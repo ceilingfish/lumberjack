@@ -17,7 +17,9 @@ lumberjack/
 │   └── sync.go
 ├── internal/          # Private application logic (not importable externally)
 │   ├── config/        # Config loading and persistence
-│   ├── schema/        # Database schema / models for tracked repos
+│   ├── database/      # Database access layer
+│   │   ├── schema/    # Schema / models for tracked repos
+│   │   └── migrations/ # goose migration files, embedded via embed.FS
 │   ├── github/        # GitHub API auth + PR status queries
 │   ├── worktree/      # Worktree create/checkout/delete + name resolution
 │   └── daemon/        # Hourly background sync process
@@ -30,6 +32,10 @@ lumberjack/
 - **[Go](https://go.dev)** — implementation language and toolchain.
 - **[mise-en-place](https://mise.jdx.dev)** (`mise`) — task runner and tool/version management.
 - **[Cobra](https://github.com/spf13/cobra)** — CLI framework for commands, flags, and help.
+- **[gofumpt](https://github.com/mvdan/gofumpt)** — formatter; a stricter, opinionated superset of `gofmt`.
+- **[golangci-lint](https://golangci-lint.run)** — meta-linter aggregating `staticcheck`, `govet`, `errcheck`, `revive`, and others behind one config; as of v2 it also runs the formatters.
+- **[modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)** — pure-Go SQLite driver (no cgo), keeping the binary self-contained.
+- **[goose](https://github.com/pressly/goose)** — schema migrations, embedded via `embed.FS` and applied in-process at runtime.
 
 ### Conventions
 
@@ -40,3 +46,4 @@ lumberjack/
 - **One file per command** under `cmd/`, mirroring the command hierarchy (`APPNAME VERB NOUN --FLAG`).
 - **Start flat, grow modular.** Add `internal/` packages as domains emerge rather than scaffolding everything up front.
 - **Tests live next to the code**, not in a separate directory. A `_test.go` file sits in the same package directory as the code it tests (e.g. `internal/worktree/worktree_test.go`).
+- **Ship as a single self-contained binary.** The distributable must have no external runtime dependencies — no separate CLIs or libraries. Everything is compiled or embedded into the one executable.

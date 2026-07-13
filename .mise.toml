@@ -1,0 +1,29 @@
+# Lumberjack tooling, managed by mise-en-place (https://mise.jdx.dev)
+
+[tools]
+go = "1.26.5"
+gofumpt = "0.9.2"
+golangci-lint = "2.12.2"
+
+# Cobra (github.com/spf13/cobra, v1.10.2) is a Go library dependency, tracked
+# in go.mod rather than installed here.
+
+[tasks.build]
+description = "Build the lumberjack binary"
+run = "go build -o bin/lumberjack ."
+
+[tasks.run]
+description = "Run lumberjack"
+run = "go run ."
+
+[tasks.test]
+description = "Run the test suite"
+run = "go test ./..."
+
+[tasks.format]
+description = "Format all Go source with gofumpt"
+run = "gofumpt -w ."
+
+[tasks.lint]
+description = "Run golangci-lint"
+run = "golangci-lint run"

@@ -1,0 +1,14 @@
+version: "2"
+
+linters:
+  # standard gives: errcheck, govet, ineffassign, staticcheck, unused
+  default: standard
+  enable:
+    - revive
+    - misspell
+    - errorlint
+    - bodyclose
+
+formatters:
+  enable:
+    - gofumpt
