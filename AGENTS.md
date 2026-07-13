@@ -25,6 +25,8 @@ lumberjack/
 │   ├── worktree/      # Worktree create/checkout/delete + name resolution
 │   └── daemon/        # Hourly background sync process
 ├── pkg/               # Public packages (only if we intend external reuse)
+├── scripts/           # Helper shell scripts invoked by mise tasks
+│   └── coverage.sh
 └── go.mod
 ```
 
@@ -46,5 +48,6 @@ lumberjack/
 - **Return errors, don't `os.Exit`** in command logic. Use `RunE` (not `Run`) so Cobra handles exit codes centrally.
 - **One file per command** under `cmd/`, mirroring the command hierarchy (`APPNAME VERB NOUN --FLAG`).
 - **Start flat, grow modular.** Add `internal/` packages as domains emerge rather than scaffolding everything up front.
+- **Non-trivial task logic lives in `scripts/`, not inline in `.mise.toml`.** `mise` tasks should stay one-liners that call a script in `scripts/` (e.g. `scripts/coverage.sh`). Keep anything beyond a single command out of the TOML.
 - **Tests live next to the code**, not in a separate directory. A `_test.go` file sits in the same package directory as the code it tests (e.g. `internal/worktree/worktree_test.go`).
 - **Ship as a single self-contained binary.** The distributable must have no *bundled* dependencies — no cgo, no C toolchain, no libraries to install alongside it. Everything Lumberjack owns (SQLite engine, migrations) is compiled or embedded into the one executable. The exceptions are **`git` and `gh`, which are required host prerequisites**: Lumberjack shells out to the system `git` for all worktree operations and to the GitHub CLI (`gh`) for GitHub API access and authentication, rather than reimplementing them. Both are reliably present on any machine doing PR-based development, and reusing `gh` lets Lumberjack inherit the user's existing `gh auth login` credentials.

@@ -27,3 +27,7 @@ run = "gofumpt -w ."
 [tasks.lint]
 description = "Run golangci-lint"
 run = "golangci-lint run"
+
+[tasks.coverage]
+description = "Run tests with per-file coverage; fail if total is below 80%"
+run = "scripts/coverage.sh 80"
