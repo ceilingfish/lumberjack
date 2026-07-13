@@ -14,7 +14,8 @@ lumberjack/
 │   ├── init.go        # `lumberjack init .`
 │   ├── repositories.go
 │   ├── repository.go
-│   └── sync.go
+│   ├── sync.go
+│   └── doctor.go      # `lumberjack doctor` — check git/gh prerequisites
 ├── internal/          # Private application logic (not importable externally)
 │   ├── config/        # Config loading and persistence
 │   ├── database/      # Database access layer

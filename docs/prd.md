@@ -33,6 +33,7 @@ A background daemon process should query this database on an hourly basis and ch
 `lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits
 `lumberjack repositories --sync` Triggers a synchronisation of all repositories
 `lumberjack sync` Within the context of a tracked repo synchronises worktrees for that repo specifically
+`lumberjack doctor` Checks that the required host prerequisites are available and reports their location and version. It verifies that `git` and `gh` can be found (honouring `LUMBERJACK_GIT_PATH` and `LUMBERJACK_GITHUB_CLI_PATH`, otherwise searching the system `PATH`), and that `gh` is authenticated. Exits non-zero if any check fails, so it can be used in scripts.
 
 ## Environment variables
 
