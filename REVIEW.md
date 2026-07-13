@@ -21,8 +21,8 @@ in [AGENTS.md](AGENTS.md). In particular:
 Run the formatter and linter, and resolve any issues:
 
 ```sh
-mise run format   # gofumpt -w .
-mise run lint      # golangci-lint run
+mise run format
+mise run lint
 ```
 
 ## 3. Tests
@@ -30,14 +30,13 @@ mise run lint      # golangci-lint run
 Run the test suite and ensure **all tests pass**:
 
 ```sh
-mise run test      # go test ./...
+mise run tes
 ```
 
 ## 4. Coverage
 
-Run the coverage task and ensure all new code meets the coverage standard (total
-statement coverage must not fall below the 80% threshold):
+Run the coverage task and ensure all new code meets the coverage standard. Command must pass and ensure that the coverage requirements are met:
 
 ```sh
-mise run coverage  # scripts/coverage.sh 80
+mise run coverage
 ```
