@@ -10,13 +10,6 @@ Lumberjack follows the standard Go project layout, built on top of a [Cobra](htt
 lumberjack/
 ├── main.go            # Thin entry point — only calls cmd.Execute()
 ├── cmd/               # Cobra command definitions, one file per command
-│   ├── root.go        # Root command + shared flag wiring
-│   ├── init.go        # `lumberjack init .`
-│   ├── repositories.go
-│   ├── repository.go
-│   ├── sync.go
-│   ├── daemon.go      # `lumberjack daemon` — run the gRPC server
-│   └── doctor.go      # `lumberjack doctor` — check git/gh prerequisites
 ├── proto/             # Protobuf service + message definitions (source of truth)
 │   └── lumberjack/v1/ # Versioned package; `lumberjack.v1` service
 ├── internal/          # Private application logic (not importable externally)
@@ -27,11 +20,13 @@ lumberjack/
 │   ├── github/        # GitHub API auth + PR status queries
 │   ├── worktree/      # Worktree create/checkout/delete + name resolution
 │   └── daemon/        # gRPC server + hourly background sync loop
-│       └── server.go  # Implements the generated LumberjackServiceServer
 ├── pkg/               # Public packages (only if we intend external reuse)
-│   └── client/        # Generated gRPC stubs + a thin hand-written client wrapper
+│   └── client/        # Thin hand-written client wrapper (dial + error mapping)
+│       └── lumberjack/v1/ # buf-generated gRPC stubs, committed
 ├── scripts/           # Helper shell scripts invoked by mise tasks
-│   └── coverage.sh
+├── docs/              # Project documentation
+├── buf.yaml           # buf module + lint/breaking config
+├── buf.gen.yaml       # buf codegen config (proto → pkg/client)
 └── go.mod
 ```
 

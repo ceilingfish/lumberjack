@@ -35,6 +35,28 @@ if git diff --name-only main...HEAD | grep -q '\.sql$'; then
 fi
 ```
 
+If the current branch changes any protobuf files, also run the protobuf
+formatter, linter, breaking-change check, and regenerate the stubs, resolving
+any issues:
+
+```sh
+if git diff --name-only main...HEAD | grep -q '\.proto$'; then
+  mise run format-proto
+  mise run lint-proto
+  mise run lint-proto-breaking
+  mise run generate   # commit the regenerated stubs under pkg/client/
+fi
+```
+
+**All protobuf changes must be backward compatible.** The gRPC API is the
+contract between the CLI and the daemon, which may be running different
+versions, so `mise run lint-proto-breaking` must pass — it checks the proto
+against `main` and fails on any wire-incompatible change. Evolve the API
+additively: add new fields, messages, and RPCs; never renumber or reuse field
+tags, change a field's type, or remove/rename existing fields (reserve retired
+tag numbers instead). Regenerated stubs under `pkg/client/` must be committed
+alongside the `.proto` change.
+
 ## 3. Tests
 
 Run the test suite and ensure **all tests pass**:
