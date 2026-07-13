@@ -33,3 +33,11 @@ A background daemon process should query this database on an hourly basis and ch
 `lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits
 `lumberjack repositories --sync` Triggers a synchronisation of all repositories
 `lumberjack sync` Within the context of a tracked repo synchronises worktrees for that repo specifically
+
+## Environment variables
+
+| Variable             | Default                   | Description                                                                                                            |
+| -------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `LUMBERJACK_DB_PATH` | `~/.lumberjack/db.sqlite` | Path to the SQLite database tracking repositories and worktrees. The parent directory is created if it does not exist. |
+| `LUMBERJACK_GIT_PATH` | Located on `PATH` (`git`) | Path to the `git` executable. If unset, the system `PATH` is searched. |
+| `LUMBERJACK_GITHUB_CLI_PATH` | Located on `PATH` (`gh`) | Path to the GitHub CLI (`gh`) executable. If unset, the system `PATH` is searched. |
