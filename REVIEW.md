@@ -25,12 +25,22 @@ mise run format
 mise run lint
 ```
 
+If the current branch changes any SQL files, also run the SQL formatter and
+linter and resolve any issues:
+
+```sh
+if git diff --name-only main...HEAD | grep -q '\.sql$'; then
+  mise run format-sql
+  mise run lint-sql
+fi
+```
+
 ## 3. Tests
 
 Run the test suite and ensure **all tests pass**:
 
 ```sh
-mise run tes
+mise run test
 ```
 
 ## 4. Coverage

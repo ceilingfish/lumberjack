@@ -39,6 +39,7 @@ lumberjack/
 - **[golangci-lint](https://golangci-lint.run)** — meta-linter aggregating `staticcheck`, `govet`, `errcheck`, `revive`, and others behind one config; as of v2 it also runs the formatters.
 - **[modernc.org/sqlite](https://pkg.go.dev/modernc.org/sqlite)** — pure-Go SQLite driver (no cgo), keeping the binary self-contained.
 - **[goose](https://github.com/pressly/goose)** — schema migrations, embedded via `embed.FS` and applied in-process at runtime.
+- **[sqlfluff](https://sqlfluff.com/)** — dialect-aware SQL linter and formatter for the goose migration files under `internal/database/migrations/`, configured for the `sqlite` dialect via `.sqlfluff`.
 
 ### Conventions
 

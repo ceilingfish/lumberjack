@@ -4,6 +4,8 @@
 go = "1.26.5"
 gofumpt = "0.9.2"
 golangci-lint = "2.12.2"
+uv = "0.9.28"
+"pipx:sqlfluff" = "3.4.2"
 
 # Cobra (github.com/spf13/cobra, v1.10.2) is a Go library dependency, tracked
 # in go.mod rather than installed here.
@@ -27,6 +29,14 @@ run = "gofumpt -w ."
 [tasks.lint]
 description = "Run golangci-lint"
 run = "golangci-lint run"
+
+[tasks.format-sql]
+description = "Auto-fix SQL migration formatting with sqlfluff"
+run = "sqlfluff fix internal/database/migrations"
+
+[tasks.lint-sql]
+description = "Lint SQL migrations with sqlfluff"
+run = "sqlfluff lint internal/database/migrations"
 
 [tasks.coverage]
 description = "Run tests with per-file coverage; fail if total is below 80%"
