@@ -1,0 +1,29 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+
+# Test binaries, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.out
+coverage.html
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Dependency directories (when vendoring)
+vendor/
+
+# Environment variable files
+.env
+
+# Editor / OS cruft
+.DS_Store
+*.swp
