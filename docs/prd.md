@@ -25,6 +25,17 @@ Once this has been established then lumberjack should store the context of this 
 
 A background daemon process should query this database on an hourly basis and check for open PRs. Any PRs that are open should have their branches downloaded and checked out as described above. Any branches that are currently checked out but their PRs have been merged or closed should be removed. If a worktree has changes locally that are not in the merged branch, then it shouldn't be deleted, these should be considered in need of reconciliation.
 
+## Architecture: client / server split
+
+Lumberjack runs as two cooperating processes:
+
+- **The daemon is the server and the sole owner of state.** It owns the SQLite database, runs schema migrations on startup, drives the hourly sync loop, and performs every worktree operation (create, checkout, delete, and reconciliation checks). Because only the daemon touches the database and the working trees, there is a single writer — no two processes can race on the DB or corrupt a worktree. The daemon is started with `lumberjack daemon`.
+- **The CLI is a thin client.** Every user-facing command (`repositories`, `repository`, `sync`, etc.) is a request to the daemon. The CLI never opens the database or shells out to `git` for worktrees itself; it asks the daemon to do the work and renders the result. If the daemon is not running, the CLI says so clearly rather than silently operating on stale or half-owned state.
+
+The two processes communicate over a **gRPC API** whose service and message definitions are the contract between them. The daemon exposes this API; the CLI consumes it through a generated gRPC client published in `pkg/client/`, so any other tooling that wants to talk to a Lumberjack daemon can reuse the same client.
+
+Because client and server always run on the same machine, the daemon listens on a **local Unix domain socket** (under `~/.lumberjack/` by default) rather than a public network port.
+
 ## Commands
 
 `lumberjack repositories` should show the list of tracked repositories
@@ -33,6 +44,7 @@ A background daemon process should query this database on an hourly basis and ch
 `lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits
 `lumberjack repositories --sync` Triggers a synchronisation of all repositories
 `lumberjack sync` Within the context of a tracked repo synchronises worktrees for that repo specifically
+`lumberjack daemon` Runs the background daemon (the gRPC server) in the foreground. This is the process that owns the database and worktrees and runs the hourly sync loop; normally it is managed by a service supervisor rather than invoked by hand.
 `lumberjack doctor` Checks that the required host prerequisites are available and reports their location and version. It verifies that `git` and `gh` can be found (honouring `LUMBERJACK_GIT_PATH` and `LUMBERJACK_GITHUB_CLI_PATH`, otherwise searching the system `PATH`), and that `gh` is authenticated. Exits non-zero if any check fails, so it can be used in scripts.
 
 ## Environment variables
@@ -42,3 +54,5 @@ A background daemon process should query this database on an hourly basis and ch
 | `LUMBERJACK_DB_PATH` | `~/.lumberjack/db.sqlite` | Path to the SQLite database tracking repositories and worktrees. The parent directory is created if it does not exist. |
 | `LUMBERJACK_GIT_PATH` | Located on `PATH` (`git`) | Path to the `git` executable. If unset, the system `PATH` is searched. |
 | `LUMBERJACK_GITHUB_CLI_PATH` | Located on `PATH` (`gh`) | Path to the GitHub CLI (`gh`) executable. If unset, the system `PATH` is searched. |
+| `LUMBERJACK_SOCKET_PATH` | `~/.lumberjack/daemon.sock` | Path to the Unix domain socket the daemon listens on and the CLI dials. The parent directory is created if it does not exist. |
+| `LUMBERJACK_PID_PATH` | `~/.lumberjack/daemon.pid` | Path to the daemon's PID file, used to detect whether a daemon is already running. The parent directory is created if it does not exist. |
