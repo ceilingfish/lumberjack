@@ -1,0 +1,166 @@
+// Package github wraps the GitHub CLI (`gh`). Lumberjack shells out to gh for
+// all GitHub access rather than calling the API directly, so it inherits the
+// user's `gh auth login` credentials and stores no tokens of its own (see
+// docs/schema.md, "Not stored").
+package github
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+)
+
+// EnvCLIPath overrides the gh executable location; otherwise gh is found on
+// PATH (see docs/prd.md environment variables).
+const EnvCLIPath = "LUMBERJACK_GITHUB_CLI_PATH"
+
+// Client runs the gh CLI. The command runner is indirected through run so the
+// tests can drive Client without a real gh binary.
+type Client struct {
+	bin string
+	run func(ctx context.Context, dir string, args ...string) (string, error)
+}
+
+// NewClient resolves the gh executable, honouring LUMBERJACK_GITHUB_CLI_PATH
+// and otherwise searching PATH.
+func NewClient() (*Client, error) {
+	bin, err := resolveBinary(EnvCLIPath, "gh")
+	if err != nil {
+		return nil, err
+	}
+	c := &Client{bin: bin}
+	c.run = c.exec
+	return c, nil
+}
+
+// Path is the resolved absolute path to the gh binary (surfaced by doctor).
+func (c *Client) Path() string { return c.bin }
+
+// RepoInfo identifies a GitHub repository and its default branch.
+type RepoInfo struct {
+	Owner         string
+	Name          string
+	Host          string
+	DefaultBranch string
+}
+
+// PR is the minimal live view of an open pull request: its number and the head
+// branch a worktree tracks. Everything else about a PR is re-fetched when
+// needed rather than cached (docs/schema.md).
+type PR struct {
+	Number     int64
+	HeadBranch string
+}
+
+// exec runs gh with args in dir (empty dir = current directory), returning
+// trimmed stdout. On failure the error carries gh's stderr.
+func (c *Client) exec(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, c.bin, args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// Version returns gh's reported version's first line (for doctor).
+func (c *Client) Version(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, "", "--version")
+	if err != nil {
+		return "", err
+	}
+	if i := strings.IndexByte(out, '\n'); i >= 0 {
+		out = out[:i]
+	}
+	return strings.TrimPrefix(out, "gh version "), nil
+}
+
+// AuthStatus verifies that gh is authenticated, returning gh's own error (which
+// tells the user to run `gh auth login`) when it is not. Used by doctor.
+func (c *Client) AuthStatus(ctx context.Context) error {
+	_, err := c.run(ctx, "", "auth", "status")
+	return err
+}
+
+// RepoInfo discovers the GitHub identity of the repository checked out at dir,
+// via `gh repo view`. It errors if dir is not a GitHub repository — which is
+// how `lumberjack init` rejects a non-GitHub checkout.
+func (c *Client) RepoInfo(ctx context.Context, dir string) (RepoInfo, error) {
+	out, err := c.run(ctx, dir, "repo", "view",
+		"--json", "owner,name,defaultBranchRef,url")
+	if err != nil {
+		return RepoInfo{}, err
+	}
+	var v struct {
+		Owner            struct{ Login string } `json:"owner"`
+		Name             string                 `json:"name"`
+		DefaultBranchRef struct{ Name string }  `json:"defaultBranchRef"`
+		URL              string                 `json:"url"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return RepoInfo{}, fmt.Errorf("parsing gh repo view: %w", err)
+	}
+	host := "github.com"
+	if u, err := url.Parse(v.URL); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	return RepoInfo{
+		Owner:         v.Owner.Login,
+		Name:          v.Name,
+		Host:          host,
+		DefaultBranch: v.DefaultBranchRef.Name,
+	}, nil
+}
+
+// ListOpenPRs returns the open pull requests for repo. The limit is high
+// enough to cover any realistic single repo; gh caps the page itself.
+func (c *Client) ListOpenPRs(ctx context.Context, repo RepoInfo) ([]PR, error) {
+	out, err := c.run(ctx, "", "pr", "list",
+		"--repo", fmt.Sprintf("%s/%s/%s", repo.Host, repo.Owner, repo.Name),
+		"--state", "open",
+		"--limit", "1000",
+		"--json", "number,headRefName")
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		Number      int64  `json:"number"`
+		HeadRefName string `json:"headRefName"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("parsing gh pr list: %w", err)
+	}
+	prs := make([]PR, len(raw))
+	for i, r := range raw {
+		prs[i] = PR{Number: r.Number, HeadBranch: r.HeadRefName}
+	}
+	return prs, nil
+}
+
+// resolveBinary returns the path from envVar if set (verified to exist),
+// otherwise looks name up on PATH.
+func resolveBinary(envVar, name string) (string, error) {
+	if p := os.Getenv(envVar); p != "" {
+		if _, err := os.Stat(p); err != nil {
+			return "", fmt.Errorf("%s=%q: %w", envVar, p, err)
+		}
+		return p, nil
+	}
+	p, err := exec.LookPath(name)
+	if err != nil {
+		return "", fmt.Errorf("%s not found on PATH (set %s to override): %w", name, envVar, err)
+	}
+	return p, nil
+}
