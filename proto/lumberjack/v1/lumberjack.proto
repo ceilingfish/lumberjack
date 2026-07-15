@@ -1,0 +1,194 @@
+syntax = "proto3";
+
+// Package lumberjack.v1 is the gRPC contract between the Lumberjack CLI
+// (client) and the background daemon (server). The daemon owns the database
+// and all worktree operations; the CLI is a thin client that calls into this
+// API. See docs/prd.md ("Architecture: client / server split") and AGENTS.md.
+//
+// `lumberjack doctor` deliberately has no RPC here: it checks host
+// prerequisites (git/gh) and must work even when the daemon is not running, so
+// it stays entirely CLI-local.
+package lumberjack.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Generated stubs land in pkg/client/lumberjack/v1 (see buf.gen.yaml); the
+// hand-written wrapper in pkg/client imports them.
+option go_package = "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1;lumberjackv1";
+
+// LumberjackService is served by `lumberjack daemon` over a local Unix domain
+// socket (LUMBERJACK_SOCKET_PATH). Every user-facing CLI command maps to one
+// of these RPCs.
+service LumberjackService {
+  // Health reports that the daemon is up. The CLI uses it to detect whether a
+  // daemon is running before issuing other calls.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // InitRepository registers a repo — `lumberjack init .`.
+  rpc InitRepository(InitRepositoryRequest) returns (InitRepositoryResponse);
+
+  // ListRepositories lists tracked repos — `lumberjack repositories`.
+  rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
+
+  // GetRepository returns one repo's last-sync detail —
+  // `lumberjack repository NAME`.
+  rpc GetRepository(GetRepositoryRequest) returns (GetRepositoryResponse);
+
+  // ListWorktrees lists a repo's worktrees with live reconciliation status —
+  // `lumberjack repository NAME worktrees`.
+  rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
+
+  // DeleteWorktree removes a worktree —
+  // `lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+  rpc DeleteWorktree(DeleteWorktreeRequest) returns (DeleteWorktreeResponse);
+
+  // Sync reconciles worktrees against open PRs. With an empty repository it
+  // syncs everything (`lumberjack repositories --sync`); with one set it syncs
+  // just that repo (`lumberjack sync`). Progress is streamed back as it runs.
+  rpc Sync(SyncRequest) returns (stream SyncResponse);
+}
+
+// SyncStatus mirrors schema.SyncStatus* (see internal/database/schema).
+enum SyncStatus {
+  SYNC_STATUS_UNSPECIFIED = 0;
+  SYNC_STATUS_OK = 1;
+  SYNC_STATUS_ERROR = 2;
+}
+
+// CreatedBy mirrors schema.CreatedBy* — the safety rail that stops the daemon
+// deleting a worktree a human made by hand.
+enum CreatedBy {
+  CREATED_BY_UNSPECIFIED = 0;
+  CREATED_BY_LUMBERJACK = 1;
+  CREATED_BY_PREEXISTING = 2;
+}
+
+// Repository is one tracked repo. Fields mirror the `repositories` table
+// (docs/schema.md); mutable PR state is never carried here.
+message Repository {
+  int64 id = 1;
+  string local_path = 2;
+  string worktree_parent_dir = 3;
+  string dir_prefix = 4;
+  string github_owner = 5;
+  string github_name = 6;
+  string default_remote = 7;
+  string host = 8;
+  optional google.protobuf.Timestamp last_synced_at = 9;
+  SyncStatus last_sync_status = 10;
+  optional string last_sync_error = 11;
+  google.protobuf.Timestamp created_at = 12;
+}
+
+// Worktree is the live view of a local worktree: the stored branch <-> directory
+// mapping plus reconciliation status computed fresh from git at request time
+// (never cached — see docs/schema.md "Derived live, not stored").
+message Worktree {
+  string branch_name = 1;
+  string directory_path = 2;
+  // Absent for an orphaned worktree that has outlived its PR.
+  optional int64 github_pr_number = 3;
+  CreatedBy created_by = 4;
+  optional google.protobuf.Timestamp last_synced_at = 5;
+
+  // --- derived live from git, not persisted ---
+  // needs_reconciliation is true when the worktree can't be safely auto-removed
+  // (dirty tree, local-only commits, or otherwise diverged).
+  bool needs_reconciliation = 6;
+  // dirty is true when the working tree has uncommitted changes.
+  bool dirty = 7;
+  // orphaned is true when the PR has been merged/closed but the worktree was
+  // retained because it still holds unmerged local work.
+  bool orphaned = 8;
+  // local_only_commits counts commits present locally but not in the merged
+  // remote branch — the count surfaced when confirming a delete.
+  int64 local_only_commits = 9;
+  // reconciliation_note is a human-readable summary; empty when in sync.
+  string reconciliation_note = 10;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string version = 1;
+  google.protobuf.Timestamp started_at = 2;
+}
+
+message InitRepositoryRequest {
+  // Absolute path to the repo being registered (`lumberjack init .` resolves
+  // "." to the current directory before calling).
+  string local_path = 1;
+}
+
+message InitRepositoryResponse {
+  Repository repository = 1;
+}
+
+message ListRepositoriesRequest {}
+
+message ListRepositoriesResponse {
+  repeated Repository repositories = 1;
+}
+
+message GetRepositoryRequest {
+  // A repository name (dir prefix / GitHub name) or its local path; the daemon
+  // resolves either form.
+  string repository = 1;
+}
+
+message GetRepositoryResponse {
+  Repository repository = 1;
+}
+
+message ListWorktreesRequest {
+  string repository = 1;
+}
+
+message ListWorktreesResponse {
+  repeated Worktree worktrees = 1;
+}
+
+message DeleteWorktreeRequest {
+  string repository = 1;
+  // Branch name or directory name identifying the worktree.
+  string worktree = 2;
+  // Proceed even when local commits would be lost. The CLI sets this only after
+  // the user confirms the warning returned by a first, unforced attempt.
+  bool force = 3;
+}
+
+message DeleteWorktreeResponse {
+  bool deleted = 1;
+  // True when the worktree's local tip is ahead of the merged remote: the CLI
+  // must warn the user and retry with force=true to actually delete.
+  bool requires_confirmation = 2;
+  // Number of commits that would be lost, for the confirmation warning.
+  int64 commits_at_risk = 3;
+  string message = 4;
+}
+
+message SyncRequest {
+  // Empty syncs every tracked repository; set syncs just that one.
+  string repository = 1;
+}
+
+// SyncResponse is one progress update in a Sync stream. Multiple events may be
+// emitted per repository; the last one for a repo has completed = true and
+// carries its summary.
+message SyncResponse {
+  // Which repository this event concerns.
+  string repository = 1;
+  // Human-readable progress line (e.g. "creating worktree for PR #42").
+  string message = 2;
+  // True on the final event for this repository.
+  bool completed = 3;
+  // Populated when completed = true.
+  SyncSummary summary = 4;
+}
+
+message SyncSummary {
+  SyncStatus status = 1;
+  int64 worktrees_created = 2;
+  int64 worktrees_removed = 3;
+  optional string error = 4;
+}

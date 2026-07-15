@@ -1,0 +1,11 @@
+version: v2
+plugins:
+  # Message types (*.pb.go). Remote plugins are fetched by buf, so no protoc
+  # toolchain is needed locally. Bump these pins as the plugins release.
+  - remote: buf.build/protocolbuffers/go:v1.36.6
+    out: pkg/client
+    opt: paths=source_relative
+  # gRPC client + server stubs (*_grpc.pb.go).
+  - remote: buf.build/grpc/go:v1.5.1
+    out: pkg/client
+    opt: paths=source_relative
