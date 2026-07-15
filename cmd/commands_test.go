@@ -1,0 +1,309 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+)
+
+// stubService is a controllable LumberjackService for driving the CLI commands
+// end-to-end over a real socket.
+type stubService struct {
+	lumberjackv1.UnimplementedLumberjackServiceServer
+	repos          []*lumberjackv1.Repository
+	worktrees      []*lumberjackv1.Worktree
+	deleteConfirm  bool // first delete returns RequiresConfirmation
+	deletedForced  bool // set when a forced delete arrived
+	getNotFound    bool
+	syncEvents     []*lumberjackv1.SyncResponse
+	lastInitPath   string
+	lastSyncTarget string
+}
+
+func (s *stubService) InitRepository(_ context.Context, req *lumberjackv1.InitRepositoryRequest) (*lumberjackv1.InitRepositoryResponse, error) {
+	s.lastInitPath = req.GetLocalPath()
+	return &lumberjackv1.InitRepositoryResponse{Repository: &lumberjackv1.Repository{
+		LocalPath: req.GetLocalPath(), GithubOwner: "o", GithubName: "n",
+		WorktreeParentDir: filepath.Dir(req.GetLocalPath()), DirPrefix: "n",
+	}}, nil
+}
+
+func (s *stubService) ListRepositories(context.Context, *lumberjackv1.ListRepositoriesRequest) (*lumberjackv1.ListRepositoriesResponse, error) {
+	return &lumberjackv1.ListRepositoriesResponse{Repositories: s.repos}, nil
+}
+
+func (s *stubService) GetRepository(_ context.Context, req *lumberjackv1.GetRepositoryRequest) (*lumberjackv1.GetRepositoryResponse, error) {
+	if s.getNotFound {
+		return nil, status.Error(codes.NotFound, "repository not found")
+	}
+	return &lumberjackv1.GetRepositoryResponse{Repository: &lumberjackv1.Repository{
+		DirPrefix: req.GetRepository(), LocalPath: "/p/n", GithubOwner: "o", GithubName: "n", Host: "github.com",
+		LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK,
+	}}, nil
+}
+
+func (s *stubService) ListWorktrees(context.Context, *lumberjackv1.ListWorktreesRequest) (*lumberjackv1.ListWorktreesResponse, error) {
+	return &lumberjackv1.ListWorktreesResponse{Worktrees: s.worktrees}, nil
+}
+
+func (s *stubService) DeleteWorktree(_ context.Context, req *lumberjackv1.DeleteWorktreeRequest) (*lumberjackv1.DeleteWorktreeResponse, error) {
+	if s.deleteConfirm && !req.GetForce() {
+		return &lumberjackv1.DeleteWorktreeResponse{
+			RequiresConfirmation: true, CommitsAtRisk: 3,
+			Message: "worktree has 3 local-only commit(s) that will be lost",
+		}, nil
+	}
+	if req.GetForce() {
+		s.deletedForced = true
+	}
+	return &lumberjackv1.DeleteWorktreeResponse{Deleted: true, Message: "deleted n-x"}, nil
+}
+
+func (s *stubService) Sync(req *lumberjackv1.SyncRequest, stream grpc.ServerStreamingServer[lumberjackv1.SyncResponse]) error {
+	s.lastSyncTarget = req.GetRepository()
+	for _, e := range s.syncEvents {
+		if err := stream.Send(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// serveStub starts stub on a short socket, points LUMBERJACK_SOCKET_PATH at it,
+// and returns nothing (cleanup registered on t).
+func serveStub(t *testing.T, stub *stubService) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "ljcmd")
+	if err != nil {
+		t.Fatalf("MkdirTemp: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	path := filepath.Join(dir, "d.sock")
+
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := grpc.NewServer()
+	lumberjackv1.RegisterLumberjackServiceServer(srv, stub)
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(srv.Stop)
+
+	t.Setenv("LUMBERJACK_SOCKET_PATH", path)
+}
+
+// run executes the root command with args, returning combined stdout+stderr
+// and any error. stdin supplies input for prompts.
+func run(t *testing.T, stdin string, args ...string) (string, error) {
+	t.Helper()
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetIn(strings.NewReader(stdin))
+	root.SetArgs(args)
+	err := root.Execute()
+	return buf.String(), err
+}
+
+func TestCmdDoctor(t *testing.T) {
+	// doctor is daemon-free; it reports on host git/gh. We only assert it runs
+	// and produces a report — pass/fail depends on the host.
+	out, err := run(t, "", "doctor")
+	if out == "" {
+		t.Errorf("expected a doctor report, got empty output (err=%v)", err)
+	}
+}
+
+func TestCmdInit(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+
+	out, err := run(t, "", "init", ".")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if !strings.Contains(out, "Tracking o/n") {
+		t.Errorf("unexpected output: %q", out)
+	}
+	if !filepath.IsAbs(stub.lastInitPath) {
+		t.Errorf("init path should be absolute: %q", stub.lastInitPath)
+	}
+}
+
+func TestCmdRepositoriesEmpty(t *testing.T) {
+	serveStub(t, &stubService{})
+	out, err := run(t, "", "repositories")
+	if err != nil {
+		t.Fatalf("repositories: %v", err)
+	}
+	if !strings.Contains(out, "No repositories tracked") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdRepositoriesList(t *testing.T) {
+	serveStub(t, &stubService{repos: []*lumberjackv1.Repository{
+		{DirPrefix: "a", LocalPath: "/p/a", LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK},
+		{DirPrefix: "b", LocalPath: "/p/b"},
+	}})
+	out, err := run(t, "", "repositories")
+	if err != nil {
+		t.Fatalf("repositories: %v", err)
+	}
+	if !strings.Contains(out, "a") || !strings.Contains(out, "/p/b") || !strings.Contains(out, "never synced") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdRepositoriesSync(t *testing.T) {
+	stub := &stubService{syncEvents: []*lumberjackv1.SyncResponse{
+		{Repository: "a", Message: "creating worktree for PR #1"},
+		{Repository: "a", Completed: true, Summary: &lumberjackv1.SyncSummary{WorktreesCreated: 1}},
+	}}
+	serveStub(t, stub)
+	out, err := run(t, "", "repositories", "--sync")
+	if err != nil {
+		t.Fatalf("repositories --sync: %v", err)
+	}
+	if stub.lastSyncTarget != "" {
+		t.Errorf("expected all-repos sync (empty target), got %q", stub.lastSyncTarget)
+	}
+	if !strings.Contains(out, "creating worktree") || !strings.Contains(out, "synced") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdRepositoryDetail(t *testing.T) {
+	serveStub(t, &stubService{})
+	out, err := run(t, "", "repository", "n")
+	if err != nil {
+		t.Fatalf("repository: %v", err)
+	}
+	if !strings.Contains(out, "GitHub:") || !strings.Contains(out, "o/n") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdRepositoryNotFound(t *testing.T) {
+	serveStub(t, &stubService{getNotFound: true})
+	_, err := run(t, "", "repository", "ghost")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected not-found error, got %v", err)
+	}
+}
+
+func TestCmdRepositoryWorktrees(t *testing.T) {
+	num := int64(7)
+	serveStub(t, &stubService{worktrees: []*lumberjackv1.Worktree{
+		{
+			DirectoryPath: "/p/n-x", BranchName: "feature/x", GithubPrNumber: &num,
+			NeedsReconciliation: true, ReconciliationNote: "uncommitted changes",
+		},
+	}})
+	out, err := run(t, "", "repository", "n", "worktrees")
+	if err != nil {
+		t.Fatalf("worktrees: %v", err)
+	}
+	if !strings.Contains(out, "n-x") || !strings.Contains(out, "#7") || !strings.Contains(out, "⚠") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdWorktreeDeleteClean(t *testing.T) {
+	serveStub(t, &stubService{})
+	out, err := run(t, "", "repository", "n", "worktree", "feature/x", "delete")
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !strings.Contains(out, "deleted") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdWorktreeDeleteConfirmYes(t *testing.T) {
+	stub := &stubService{deleteConfirm: true}
+	serveStub(t, stub)
+	out, err := run(t, "y\n", "repository", "n", "worktree", "feature/x", "delete")
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !strings.Contains(out, "Warning") || !stub.deletedForced {
+		t.Errorf("expected forced delete after confirm; out=%q forced=%v", out, stub.deletedForced)
+	}
+}
+
+func TestCmdWorktreeDeleteConfirmNo(t *testing.T) {
+	stub := &stubService{deleteConfirm: true}
+	serveStub(t, stub)
+	out, err := run(t, "n\n", "repository", "n", "worktree", "feature/x", "delete")
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if !strings.Contains(out, "Aborted") || stub.deletedForced {
+		t.Errorf("expected abort; out=%q forced=%v", out, stub.deletedForced)
+	}
+}
+
+func TestCmdWorktreeDeleteForceFlag(t *testing.T) {
+	stub := &stubService{deleteConfirm: true}
+	serveStub(t, stub)
+	// --force skips the prompt and forces immediately.
+	_, err := run(t, "", "repository", "n", "worktree", "feature/x", "delete", "--force")
+	if err != nil {
+		t.Fatalf("delete --force: %v", err)
+	}
+	if !stub.deletedForced {
+		t.Error("expected forced delete with --force")
+	}
+}
+
+func TestCmdRepositoryBadSubcommand(t *testing.T) {
+	serveStub(t, &stubService{})
+	_, err := run(t, "", "repository", "n", "bogus")
+	if err == nil || !strings.Contains(err.Error(), "unrecognised") {
+		t.Errorf("expected unrecognised-command error, got %v", err)
+	}
+}
+
+func TestCmdSyncCurrentRepo(t *testing.T) {
+	stub := &stubService{syncEvents: []*lumberjackv1.SyncResponse{
+		{Repository: "n", Completed: true, Summary: &lumberjackv1.SyncSummary{WorktreesRemoved: 2}},
+	}}
+	serveStub(t, stub)
+	out, err := run(t, "", "sync")
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if stub.lastSyncTarget == "" || !filepath.IsAbs(stub.lastSyncTarget) {
+		t.Errorf("expected sync target to be the cwd path, got %q", stub.lastSyncTarget)
+	}
+	if !strings.Contains(out, "-2") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSyncErrorSummary(t *testing.T) {
+	errMsg := "boom"
+	serveStub(t, &stubService{syncEvents: []*lumberjackv1.SyncResponse{
+		{Repository: "n", Completed: true, Summary: &lumberjackv1.SyncSummary{
+			Status: lumberjackv1.SyncStatus_SYNC_STATUS_ERROR, Error: &errMsg,
+		}},
+	}})
+	out, err := run(t, "", "sync")
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if !strings.Contains(out, "error") || !strings.Contains(out, "boom") {
+		t.Errorf("out = %q", out)
+	}
+}
