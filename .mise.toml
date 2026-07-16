@@ -16,8 +16,8 @@ buf = "1.71.0"
 description = "Build the lumberjack binary"
 run = "go build -o bin/lumberjack ."
 
-[tasks.run]
-description = "Run lumberjack"
+[tasks.dev]
+description = "Run the daemon in the foreground (development mode)"
 run = "go run ."
 
 [tasks.test]

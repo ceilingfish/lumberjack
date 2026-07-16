@@ -58,6 +58,9 @@ func TestDaemonStartStop(t *testing.T) {
 	}
 	dir := t.TempDir()
 	t.Setenv("LUMBERJACK_DB_PATH", filepath.Join(dir, "db.sqlite"))
+	// Isolate the pid file (resolved under $HOME/.lumberjack) into the temp dir
+	// so the test neither touches nor depends on the real home directory.
+	t.Setenv("HOME", dir)
 
 	app := fx.New(
 		fx.Supply(
@@ -81,6 +84,11 @@ func TestDaemonStartStop(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "daemon.sock")); err != nil {
 		t.Errorf("socket not created: %v", err)
 	}
+	// The pid file must record this process while running.
+	if pid, running, err := ReadPID(); err != nil || !running || pid != os.Getpid() {
+		t.Errorf("pid file while running: got (%d, %v, %v), want (%d, true, nil)",
+			pid, running, err, os.Getpid())
+	}
 
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer stopCancel()
@@ -90,5 +98,9 @@ func TestDaemonStartStop(t *testing.T) {
 	// Socket cleaned up on stop.
 	if _, err := os.Stat(filepath.Join(dir, "daemon.sock")); !os.IsNotExist(err) {
 		t.Errorf("socket not removed on stop: %v", err)
+	}
+	// Pid file cleaned up on stop.
+	if _, running, err := ReadPID(); err != nil || running {
+		t.Errorf("pid file after stop: got running=%v err=%v, want false/nil", running, err)
 	}
 }

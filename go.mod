@@ -3,6 +3,7 @@ module github.com/ceilingfish/lumberjack
 go 1.26.2
 
 require (
+	github.com/kardianos/service v1.3.0
 	github.com/pressly/goose/v3 v3.27.2
 	github.com/spf13/cobra v1.10.2
 	github.com/uptrace/bun v1.2.18

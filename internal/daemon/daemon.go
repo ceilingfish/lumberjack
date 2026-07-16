@@ -57,6 +57,7 @@ var Module = fx.Module("daemon",
 	),
 	fx.Invoke(runServer),
 	fx.Invoke(runSyncLoop),
+	fx.Invoke(writePIDFile),
 )
 
 // newDatabase opens the SQLite database (running migrations) and registers a
@@ -157,9 +158,20 @@ func resolveSocketPath(configured string) (string, error) {
 	if env := os.Getenv("LUMBERJACK_SOCKET_PATH"); env != "" {
 		return env, nil
 	}
+	dir, err := lumberjackDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "daemon.sock"), nil
+}
+
+// lumberjackDir is Lumberjack's per-user state directory (~/.lumberjack). It is
+// the single place the daemon keeps its socket and pid file so client and
+// server agree on locations.
+func lumberjackDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("resolving home dir for default socket: %w", err)
+		return "", fmt.Errorf("resolving home dir: %w", err)
 	}
-	return filepath.Join(home, ".lumberjack", "daemon.sock"), nil
+	return filepath.Join(home, ".lumberjack"), nil
 }
