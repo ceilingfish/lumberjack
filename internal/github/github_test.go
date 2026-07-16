@@ -105,6 +105,48 @@ func TestRepoInfoNotGitHub(t *testing.T) {
 	}
 }
 
+func TestRepoInfoNotFoundIsSentinel(t *testing.T) {
+	cases := []string{
+		"gh repo view: HTTP 404: Not Found (https://api.github.com/repos/o/n)",
+		"gh repo view: GraphQL: Could not resolve to a Repository with the name 'o/n'. (repository)",
+	}
+	for _, stderr := range cases {
+		c := fakeClient(func(...string) (string, error) { return "", errors.New(stderr) })
+		_, err := c.RepoInfo(context.Background(), "/repo")
+		if !errors.Is(err, ErrRepoNotFound) {
+			t.Errorf("stderr %q: got %v, want ErrRepoNotFound", stderr, err)
+		}
+	}
+}
+
+func TestRepoInfoOtherErrorIsNotSentinel(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return "", errors.New("gh repo view: not a git repository")
+	})
+	_, err := c.RepoInfo(context.Background(), "/repo")
+	if err == nil || errors.Is(err, ErrRepoNotFound) {
+		t.Errorf("non-404 error should not be ErrRepoNotFound, got %v", err)
+	}
+}
+
+func TestAuthenticatedUser(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return "octocat", nil
+	})
+	user, err := c.AuthenticatedUser(context.Background())
+	if err != nil {
+		t.Fatalf("AuthenticatedUser: %v", err)
+	}
+	if user != "octocat" {
+		t.Errorf("user = %q, want octocat", user)
+	}
+	if len(gotArgs) < 2 || gotArgs[0] != "api" || gotArgs[1] != "user" {
+		t.Errorf("expected `api user` invocation, got %v", gotArgs)
+	}
+}
+
 func TestRepoInfoBadJSON(t *testing.T) {
 	c := fakeClient(func(...string) (string, error) { return "not json", nil })
 	if _, err := c.RepoInfo(context.Background(), "/repo"); err == nil {

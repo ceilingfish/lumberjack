@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -18,6 +19,13 @@ import (
 // EnvCLIPath overrides the gh executable location; otherwise gh is found on
 // PATH (see docs/prd.md environment variables).
 const EnvCLIPath = "LUMBERJACK_GITHUB_CLI_PATH"
+
+// ErrRepoNotFound is returned by RepoInfo when gh reaches GitHub but the
+// repository is not visible to the authenticated account — either it does not
+// exist or the current credentials lack access (an HTTP 404). It is distinct
+// from a "not a GitHub checkout at all" failure so `lumberjack init` can tell
+// the user they may need to switch gh credentials.
+var ErrRepoNotFound = errors.New("repository not found or not accessible with the current GitHub credentials")
 
 // Client runs the gh CLI. The command runner is indirected through run so the
 // tests can drive Client without a real gh binary.
@@ -101,6 +109,9 @@ func (c *Client) RepoInfo(ctx context.Context, dir string) (RepoInfo, error) {
 	out, err := c.run(ctx, dir, "repo", "view",
 		"--json", "owner,name,defaultBranchRef,url")
 	if err != nil {
+		if isNotFound(err) {
+			return RepoInfo{}, fmt.Errorf("%w: %v", ErrRepoNotFound, err)
+		}
 		return RepoInfo{}, err
 	}
 	var v struct {
@@ -122,6 +133,23 @@ func (c *Client) RepoInfo(ctx context.Context, dir string) (RepoInfo, error) {
 		Host:          host,
 		DefaultBranch: v.DefaultBranchRef.Name,
 	}, nil
+}
+
+// isNotFound reports whether a gh error is GitHub's "no such repository (for
+// you)" response. gh phrases a 404 either as a REST "HTTP 404" or a GraphQL
+// "Could not resolve to a Repository" message; both mean the repo either does
+// not exist or is invisible to the authenticated account.
+func isNotFound(err error) bool {
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "http 404") ||
+		strings.Contains(msg, "404 not found") ||
+		strings.Contains(msg, "could not resolve to a repository")
+}
+
+// AuthenticatedUser returns the login gh is currently signed in as, so callers
+// can name the account when access to a repository is refused.
+func (c *Client) AuthenticatedUser(ctx context.Context) (string, error) {
+	return c.run(ctx, "", "api", "user", "--jq", ".login")
 }
 
 // ListOpenPRs returns the open pull requests for repo. The limit is high

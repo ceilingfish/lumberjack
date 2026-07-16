@@ -3,8 +3,10 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +25,8 @@ type fakeGit struct {
 	fetchErr  error
 	remotes   string
 	remoteErr error
+	remoteURL string
+	urlErr    error
 }
 
 func newFakeGit() *fakeGit {
@@ -39,6 +43,9 @@ func (f *fakeGit) DefaultRemote(context.Context, string) (string, error) {
 		return "", f.remoteErr
 	}
 	return f.remotes, nil
+}
+func (f *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
+	return f.remoteURL, f.urlErr
 }
 func (f *fakeGit) Fetch(context.Context, string, string) error { return f.fetchErr }
 
@@ -67,6 +74,8 @@ type fakeGH struct {
 	infoErr error
 	prs     []github.PR
 	prsErr  error
+	user    string
+	userErr error
 }
 
 func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {
@@ -75,6 +84,10 @@ func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {
 
 func (f *fakeGH) ListOpenPRs(context.Context, github.RepoInfo) ([]github.PR, error) {
 	return f.prs, f.prsErr
+}
+
+func (f *fakeGH) AuthenticatedUser(context.Context) (string, error) {
+	return f.user, f.userErr
 }
 
 // harness bundles a Service over a temp DB with controllable fakes.
@@ -140,6 +153,61 @@ func TestInitRepositoryNotGitHub(t *testing.T) {
 	h.gh.infoErr = errors.New("not a repo")
 	if _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
 		t.Error("expected error for non-GitHub repo")
+	}
+}
+
+func TestInitRepository404GitHubRemoteHintsCredentials(t *testing.T) {
+	h := newHarness(t)
+	h.gh.infoErr = fmt.Errorf("%w: gh repo view: HTTP 404", github.ErrRepoNotFound)
+	h.git.remoteURL = "https://github.com/ceilingfish/lumberjack.git"
+	h.gh.user = "work-account"
+
+	_, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
+	if err == nil {
+		t.Fatal("expected error for inaccessible GitHub repo")
+	}
+	msg := err.Error()
+	for _, want := range []string{"ceilingfish/lumberjack", "work-account", "gh auth switch"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q missing %q", msg, want)
+		}
+	}
+}
+
+func TestInitRepository404NonGitHubRemoteFallsBack(t *testing.T) {
+	h := newHarness(t)
+	h.gh.infoErr = fmt.Errorf("%w: HTTP 404", github.ErrRepoNotFound)
+	h.git.remoteURL = "https://gitlab.com/someone/thing.git"
+
+	_, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "gh auth switch") {
+		t.Errorf("non-GitHub remote should not get a credentials hint: %v", err)
+	}
+}
+
+func TestGithubRepoSlug(t *testing.T) {
+	cases := []struct {
+		raw      string
+		wantSlug string
+		wantOK   bool
+	}{
+		{"https://github.com/ceilingfish/lumberjack.git", "ceilingfish/lumberjack", true},
+		{"https://github.com/ceilingfish/lumberjack", "ceilingfish/lumberjack", true},
+		{"git@github.com:ceilingfish/lumberjack.git", "ceilingfish/lumberjack", true},
+		{"ssh://git@github.com/ceilingfish/lumberjack.git", "ceilingfish/lumberjack", true},
+		{"git@github.acme.com:team/repo.git", "team/repo", true},
+		{"https://gitlab.com/someone/thing.git", "", false},
+		{"git@gitlab.com:someone/thing.git", "", false},
+		{"not a url", "", false},
+	}
+	for _, tc := range cases {
+		slug, ok := githubRepoSlug(tc.raw)
+		if ok != tc.wantOK || slug != tc.wantSlug {
+			t.Errorf("githubRepoSlug(%q) = (%q, %v), want (%q, %v)", tc.raw, slug, ok, tc.wantSlug, tc.wantOK)
+		}
 	}
 }
 

@@ -19,15 +19,19 @@ import (
 type GitOps interface {
 	worktree.Prober
 	DefaultRemote(ctx context.Context, repoPath string) (string, error)
+	RemoteURL(ctx context.Context, repoPath, remote string) (string, error)
 	Fetch(ctx context.Context, repoPath, remote string) error
 	AddWorktree(ctx context.Context, repoPath, dir, remote, branch string) error
 	RemoveWorktree(ctx context.Context, repoPath, dir string, force bool) error
 }
 
-// GHOps is the gh surface the sync engine needs.
+// GHOps is the gh surface the sync engine and init need.
 type GHOps interface {
 	RepoInfo(ctx context.Context, dir string) (github.RepoInfo, error)
 	ListOpenPRs(ctx context.Context, repo github.RepoInfo) ([]github.PR, error)
+	// AuthenticatedUser names the account gh is signed in as, so init can point
+	// at credentials when a repository is not accessible.
+	AuthenticatedUser(ctx context.Context) (string, error)
 }
 
 // Service is the daemon's domain layer: it owns every worktree mutation
