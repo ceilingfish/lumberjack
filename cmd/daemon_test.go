@@ -104,8 +104,9 @@ func TestInstallDaemon(t *testing.T) {
 // with actionable guidance; durable paths pass.
 func TestCheckStableExecutable(t *testing.T) {
 	ephemeral := []string{
-		"/var/folders/xb/T/go-build2170204171/b001/exe/lumberjack",
-		"/tmp/go-build123/b001/exe/lumberjack",
+		"/var/folders/xb/T/go-build2170204171/b001/exe/lumberjack",             // temp work dir
+		"/tmp/go-build123/b001/exe/lumberjack",                                 // temp work dir
+		"/Users/tom/Library/Caches/go-build/42/42dd568…-d/lumberjack",          // persistent build cache
 	}
 	for _, p := range ephemeral {
 		err := checkStableExecutable(p)
@@ -113,8 +114,8 @@ func TestCheckStableExecutable(t *testing.T) {
 			t.Errorf("checkStableExecutable(%q) = nil, want error", p)
 			continue
 		}
-		if !strings.Contains(err.Error(), "mise build") {
-			t.Errorf("error for %q lacks build guidance: %v", p, err)
+		if !strings.Contains(err.Error(), "./bin/lumberjack") {
+			t.Errorf("error for %q lacks durable-install guidance: %v", p, err)
 		}
 	}
 

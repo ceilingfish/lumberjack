@@ -52,29 +52,34 @@ func newDaemonInstallCmd() *cobra.Command {
 	return c
 }
 
-// checkStableExecutable refuses to install when the running binary is an
-// ephemeral `go run` build. Such builds live in a temporary go-build directory
-// that is deleted once the process exits, so the service manager would be left
-// pointing at a path that soon vanishes — the daemon then fails to launch (and,
-// under KeepAlive, crash-loops). Installing must be done from a durable binary,
-// e.g. `mise build` then `./bin/lumberjack daemon install`.
+// checkStableExecutable refuses to install when the running binary is a
+// `go run` build. go run links to a transient, content-addressed path under a
+// go-build directory: it changes every time the source is rebuilt (a new content
+// hash means a new path) and Go prunes the build cache over time. Registering a
+// service against such a path leaves the service manager pointing at a binary
+// that moves or disappears on the next build — the daemon then fails to launch
+// (and, under KeepAlive, crash-loops). Installing must be done from a durable
+// binary, e.g. `mise run install`, or `mise build` then
+// `./bin/lumberjack daemon install`.
 func checkStableExecutable(exe string) error {
 	if !isEphemeralBuild(exe) {
 		return nil
 	}
 	return fmt.Errorf(
-		"refusing to install the daemon from a temporary `go run` build (%s): "+
-			"its path is deleted when the process exits. Build a durable binary "+
-			"first, then install from it:\n\n"+
-			"    mise build\n"+
-			"    ./bin/lumberjack daemon install",
+		"refusing to install the daemon from a `go run` build (%s): go run builds "+
+			"to a transient, content-addressed path that changes on every rebuild "+
+			"and is pruned from the build cache over time, so the installed service "+
+			"would soon point at a binary that has moved or gone. Install from a "+
+			"durable binary instead:\n\n"+
+			"    mise run install\n"+
+			"    # or: mise build && ./bin/lumberjack daemon install",
 		exe)
 }
 
-// isEphemeralBuild reports whether path looks like a throwaway binary produced
-// by `go run`, which places the compiled executable under a `go-build` cache
-// directory in the system temp area. ToSlash normalises separators so the match
-// holds on Windows too.
+// isEphemeralBuild reports whether path looks like a binary produced by
+// `go run`, which places the compiled executable under a `go-build` directory
+// (either a temporary work dir or the persistent build cache). ToSlash
+// normalises separators so the match holds on Windows too.
 func isEphemeralBuild(path string) bool {
 	return strings.Contains(filepath.ToSlash(path), "/go-build")
 }

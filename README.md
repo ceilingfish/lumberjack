@@ -88,33 +88,33 @@ launchd.
 mise run dev            # = `go run . daemon run`
 ```
 
-**Installed service:** to register the daemon so it starts at login, always
-install from a **built binary**, never from `go run`:
+**Installed service:** to register the daemon so it starts at login, install
+from a **built binary**, never from `go run`. The `install` task builds one and
+installs it in a single step:
 
 ```sh
-mise run build                    # produces ./bin/lumberjack
-./bin/lumberjack daemon install   # add --force to upgrade an existing install
+mise run install        # go build -o bin/lumberjack . && daemon install
 ./bin/lumberjack daemon start
 ```
 
-> **Why not `go run . daemon install`?** `go run` compiles to a throwaway binary
-> under a temporary `go-build` directory that is **deleted when the process
-> exits**. Installing bakes that path into the LaunchAgent, so launchd is left
-> pointing at a binary that no longer exists — the daemon fails to launch and,
-> under `KeepAlive`, crash-loops; a later `daemon start` then fails with
-> `launchctl … Load failed: 5`. `daemon install` refuses to run from a `go run`
-> build for exactly this reason and points you back here.
+> **Why not `go run . daemon install`?** `go run` links the program to a
+> **transient, content-addressed path** under a `go-build` directory — the hash
+> changes every time you rebuild, and Go prunes the build cache over time. So the
+> path is not a stable install target: register the service against it and the
+> next build leaves launchd pointing at a binary that has moved or been pruned.
+> The daemon then fails to launch and, under `KeepAlive`, crash-loops; a later
+> `daemon start` fails with `launchctl … Load failed: 5`. `daemon install`
+> refuses to run from a `go run` build for exactly this reason and points you
+> back here.
 
-After rebuilding, upgrade the installed service in place with:
+After rebuilding, upgrade the installed service in place with `--force`, which
+stops and removes the old registration then reinstalls with the new binary path
+and environment:
 
 ```sh
-mise run build
-./bin/lumberjack daemon install --force
+mise run install -- --force
 ./bin/lumberjack daemon start
 ```
-
-`--force` stops and removes the old registration, then reinstalls with the new
-binary path and environment.
 
 ---
 
