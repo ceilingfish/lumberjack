@@ -18,8 +18,15 @@ node = "24.10.0"
 description = "Build the lumberjack binary"
 run = "go build -o bin/lumberjack ."
 
+# Installs the daemon as a login service from a freshly built, durable binary.
+# `daemon install` refuses a `go run` build, so installing must go through a
+# real binary — extra args are forwarded (e.g. `mise run install -- --force`).
+[tasks.install]
+description = "Build a durable binary and install the daemon as a login service"
+run = "go build -o bin/lumberjack . && ./bin/lumberjack daemon install"
+
 [tasks.dev]
-description = "Run the daemon in the foreground (development mode)"
+description = "Run the CLI from source"
 run = "go run ."
 
 # Emits the Cobra shell-completion script for the given shell to stdout, so it
