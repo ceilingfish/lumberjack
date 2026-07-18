@@ -3,8 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
@@ -22,11 +20,7 @@ func newSetLoginCmd() *cobra.Command {
 			"`lumberjack repositories NAME set-login [LOGIN]`.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("resolving current directory: %w", err)
-			}
-			abs, err := filepath.Abs(cwd)
+			abs, err := cwdAbs()
 			if err != nil {
 				return err
 			}

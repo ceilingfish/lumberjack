@@ -28,6 +28,7 @@ type stubService struct {
 	syncEvents     []*lumberjackv1.SyncResponse
 	lastInitPath   string
 	lastSyncTarget string
+	lastGetRef     string
 	// logins is what ListLogins reports; loginErr, if set, is returned by
 	// SetLogin (e.g. an unauthenticated account). lastSetLogin records the login
 	// SetLogin received.
@@ -64,6 +65,7 @@ func (s *stubService) ListRepositories(context.Context, *lumberjackv1.ListReposi
 }
 
 func (s *stubService) GetRepository(_ context.Context, req *lumberjackv1.GetRepositoryRequest) (*lumberjackv1.GetRepositoryResponse, error) {
+	s.lastGetRef = req.GetRepository()
 	if s.getNotFound {
 		return nil, status.Error(codes.NotFound, "repository not found")
 	}
@@ -231,6 +233,23 @@ func TestCmdRepositoryDetail(t *testing.T) {
 	}
 	if !strings.Contains(out, "GitHub:") || !strings.Contains(out, "o/n") {
 		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdStatus(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	out, err := run(t, "", "status")
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	// Same detail view as `repositories NAME`.
+	if !strings.Contains(out, "GitHub:") || !strings.Contains(out, "o/n") {
+		t.Errorf("out = %q", out)
+	}
+	// Resolved against the current directory's absolute path.
+	if !filepath.IsAbs(stub.lastGetRef) {
+		t.Errorf("status should query by the cwd path, got %q", stub.lastGetRef)
 	}
 }
 

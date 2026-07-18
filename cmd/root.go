@@ -26,6 +26,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newRepositoriesCmd())
 	root.AddCommand(newSetLoginCmd())
+	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSyncCmd())
 	return root
 }

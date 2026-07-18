@@ -40,6 +40,7 @@ Because client and server always run on the same machine, the daemon listens on 
 
 `lumberjack repositories` should show the list of tracked repositories
 `lumberjack repositories NAME` should show details of the last sync for a named repository
+`lumberjack status` shows the same last-sync detail as `lumberjack repositories NAME`, but for the tracked repository at the current working directory
 `lumberjack repositories NAME sync` Triggers a synchronisation of the named repository specifically
 `lumberjack repositories NAME worktrees` should show a list of worktrees checked out for a repository, with their path, and if they need reconciliation, a warning
 `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits

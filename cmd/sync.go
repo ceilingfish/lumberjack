@@ -3,8 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
@@ -21,11 +19,7 @@ func newSyncCmd() *cobra.Command {
 			"`lumberjack repositories --sync`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("resolving current directory: %w", err)
-			}
-			abs, err := filepath.Abs(cwd)
+			abs, err := cwdAbs()
 			if err != nil {
 				return err
 			}
