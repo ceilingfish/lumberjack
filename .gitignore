@@ -27,3 +27,7 @@ vendor/
 # Editor / OS cruft
 .DS_Store
 *.swp
+
+# Agent skills installed from skills-lock.json via `mise run skills`
+/.agents/
+/.claude/

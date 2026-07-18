@@ -8,6 +8,8 @@ uv = "0.9.28"
 "pipx:sqlfluff" = "3.4.2"
 buf = "1.71.0"
 "github:gastownhall/beads" = "latest"
+# node provides npx, used by the `skills` task to install agent skills.
+node = "24.10.0"
 
 # Cobra (github.com/spf13/cobra, v1.10.2) is a Go library dependency, tracked
 # in go.mod rather than installed here.
@@ -67,3 +69,9 @@ run = "buf breaking --against '.git#branch=main'"
 [tasks.coverage]
 description = "Run tests with per-file coverage; fail if total is below 80%"
 run = "scripts/coverage.sh 80"
+
+# Restores the agent skills pinned in skills-lock.json (see https://skills.sh).
+# Run after cloning to install project skills such as go-code-review.
+[tasks.skills]
+description = "Install agent skills pinned in skills-lock.json"
+run = "npx --yes skills experimental_install"
