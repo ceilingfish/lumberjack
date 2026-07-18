@@ -33,7 +33,7 @@ func NewServer(info Info, db *database.Client, svc *Service) *Server {
 	return &Server{info: info, db: db, svc: svc}
 }
 
-// RegisterGRPC satisfies ServiceRegistrar.
+// RegisterGRPC binds the LumberjackService onto the gRPC server.
 func (s *Server) RegisterGRPC(g *grpc.Server) {
 	lumberjackv1.RegisterLumberjackServiceServer(g, s)
 }

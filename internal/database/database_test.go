@@ -51,22 +51,6 @@ func TestDefaultPathHomeFallback(t *testing.T) {
 	}
 }
 
-func TestOpenDefault(t *testing.T) {
-	// Point the default at a temp path so OpenDefault runs end-to-end.
-	t.Setenv(EnvDBPath, filepath.Join(t.TempDir(), "default.sqlite"))
-
-	client, err := OpenDefault(context.Background())
-	if err != nil {
-		t.Fatalf("OpenDefault: %v", err)
-	}
-	t.Cleanup(func() { _ = client.Close() })
-
-	var n int
-	if err := client.NewRaw("SELECT count(*) FROM repositories").Scan(context.Background(), &n); err != nil {
-		t.Errorf("querying migrated table: %v", err)
-	}
-}
-
 func TestOpenCreatesParentDirs(t *testing.T) {
 	// Nested, not-yet-existing parents must be created by Open.
 	path := filepath.Join(t.TempDir(), "a", "b", "c", "db.sqlite")

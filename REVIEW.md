@@ -72,3 +72,12 @@ Run the coverage task and ensure all new code meets the coverage standard. Comma
 ```sh
 mise run coverage
 ```
+
+## 5. Stylistic review
+
+Once all the checks above pass, carry out the stylistic review using both
+skills:
+
+- `/go-code-review` — check the change against Go community style standards.
+- `/ponytail-review` — hunt for over-engineering and anything that can be
+  deleted or simplified.

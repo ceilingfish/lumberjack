@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
@@ -69,7 +70,7 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 	if err := s.db.DeleteWorktree(ctx, wt.ID); err != nil {
 		return DeleteResult{}, err
 	}
-	return DeleteResult{Deleted: true, Message: fmt.Sprintf("deleted %s", baseName(wt.DirectoryPath))}, nil
+	return DeleteResult{Deleted: true, Message: fmt.Sprintf("deleted %s", filepath.Base(wt.DirectoryPath))}, nil
 }
 
 // confirmMessage renders the warning shown before a forced delete.

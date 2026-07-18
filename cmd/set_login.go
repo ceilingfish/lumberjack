@@ -37,19 +37,15 @@ func newSetLoginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			login := ""
+			if len(args) == 1 {
+				login = args[0]
+			}
 			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
-				return setLogin(ctx, cmd, c, abs, firstArg(args))
+				return setLogin(ctx, cmd, c, abs, login)
 			})
 		},
 	}
-}
-
-// firstArg returns args[0] or "" — the optional LOGIN positional.
-func firstArg(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	return args[0]
 }
 
 // setLogin sets the gh login for the repository resolved by ref and reports the

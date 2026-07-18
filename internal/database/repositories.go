@@ -2,8 +2,6 @@ package database
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -54,14 +52,14 @@ func (c *Client) FindRepository(ctx context.Context, ref string) (*schema.Reposi
 		return nil, ErrRepositoryNotFound
 	}
 	// Prefer an exact local-path match, then dir_prefix, then fall through.
-	for _, want := range []func(schema.Repository) bool{
-		func(r schema.Repository) bool { return r.LocalPath == ref },
-		func(r schema.Repository) bool { return r.DirPrefix == ref },
-	} {
-		for i := range repos {
-			if want(repos[i]) {
-				return &repos[i], nil
-			}
+	for i := range repos {
+		if repos[i].LocalPath == ref {
+			return &repos[i], nil
+		}
+	}
+	for i := range repos {
+		if repos[i].DirPrefix == ref {
+			return &repos[i], nil
 		}
 	}
 	return &repos[0], nil
@@ -105,9 +103,8 @@ func (c *Client) DeleteRepository(ctx context.Context, repoID int64) (worktreesR
 }
 
 // UpdateSyncResult records the outcome of a sync on the repository row. A nil
-// syncErr records success; a non-nil one records the error message. The
-// optional etag is stored when non-empty for conditional PR fetches.
-func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Time, syncErr error, etag string) error {
+// syncErr records success; a non-nil one records the error message.
+func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Time, syncErr error) error {
 	status := schema.SyncStatusOK
 	var errMsg *string
 	if syncErr != nil {
@@ -115,14 +112,11 @@ func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Tim
 		m := syncErr.Error()
 		errMsg = &m
 	}
-	q := c.NewUpdate().Model((*schema.Repository)(nil)).
+	if _, err := c.NewUpdate().Model((*schema.Repository)(nil)).
 		Set("last_synced_at = ?", at).
 		Set("last_sync_status = ?", status).
-		Set("last_sync_error = ?", errMsg)
-	if etag != "" {
-		q = q.Set("etag_pulls = ?", etag)
-	}
-	if _, err := q.Where("id = ?", repoID).Exec(ctx); err != nil {
+		Set("last_sync_error = ?", errMsg).
+		Where("id = ?", repoID).Exec(ctx); err != nil {
 		return fmt.Errorf("updating sync result: %w", err)
 	}
 	return nil
@@ -137,17 +131,4 @@ func (c *Client) UpdateLogin(ctx context.Context, repoID int64, login string) er
 		return fmt.Errorf("updating repository login: %w", err)
 	}
 	return nil
-}
-
-// repositoryByID fetches one repository by primary key (nil, sql.ErrNoRows on
-// miss). Used internally by tests and the sync engine.
-func (c *Client) repositoryByID(ctx context.Context, id int64) (*schema.Repository, error) {
-	repo := new(schema.Repository)
-	if err := c.NewSelect().Model(repo).Where("id = ?", id).Scan(ctx); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrRepositoryNotFound
-		}
-		return nil, err
-	}
-	return repo, nil
 }

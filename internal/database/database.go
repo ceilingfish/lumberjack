@@ -79,15 +79,6 @@ func Open(ctx context.Context, path string) (*Client, error) {
 	return &Client{DB: bun.NewDB(sqldb, sqlitedialect.New())}, nil
 }
 
-// OpenDefault is Open against DefaultPath.
-func OpenDefault(ctx context.Context) (*Client, error) {
-	path, err := DefaultPath()
-	if err != nil {
-		return nil, err
-	}
-	return Open(ctx, path)
-}
-
 // migrate applies every embedded goose migration to db.
 //
 // goose configuration is process-global. This is safe because the daemon owns

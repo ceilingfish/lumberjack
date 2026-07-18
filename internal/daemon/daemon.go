@@ -48,11 +48,7 @@ var Module = fx.Module("daemon",
 		fx.Annotate(github.NewClient, fx.As(new(GHOps))),
 		NewService,
 
-		// Each service joins the grpc.services group via asRegistrar. This is
-		// the only list that changes when the daemon gains a service.
-		asRegistrar(NewServer),
-		asRegistrar(NewHealthService),
-
+		NewServer,
 		newGRPCServer,
 	),
 	fx.Invoke(runServer),
@@ -77,21 +73,11 @@ func newDatabase(lc fx.Lifecycle) (*database.Client, error) {
 	return db, nil
 }
 
-// grpcParams collects every contributed ServiceRegistrar. The `group` tag must
-// match the ResultTags used by asRegistrar (both go through grpcGroup).
-type grpcParams struct {
-	fx.In
-	Services []ServiceRegistrar `group:"grpc.services"`
-}
-
-// newGRPCServer builds the server and lets every registered service bind onto
-// it. Server-wide concerns (interceptors, reflection) live here — per-service
-// concerns live in each ServiceRegistrar.
-func newGRPCServer(p grpcParams) *grpc.Server {
+// newGRPCServer builds the server and binds the LumberjackService onto it.
+// Server-wide concerns (reflection) live here.
+func newGRPCServer(srv *Server) *grpc.Server {
 	s := grpc.NewServer()
-	for _, svc := range p.Services {
-		svc.RegisterGRPC(s)
-	}
+	srv.RegisterGRPC(s)
 	// Reflection lets grpcurl and the like introspect the daemon over the
 	// socket — cheap and useful for a local dev daemon.
 	reflection.Register(s)

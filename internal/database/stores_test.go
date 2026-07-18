@@ -2,12 +2,38 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 )
+
+// repositoryByID and listPRs are read-back helpers used only by these store
+// tests to assert what the write methods persisted. They live here rather than
+// in the production Client because nothing outside the tests reads by id or
+// lists tracked PRs.
+func (c *Client) repositoryByID(ctx context.Context, id int64) (*schema.Repository, error) {
+	repo := new(schema.Repository)
+	if err := c.NewSelect().Model(repo).Where("id = ?", id).Scan(ctx); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrRepositoryNotFound
+		}
+		return nil, err
+	}
+	return repo, nil
+}
+
+func (c *Client) listPRs(ctx context.Context, repoID int64) ([]schema.PullRequest, error) {
+	var prs []schema.PullRequest
+	if err := c.NewSelect().Model(&prs).
+		Where("repository_id = ?", repoID).Order("github_pr_number ASC").Scan(ctx); err != nil {
+		return nil, fmt.Errorf("listing pull requests: %w", err)
+	}
+	return prs, nil
+}
 
 func newRepo(localPath, prefix, name string) *schema.Repository {
 	return &schema.Repository{
@@ -136,18 +162,15 @@ func TestUpdateSyncResult(t *testing.T) {
 	_ = c.CreateRepository(ctx, repo)
 
 	now := time.Now()
-	if err := c.UpdateSyncResult(ctx, repo.ID, now, nil, "etag123"); err != nil {
+	if err := c.UpdateSyncResult(ctx, repo.ID, now, nil); err != nil {
 		t.Fatalf("UpdateSyncResult: %v", err)
 	}
 	got, _ := c.repositoryByID(ctx, repo.ID)
 	if got.LastSyncStatus == nil || *got.LastSyncStatus != schema.SyncStatusOK {
 		t.Errorf("status = %v, want ok", got.LastSyncStatus)
 	}
-	if got.EtagPulls == nil || *got.EtagPulls != "etag123" {
-		t.Errorf("etag = %v", got.EtagPulls)
-	}
 
-	if err := c.UpdateSyncResult(ctx, repo.ID, now, errors.New("boom"), ""); err != nil {
+	if err := c.UpdateSyncResult(ctx, repo.ID, now, errors.New("boom")); err != nil {
 		t.Fatalf("UpdateSyncResult(err): %v", err)
 	}
 	got, _ = c.repositoryByID(ctx, repo.ID)
@@ -156,10 +179,6 @@ func TestUpdateSyncResult(t *testing.T) {
 	}
 	if got.LastSyncError == nil || *got.LastSyncError != "boom" {
 		t.Errorf("error = %v", got.LastSyncError)
-	}
-	// The earlier etag must survive an update that passes an empty etag.
-	if got.EtagPulls == nil || *got.EtagPulls != "etag123" {
-		t.Errorf("etag should be preserved, got %v", got.EtagPulls)
 	}
 }
 
@@ -280,7 +299,7 @@ func TestReplaceOpenPRs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReplaceOpenPRs: %v", err)
 	}
-	prs, _ := c.ListPRs(ctx, repo.ID)
+	prs, _ := c.listPRs(ctx, repo.ID)
 	if len(prs) != 2 {
 		t.Fatalf("expected 2 PRs, got %d", len(prs))
 	}
@@ -293,7 +312,7 @@ func TestReplaceOpenPRs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReplaceOpenPRs: %v", err)
 	}
-	prs, _ = c.ListPRs(ctx, repo.ID)
+	prs, _ = c.listPRs(ctx, repo.ID)
 	if len(prs) != 2 {
 		t.Fatalf("expected 2 PRs after prune, got %d", len(prs))
 	}
@@ -320,7 +339,7 @@ func TestReplaceOpenPRsEmptyPrunesAll(t *testing.T) {
 	if err := c.ReplaceOpenPRs(ctx, repo.ID, nil, now); err != nil {
 		t.Fatalf("ReplaceOpenPRs(nil): %v", err)
 	}
-	prs, _ := c.ListPRs(ctx, repo.ID)
+	prs, _ := c.listPRs(ctx, repo.ID)
 	if len(prs) != 0 {
 		t.Errorf("expected all PRs pruned, got %d", len(prs))
 	}

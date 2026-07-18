@@ -31,7 +31,6 @@ type Repository struct {
 	LastSyncedAt   *time.Time `bun:"last_synced_at"`
 	LastSyncStatus *string    `bun:"last_sync_status"`
 	LastSyncError  *string    `bun:"last_sync_error"`
-	EtagPulls      *string    `bun:"etag_pulls"`
 	CreatedAt      time.Time  `bun:"created_at,notnull,default:current_timestamp"`
 }
 
