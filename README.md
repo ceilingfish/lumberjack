@@ -77,16 +77,18 @@ Copy `bin/lumberjack` somewhere on your `PATH` (e.g. `~/.local/bin`).
 
 ## Running from source
 
-For day-to-day development there are two ways to run the daemon, and it matters
-which you use.
-
-**Foreground (development):** run the daemon in the foreground, tied to your
-terminal, with logs on stdout. Stop it with Ctrl-C. Nothing is registered with
-launchd.
+For day-to-day development, `mise run dev` runs the CLI straight from source —
+it is `go run .` with your arguments appended, so any command works:
 
 ```sh
-mise run dev            # = `go run . daemon run`
+mise run dev doctor           # = `go run . doctor`
+mise run dev daemon run       # run the daemon in the foreground (Ctrl-C to stop)
+mise run dev status           # any CLI command, straight from source
 ```
+
+Running the daemon this way (`daemon run`) ties it to your terminal with logs on
+stdout and registers nothing with launchd — handy for iterating. To register it
+as a login service, that is a separate step, and it matters how you do it.
 
 **Installed service:** to register the daemon so it starts at login, install
 from a **built binary**, never from `go run`. The `install` task builds one and
