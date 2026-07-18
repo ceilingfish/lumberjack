@@ -40,6 +40,9 @@ type GHOps interface {
 	// ListLogins reports every gh account authenticated for a host — the logins
 	// set-login accepts and the picker offers.
 	ListLogins(ctx context.Context, host string) ([]string, error)
+	// CheckRepoAccess verifies gh's active account can reach a repository, so
+	// set-login can reject a login that authenticates but cannot operate the repo.
+	CheckRepoAccess(ctx context.Context, repo github.RepoInfo) error
 }
 
 // Service is the daemon's domain layer: it owns every worktree mutation
@@ -92,24 +95,32 @@ func repoInfo(repo *schema.Repository) github.RepoInfo {
 //
 // Repos tracked before login capture (empty Login) run fn unchanged. gh's
 // active account is process-global, so callers must hold s.mu.
-func (s *Service) withRepoLogin(ctx context.Context, repo *schema.Repository, fn func() error) (err error) {
-	if repo.Login == "" {
+func (s *Service) withRepoLogin(ctx context.Context, repo *schema.Repository, fn func() error) error {
+	return s.withLogin(ctx, repo.Host, repo.Login, fn)
+}
+
+// withLogin runs fn with gh's active account switched to login for host,
+// restoring the previously-active account afterwards. An empty login (or one
+// already active) runs fn without switching. gh's active account is
+// process-global, so callers must hold s.mu.
+func (s *Service) withLogin(ctx context.Context, host, login string, fn func() error) (err error) {
+	if login == "" {
 		return fn()
 	}
-	current, aerr := s.gh.ActiveLogin(ctx, repo.Host)
+	current, aerr := s.gh.ActiveLogin(ctx, host)
 	if aerr != nil {
 		return fmt.Errorf("checking active GitHub account: %w", aerr)
 	}
-	if current == repo.Login {
+	if current == login {
 		return fn()
 	}
-	if serr := s.gh.SwitchAccount(ctx, repo.Host, repo.Login); serr != nil {
-		return fmt.Errorf("switching to GitHub account %q: %w", repo.Login, serr)
+	if serr := s.gh.SwitchAccount(ctx, host, login); serr != nil {
+		return fmt.Errorf("switching to GitHub account %q: %w", login, serr)
 	}
 	defer func() {
 		// Restore the account that was active before. A restore failure must not
 		// mask fn's own error, but is surfaced when fn otherwise succeeded.
-		if serr := s.gh.SwitchAccount(ctx, repo.Host, current); serr != nil && err == nil {
+		if serr := s.gh.SwitchAccount(ctx, host, current); serr != nil && err == nil {
 			err = fmt.Errorf("restoring GitHub account %q: %w", current, serr)
 		}
 	}()

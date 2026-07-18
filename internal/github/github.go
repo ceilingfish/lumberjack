@@ -110,7 +110,7 @@ func (c *Client) RepoInfo(ctx context.Context, dir string) (RepoInfo, error) {
 		"--json", "owner,name,defaultBranchRef,url")
 	if err != nil {
 		if isNotFound(err) {
-			return RepoInfo{}, fmt.Errorf("%w: %v", ErrRepoNotFound, err)
+			return RepoInfo{}, fmt.Errorf("%w: %s", ErrRepoNotFound, err.Error())
 		}
 		return RepoInfo{}, err
 	}
@@ -133,6 +133,24 @@ func (c *Client) RepoInfo(ctx context.Context, dir string) (RepoInfo, error) {
 		Host:          host,
 		DefaultBranch: v.DefaultBranchRef.Name,
 	}, nil
+}
+
+// CheckRepoAccess verifies that gh's currently-active account can reach repo on
+// GitHub, via `gh repo view HOST/OWNER/NAME`. It returns ErrRepoNotFound when
+// the repository is invisible to the active credentials (a 404) — which is how
+// set-login rejects a login that cannot operate the repo. Callers switch gh to
+// the account under test first (see Service.withLogin).
+func (c *Client) CheckRepoAccess(ctx context.Context, repo RepoInfo) error {
+	_, err := c.run(ctx, "", "repo", "view",
+		fmt.Sprintf("%s/%s/%s", repo.Host, repo.Owner, repo.Name),
+		"--json", "name")
+	if err != nil {
+		if isNotFound(err) {
+			return fmt.Errorf("%w: %s", ErrRepoNotFound, err.Error())
+		}
+		return err
+	}
+	return nil
 }
 
 // isNotFound reports whether a gh error is GitHub's "no such repository (for

@@ -34,6 +34,15 @@ func (s *Service) SetLogin(ctx context.Context, repo *schema.Repository, login s
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// A login gh knows about is not necessarily one that can operate this repo:
+	// switch to it and confirm it can reach the repo on GitHub before committing.
+	if err := s.withLogin(ctx, repo.Host, login, func() error {
+		return s.gh.CheckRepoAccess(ctx, repoInfo(repo))
+	}); err != nil {
+		return nil, fmt.Errorf("account %q cannot access %s/%s on %s: %w",
+			login, repo.GithubOwner, repo.GithubName, repo.Host, err)
+	}
+
 	if err := s.db.UpdateLogin(ctx, repo.ID, login); err != nil {
 		return nil, err
 	}

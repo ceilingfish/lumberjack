@@ -60,7 +60,8 @@ type LumberjackServiceClient interface {
 	// SetLogin sets the gh account a repository operates under —
 	// `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
 	// checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
-	// is not authenticated as for the repository's host.
+	// is not authenticated as for the repository's host, or one that authenticates
+	// but cannot reach the repository on GitHub.
 	SetLogin(ctx context.Context, in *SetLoginRequest, opts ...grpc.CallOption) (*SetLoginResponse, error)
 	// ListLogins returns the gh accounts authenticated for a repository's host —
 	// the candidates set-login accepts. The CLI uses it to offer an interactive
@@ -206,7 +207,8 @@ type LumberjackServiceServer interface {
 	// SetLogin sets the gh account a repository operates under —
 	// `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
 	// checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
-	// is not authenticated as for the repository's host.
+	// is not authenticated as for the repository's host, or one that authenticates
+	// but cannot reach the repository on GitHub.
 	SetLogin(context.Context, *SetLoginRequest) (*SetLoginResponse, error)
 	// ListLogins returns the gh accounts authenticated for a repository's host —
 	// the candidates set-login accepts. The CLI uses it to offer an interactive

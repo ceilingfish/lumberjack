@@ -87,6 +87,11 @@ type fakeGH struct {
 	// fail. A nil logins slice means gh has no accounts.
 	logins    []string
 	loginsErr error
+	// accessErr, if set, is returned by CheckRepoAccess — simulating a login gh
+	// knows but that cannot reach the repo. accessChecks records each account
+	// active when CheckRepoAccess ran.
+	accessErr    error
+	accessChecks []string
 }
 
 func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {
@@ -116,6 +121,13 @@ func (f *fakeGH) SwitchAccount(_ context.Context, host, login string) error {
 
 func (f *fakeGH) ListLogins(context.Context, string) ([]string, error) {
 	return f.logins, f.loginsErr
+}
+
+func (f *fakeGH) CheckRepoAccess(context.Context, github.RepoInfo) error {
+	// Record the account active at check time so tests can assert the check ran
+	// under the candidate login rather than whatever was active before.
+	f.accessChecks = append(f.accessChecks, f.active)
+	return f.accessErr
 }
 
 // harness bundles a Service over a temp DB with controllable fakes.
@@ -349,6 +361,34 @@ func TestSetLoginUnknownAccountRejected(t *testing.T) {
 	got, _ := h.db.FindRepository(context.Background(), repo.LocalPath)
 	if got.Login != "" {
 		t.Errorf("login should be unchanged, got %q", got.Login)
+	}
+}
+
+func TestSetLoginUnreachableRepoRejected(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.logins = []string{"personal", "work"}
+	h.gh.active = "personal"
+	h.gh.accessErr = fmt.Errorf("HTTP 404: Not Found")
+
+	_, err := h.svc.SetLogin(context.Background(), repo, "work")
+	if err == nil {
+		t.Fatal("expected a login that cannot reach the repo to be rejected")
+	}
+	if !strings.Contains(err.Error(), "cannot access") {
+		t.Errorf("error should explain the access failure, got %v", err)
+	}
+	// The check must have run under the candidate account, not the prior one.
+	if len(h.gh.accessChecks) != 1 || h.gh.accessChecks[0] != "work" {
+		t.Errorf("access check ran under %v, want [work]", h.gh.accessChecks)
+	}
+	// Nothing persisted, and the prior account is restored.
+	got, _ := h.db.FindRepository(context.Background(), repo.LocalPath)
+	if got.Login != "" {
+		t.Errorf("login should be unchanged, got %q", got.Login)
+	}
+	if h.gh.active != "personal" {
+		t.Errorf("active account should be restored to personal, got %q", h.gh.active)
 	}
 }
 

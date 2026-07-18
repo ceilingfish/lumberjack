@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,6 +127,33 @@ func TestRepoInfoOtherErrorIsNotSentinel(t *testing.T) {
 	_, err := c.RepoInfo(context.Background(), "/repo")
 	if err == nil || errors.Is(err, ErrRepoNotFound) {
 		t.Errorf("non-404 error should not be ErrRepoNotFound, got %v", err)
+	}
+}
+
+func TestCheckRepoAccess(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `{"name":"Lumberjack"}`, nil
+	})
+	repo := RepoInfo{Owner: "ceilingfish", Name: "Lumberjack", Host: "github.com"}
+	if err := c.CheckRepoAccess(context.Background(), repo); err != nil {
+		t.Fatalf("CheckRepoAccess: %v", err)
+	}
+	// It must target the specific repo (HOST/OWNER/NAME), not the cwd.
+	joined := strings.Join(gotArgs, " ")
+	if !strings.Contains(joined, "github.com/ceilingfish/Lumberjack") {
+		t.Errorf("args = %v, want a HOST/OWNER/NAME target", gotArgs)
+	}
+}
+
+func TestCheckRepoAccessNotFoundIsSentinel(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return "", errors.New("gh repo view: HTTP 404: Not Found")
+	})
+	repo := RepoInfo{Owner: "o", Name: "n", Host: "github.com"}
+	if err := c.CheckRepoAccess(context.Background(), repo); !errors.Is(err, ErrRepoNotFound) {
+		t.Errorf("got %v, want ErrRepoNotFound", err)
 	}
 }
 

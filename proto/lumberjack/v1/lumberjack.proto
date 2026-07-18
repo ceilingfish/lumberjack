@@ -37,7 +37,8 @@ service LumberjackService {
   // SetLogin sets the gh account a repository operates under —
   // `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
   // checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
-  // is not authenticated as for the repository's host.
+  // is not authenticated as for the repository's host, or one that authenticates
+  // but cannot reach the repository on GitHub.
   rpc SetLogin(SetLoginRequest) returns (SetLoginResponse);
 
   // ListLogins returns the gh accounts authenticated for a repository's host —
