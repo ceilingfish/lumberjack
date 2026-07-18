@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 )
 
@@ -63,6 +65,43 @@ func (c *Client) FindRepository(ctx context.Context, ref string) (*schema.Reposi
 		}
 	}
 	return &repos[0], nil
+}
+
+// DeleteRepository stops tracking the repository with the given primary key,
+// removing its worktree (and, via ON DELETE CASCADE, pull_request and sync_run)
+// rows in the same transaction. It touches only the database — nothing on disk
+// or on GitHub — and returns the number of worktree rows removed. It returns
+// ErrRepositoryNotFound when no repository has that id.
+func (c *Client) DeleteRepository(ctx context.Context, repoID int64) (worktreesRemoved int64, err error) {
+	err = c.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		res, derr := tx.NewDelete().Model((*schema.Worktree)(nil)).
+			Where("repository_id = ?", repoID).Exec(ctx)
+		if derr != nil {
+			return fmt.Errorf("deleting worktrees: %w", derr)
+		}
+		worktreesRemoved, derr = res.RowsAffected()
+		if derr != nil {
+			return fmt.Errorf("counting deleted worktrees: %w", derr)
+		}
+
+		res, derr = tx.NewDelete().Model((*schema.Repository)(nil)).
+			Where("id = ?", repoID).Exec(ctx)
+		if derr != nil {
+			return fmt.Errorf("deleting repository: %w", derr)
+		}
+		affected, derr := res.RowsAffected()
+		if derr != nil {
+			return fmt.Errorf("counting deleted repository: %w", derr)
+		}
+		if affected == 0 {
+			return ErrRepositoryNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return worktreesRemoved, nil
 }
 
 // UpdateSyncResult records the outcome of a sync on the repository row. A nil

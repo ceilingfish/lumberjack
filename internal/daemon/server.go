@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
@@ -147,6 +148,26 @@ func (s *Server) DeleteWorktree(ctx context.Context, req *lumberjackv1.DeleteWor
 		RequiresConfirmation: res.RequiresConfirmation,
 		CommitsAtRisk:        res.CommitsAtRisk,
 		Message:              res.Message,
+	}, nil
+}
+
+// DeleteRepository stops tracking a repository, removing it and its worktree
+// rows from the database only (nothing on disk or on GitHub).
+func (s *Server) DeleteRepository(ctx context.Context, req *lumberjackv1.DeleteRepositoryRequest) (*lumberjackv1.DeleteRepositoryResponse, error) {
+	if req.GetRepository() == "" {
+		return nil, status.Error(codes.InvalidArgument, "repository is required")
+	}
+	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	removed, err := s.db.DeleteRepository(ctx, repo.ID)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &lumberjackv1.DeleteRepositoryResponse{
+		WorktreesRemoved: removed,
+		Message:          fmt.Sprintf("stopped tracking %s (removed %d worktree(s) from the database)", displayName(repo), removed),
 	}, nil
 }
 

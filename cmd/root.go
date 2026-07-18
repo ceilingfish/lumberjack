@@ -22,6 +22,7 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true, // Execute prints the error itself, once
 	}
 	root.AddCommand(newDaemonCmd())
+	root.AddCommand(newDeleteCmd())
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newRepositoriesCmd())

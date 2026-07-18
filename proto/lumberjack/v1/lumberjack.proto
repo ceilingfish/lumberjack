@@ -54,6 +54,11 @@ service LumberjackService {
   // `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
   rpc DeleteWorktree(DeleteWorktreeRequest) returns (DeleteWorktreeResponse);
 
+  // DeleteRepository stops tracking a repository — `lumberjack delete NAME`.
+  // It removes the repository and all its worktree rows from the database only;
+  // nothing is touched on disk or on GitHub.
+  rpc DeleteRepository(DeleteRepositoryRequest) returns (DeleteRepositoryResponse);
+
   // Sync reconciles worktrees against open PRs. With an empty repository it
   // syncs everything (`lumberjack repositories --sync`); with one set it syncs
   // just that repo (`lumberjack sync`). Progress is streamed back as it runs.
@@ -206,6 +211,18 @@ message DeleteWorktreeResponse {
   // Number of commits that would be lost, for the confirmation warning.
   int64 commits_at_risk = 3;
   string message = 4;
+}
+
+message DeleteRepositoryRequest {
+  // A repository name (dir prefix / GitHub name) or its local path; the daemon
+  // resolves either form.
+  string repository = 1;
+}
+
+message DeleteRepositoryResponse {
+  // Number of worktree rows removed alongside the repository.
+  int64 worktrees_removed = 1;
+  string message = 2;
 }
 
 message SyncRequest {

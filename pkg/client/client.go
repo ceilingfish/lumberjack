@@ -156,6 +156,17 @@ func (c *Client) DeleteWorktree(ctx context.Context, ref, worktree string, force
 	return resp, nil
 }
 
+// DeleteRepository stops tracking the repository resolved by ref, removing it
+// and its worktree rows from the database only (nothing on disk or on GitHub).
+// It returns the number of worktree rows removed.
+func (c *Client) DeleteRepository(ctx context.Context, ref string) (*lumberjackv1.DeleteRepositoryResponse, error) {
+	resp, err := c.svc.DeleteRepository(ctx, &lumberjackv1.DeleteRepositoryRequest{Repository: ref})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp, nil
+}
+
 // Sync reconciles one repository (ref set) or all of them (ref empty),
 // invoking onEvent for each streamed progress update until the stream ends.
 func (c *Client) Sync(ctx context.Context, ref string, onEvent func(*lumberjackv1.SyncResponse) error) error {

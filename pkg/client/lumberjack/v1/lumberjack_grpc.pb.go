@@ -36,6 +36,7 @@ const (
 	LumberjackService_ListLogins_FullMethodName       = "/lumberjack.v1.LumberjackService/ListLogins"
 	LumberjackService_ListWorktrees_FullMethodName    = "/lumberjack.v1.LumberjackService/ListWorktrees"
 	LumberjackService_DeleteWorktree_FullMethodName   = "/lumberjack.v1.LumberjackService/DeleteWorktree"
+	LumberjackService_DeleteRepository_FullMethodName = "/lumberjack.v1.LumberjackService/DeleteRepository"
 	LumberjackService_Sync_FullMethodName             = "/lumberjack.v1.LumberjackService/Sync"
 )
 
@@ -73,6 +74,10 @@ type LumberjackServiceClient interface {
 	// DeleteWorktree removes a worktree —
 	// `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
 	DeleteWorktree(ctx context.Context, in *DeleteWorktreeRequest, opts ...grpc.CallOption) (*DeleteWorktreeResponse, error)
+	// DeleteRepository stops tracking a repository — `lumberjack delete NAME`.
+	// It removes the repository and all its worktree rows from the database only;
+	// nothing is touched on disk or on GitHub.
+	DeleteRepository(ctx context.Context, in *DeleteRepositoryRequest, opts ...grpc.CallOption) (*DeleteRepositoryResponse, error)
 	// Sync reconciles worktrees against open PRs. With an empty repository it
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
 	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
@@ -167,6 +172,16 @@ func (c *lumberjackServiceClient) DeleteWorktree(ctx context.Context, in *Delete
 	return out, nil
 }
 
+func (c *lumberjackServiceClient) DeleteRepository(ctx context.Context, in *DeleteRepositoryRequest, opts ...grpc.CallOption) (*DeleteRepositoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteRepositoryResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_DeleteRepository_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *lumberjackServiceClient) Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &LumberjackService_ServiceDesc.Streams[0], LumberjackService_Sync_FullMethodName, cOpts...)
@@ -220,6 +235,10 @@ type LumberjackServiceServer interface {
 	// DeleteWorktree removes a worktree —
 	// `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
 	DeleteWorktree(context.Context, *DeleteWorktreeRequest) (*DeleteWorktreeResponse, error)
+	// DeleteRepository stops tracking a repository — `lumberjack delete NAME`.
+	// It removes the repository and all its worktree rows from the database only;
+	// nothing is touched on disk or on GitHub.
+	DeleteRepository(context.Context, *DeleteRepositoryRequest) (*DeleteRepositoryResponse, error)
 	// Sync reconciles worktrees against open PRs. With an empty repository it
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
 	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
@@ -257,6 +276,9 @@ func (UnimplementedLumberjackServiceServer) ListWorktrees(context.Context, *List
 }
 func (UnimplementedLumberjackServiceServer) DeleteWorktree(context.Context, *DeleteWorktreeRequest) (*DeleteWorktreeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorktree not implemented")
+}
+func (UnimplementedLumberjackServiceServer) DeleteRepository(context.Context, *DeleteRepositoryRequest) (*DeleteRepositoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteRepository not implemented")
 }
 func (UnimplementedLumberjackServiceServer) Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Sync not implemented")
@@ -426,6 +448,24 @@ func _LumberjackService_DeleteWorktree_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LumberjackService_DeleteRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteRepositoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).DeleteRepository(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_DeleteRepository_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).DeleteRepository(ctx, req.(*DeleteRepositoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _LumberjackService_Sync_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(SyncRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -475,6 +515,10 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteWorktree",
 			Handler:    _LumberjackService_DeleteWorktree_Handler,
+		},
+		{
+			MethodName: "DeleteRepository",
+			Handler:    _LumberjackService_DeleteRepository_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

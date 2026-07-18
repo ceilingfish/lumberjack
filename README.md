@@ -123,6 +123,7 @@ Run `lumberjack <command> --help` for full details on any of these.
 | --- | --- |
 | `lumberjack doctor` | Check `git`/`gh` prerequisites (no daemon needed). |
 | `lumberjack init [path]` | Start tracking the repository at `path` (default: current dir). |
+| `lumberjack delete NAME` | Stop tracking a repository — removes it and its worktrees from the database only (nothing on disk or GitHub). |
 | `lumberjack status` | Last-sync detail for the repo in the current dir. |
 | `lumberjack sync` | Reconcile worktrees for the repo in the current dir now. |
 | `lumberjack repositories` | List every tracked repository. |

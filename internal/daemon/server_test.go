@@ -147,6 +147,46 @@ func TestServerDeleteWorktree(t *testing.T) {
 	}
 }
 
+func TestServerDeleteRepository(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+
+	resp, err := srv.DeleteRepository(context.Background(),
+		&lumberjackv1.DeleteRepositoryRequest{Repository: "n"})
+	if err != nil {
+		t.Fatalf("DeleteRepository: %v", err)
+	}
+	if resp.GetWorktreesRemoved() != 1 {
+		t.Errorf("worktreesRemoved = %d, want 1", resp.GetWorktreesRemoved())
+	}
+
+	// The repository is gone.
+	_, err = srv.GetRepository(context.Background(), &lumberjackv1.GetRepositoryRequest{Repository: "n"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound after delete, got %v", err)
+	}
+}
+
+func TestServerDeleteRepositoryEmpty(t *testing.T) {
+	srv := newServer(newHarness(t))
+	_, err := srv.DeleteRepository(context.Background(), &lumberjackv1.DeleteRepositoryRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v", err)
+	}
+}
+
+func TestServerDeleteRepositoryUnknown(t *testing.T) {
+	srv := newServer(newHarness(t))
+	_, err := srv.DeleteRepository(context.Background(),
+		&lumberjackv1.DeleteRepositoryRequest{Repository: "ghost"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
 func TestServerSyncSingleRepo(t *testing.T) {
 	h := newHarness(t)
 	srv := newServer(h)

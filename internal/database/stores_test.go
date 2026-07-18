@@ -210,6 +210,61 @@ func TestWorktreeStore(t *testing.T) {
 	}
 }
 
+func TestDeleteRepository(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	// A second repo that must be left untouched.
+	other := newRepo("/b", "b", "B")
+	_ = c.CreateRepository(ctx, other)
+
+	for _, dir := range []string{"/parent/a-x", "/parent/a-y"} {
+		wt := &schema.Worktree{
+			RepositoryID: repo.ID, BranchName: "feature/" + dir,
+			DirectoryPath: dir, CreatedBy: schema.CreatedByLumberjack,
+		}
+		if err := c.CreateWorktree(ctx, wt); err != nil {
+			t.Fatalf("CreateWorktree: %v", err)
+		}
+	}
+	otherWT := &schema.Worktree{
+		RepositoryID: other.ID, BranchName: "feature/b",
+		DirectoryPath: "/parent/b-x", CreatedBy: schema.CreatedByLumberjack,
+	}
+	_ = c.CreateWorktree(ctx, otherWT)
+
+	removed, err := c.DeleteRepository(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("DeleteRepository: %v", err)
+	}
+	if removed != 2 {
+		t.Errorf("worktreesRemoved = %d, want 2", removed)
+	}
+
+	if _, err := c.repositoryByID(ctx, repo.ID); !errors.Is(err, ErrRepositoryNotFound) {
+		t.Errorf("repository should be gone, got %v", err)
+	}
+	if wts, _ := c.ListWorktrees(ctx, repo.ID); len(wts) != 0 {
+		t.Errorf("expected 0 worktrees after delete, got %d", len(wts))
+	}
+
+	// The other repository and its worktree survive.
+	if _, err := c.repositoryByID(ctx, other.ID); err != nil {
+		t.Errorf("other repository should survive, got %v", err)
+	}
+	if wts, _ := c.ListWorktrees(ctx, other.ID); len(wts) != 1 {
+		t.Errorf("other repo should keep its worktree, got %d", len(wts))
+	}
+}
+
+func TestDeleteRepositoryMissing(t *testing.T) {
+	c := openTemp(t)
+	if _, err := c.DeleteRepository(context.Background(), 999); !errors.Is(err, ErrRepositoryNotFound) {
+		t.Errorf("expected ErrRepositoryNotFound, got %v", err)
+	}
+}
+
 func TestReplaceOpenPRs(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()

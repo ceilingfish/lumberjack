@@ -1175,6 +1175,105 @@ func (x *DeleteWorktreeResponse) GetMessage() string {
 	return ""
 }
 
+type DeleteRepositoryRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A repository name (dir prefix / GitHub name) or its local path; the daemon
+	// resolves either form.
+	Repository    string `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DeleteRepositoryRequest) Reset() {
+	*x = DeleteRepositoryRequest{}
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteRepositoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteRepositoryRequest) ProtoMessage() {}
+
+func (x *DeleteRepositoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteRepositoryRequest.ProtoReflect.Descriptor instead.
+func (*DeleteRepositoryRequest) Descriptor() ([]byte, []int) {
+	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *DeleteRepositoryRequest) GetRepository() string {
+	if x != nil {
+		return x.Repository
+	}
+	return ""
+}
+
+type DeleteRepositoryResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Number of worktree rows removed alongside the repository.
+	WorktreesRemoved int64  `protobuf:"varint,1,opt,name=worktrees_removed,json=worktreesRemoved,proto3" json:"worktrees_removed,omitempty"`
+	Message          string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *DeleteRepositoryResponse) Reset() {
+	*x = DeleteRepositoryResponse{}
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeleteRepositoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeleteRepositoryResponse) ProtoMessage() {}
+
+func (x *DeleteRepositoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeleteRepositoryResponse.ProtoReflect.Descriptor instead.
+func (*DeleteRepositoryResponse) Descriptor() ([]byte, []int) {
+	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *DeleteRepositoryResponse) GetWorktreesRemoved() int64 {
+	if x != nil {
+		return x.WorktreesRemoved
+	}
+	return 0
+}
+
+func (x *DeleteRepositoryResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type SyncRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Empty syncs every tracked repository; set syncs just that one.
@@ -1185,7 +1284,7 @@ type SyncRequest struct {
 
 func (x *SyncRequest) Reset() {
 	*x = SyncRequest{}
-	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[18]
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1197,7 +1296,7 @@ func (x *SyncRequest) String() string {
 func (*SyncRequest) ProtoMessage() {}
 
 func (x *SyncRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[18]
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1210,7 +1309,7 @@ func (x *SyncRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncRequest.ProtoReflect.Descriptor instead.
 func (*SyncRequest) Descriptor() ([]byte, []int) {
-	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{18}
+	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SyncRequest) GetRepository() string {
@@ -1239,7 +1338,7 @@ type SyncResponse struct {
 
 func (x *SyncResponse) Reset() {
 	*x = SyncResponse{}
-	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[19]
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1251,7 +1350,7 @@ func (x *SyncResponse) String() string {
 func (*SyncResponse) ProtoMessage() {}
 
 func (x *SyncResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[19]
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1264,7 +1363,7 @@ func (x *SyncResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncResponse.ProtoReflect.Descriptor instead.
 func (*SyncResponse) Descriptor() ([]byte, []int) {
-	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{19}
+	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SyncResponse) GetRepository() string {
@@ -1307,7 +1406,7 @@ type SyncSummary struct {
 
 func (x *SyncSummary) Reset() {
 	*x = SyncSummary{}
-	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[20]
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1319,7 +1418,7 @@ func (x *SyncSummary) String() string {
 func (*SyncSummary) ProtoMessage() {}
 
 func (x *SyncSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[20]
+	mi := &file_lumberjack_v1_lumberjack_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1332,7 +1431,7 @@ func (x *SyncSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SyncSummary.ProtoReflect.Descriptor instead.
 func (*SyncSummary) Descriptor() ([]byte, []int) {
-	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{20}
+	return file_lumberjack_v1_lumberjack_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *SyncSummary) GetStatus() SyncStatus {
@@ -1461,7 +1560,14 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\adeleted\x18\x01 \x01(\bR\adeleted\x123\n" +
 	"\x15requires_confirmation\x18\x02 \x01(\bR\x14requiresConfirmation\x12&\n" +
 	"\x0fcommits_at_risk\x18\x03 \x01(\x03R\rcommitsAtRisk\x12\x18\n" +
-	"\amessage\x18\x04 \x01(\tR\amessage\"-\n" +
+	"\amessage\x18\x04 \x01(\tR\amessage\"9\n" +
+	"\x17DeleteRepositoryRequest\x12\x1e\n" +
+	"\n" +
+	"repository\x18\x01 \x01(\tR\n" +
+	"repository\"a\n" +
+	"\x18DeleteRepositoryResponse\x12+\n" +
+	"\x11worktrees_removed\x18\x01 \x01(\x03R\x10worktreesRemoved\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"-\n" +
 	"\vSyncRequest\x12\x1e\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tR\n" +
@@ -1487,7 +1593,7 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\tCreatedBy\x12\x1a\n" +
 	"\x16CREATED_BY_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15CREATED_BY_LUMBERJACK\x10\x01\x12\x1a\n" +
-	"\x16CREATED_BY_PREEXISTING\x10\x022\x98\x06\n" +
+	"\x16CREATED_BY_PREEXISTING\x10\x022\xfd\x06\n" +
 	"\x11LumberjackService\x12E\n" +
 	"\x06Health\x12\x1c.lumberjack.v1.HealthRequest\x1a\x1d.lumberjack.v1.HealthResponse\x12]\n" +
 	"\x0eInitRepository\x12$.lumberjack.v1.InitRepositoryRequest\x1a%.lumberjack.v1.InitRepositoryResponse\x12c\n" +
@@ -1497,7 +1603,8 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\n" +
 	"ListLogins\x12 .lumberjack.v1.ListLoginsRequest\x1a!.lumberjack.v1.ListLoginsResponse\x12Z\n" +
 	"\rListWorktrees\x12#.lumberjack.v1.ListWorktreesRequest\x1a$.lumberjack.v1.ListWorktreesResponse\x12]\n" +
-	"\x0eDeleteWorktree\x12$.lumberjack.v1.DeleteWorktreeRequest\x1a%.lumberjack.v1.DeleteWorktreeResponse\x12A\n" +
+	"\x0eDeleteWorktree\x12$.lumberjack.v1.DeleteWorktreeRequest\x1a%.lumberjack.v1.DeleteWorktreeResponse\x12c\n" +
+	"\x10DeleteRepository\x12&.lumberjack.v1.DeleteRepositoryRequest\x1a'.lumberjack.v1.DeleteRepositoryResponse\x12A\n" +
 	"\x04Sync\x12\x1a.lumberjack.v1.SyncRequest\x1a\x1b.lumberjack.v1.SyncResponse0\x01BIZGgithub.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1;lumberjackv1b\x06proto3"
 
 var (
@@ -1513,7 +1620,7 @@ func file_lumberjack_v1_lumberjack_proto_rawDescGZIP() []byte {
 }
 
 var file_lumberjack_v1_lumberjack_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_lumberjack_v1_lumberjack_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_lumberjack_v1_lumberjack_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_lumberjack_v1_lumberjack_proto_goTypes = []any{
 	(SyncStatus)(0),                  // 0: lumberjack.v1.SyncStatus
 	(CreatedBy)(0),                   // 1: lumberjack.v1.CreatedBy
@@ -1535,24 +1642,26 @@ var file_lumberjack_v1_lumberjack_proto_goTypes = []any{
 	(*ListWorktreesResponse)(nil),    // 17: lumberjack.v1.ListWorktreesResponse
 	(*DeleteWorktreeRequest)(nil),    // 18: lumberjack.v1.DeleteWorktreeRequest
 	(*DeleteWorktreeResponse)(nil),   // 19: lumberjack.v1.DeleteWorktreeResponse
-	(*SyncRequest)(nil),              // 20: lumberjack.v1.SyncRequest
-	(*SyncResponse)(nil),             // 21: lumberjack.v1.SyncResponse
-	(*SyncSummary)(nil),              // 22: lumberjack.v1.SyncSummary
-	(*timestamppb.Timestamp)(nil),    // 23: google.protobuf.Timestamp
+	(*DeleteRepositoryRequest)(nil),  // 20: lumberjack.v1.DeleteRepositoryRequest
+	(*DeleteRepositoryResponse)(nil), // 21: lumberjack.v1.DeleteRepositoryResponse
+	(*SyncRequest)(nil),              // 22: lumberjack.v1.SyncRequest
+	(*SyncResponse)(nil),             // 23: lumberjack.v1.SyncResponse
+	(*SyncSummary)(nil),              // 24: lumberjack.v1.SyncSummary
+	(*timestamppb.Timestamp)(nil),    // 25: google.protobuf.Timestamp
 }
 var file_lumberjack_v1_lumberjack_proto_depIdxs = []int32{
-	23, // 0: lumberjack.v1.Repository.last_synced_at:type_name -> google.protobuf.Timestamp
+	25, // 0: lumberjack.v1.Repository.last_synced_at:type_name -> google.protobuf.Timestamp
 	0,  // 1: lumberjack.v1.Repository.last_sync_status:type_name -> lumberjack.v1.SyncStatus
-	23, // 2: lumberjack.v1.Repository.created_at:type_name -> google.protobuf.Timestamp
+	25, // 2: lumberjack.v1.Repository.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: lumberjack.v1.Worktree.created_by:type_name -> lumberjack.v1.CreatedBy
-	23, // 4: lumberjack.v1.Worktree.last_synced_at:type_name -> google.protobuf.Timestamp
-	23, // 5: lumberjack.v1.HealthResponse.started_at:type_name -> google.protobuf.Timestamp
+	25, // 4: lumberjack.v1.Worktree.last_synced_at:type_name -> google.protobuf.Timestamp
+	25, // 5: lumberjack.v1.HealthResponse.started_at:type_name -> google.protobuf.Timestamp
 	2,  // 6: lumberjack.v1.InitRepositoryResponse.repository:type_name -> lumberjack.v1.Repository
 	2,  // 7: lumberjack.v1.ListRepositoriesResponse.repositories:type_name -> lumberjack.v1.Repository
 	2,  // 8: lumberjack.v1.GetRepositoryResponse.repository:type_name -> lumberjack.v1.Repository
 	2,  // 9: lumberjack.v1.SetLoginResponse.repository:type_name -> lumberjack.v1.Repository
 	3,  // 10: lumberjack.v1.ListWorktreesResponse.worktrees:type_name -> lumberjack.v1.Worktree
-	22, // 11: lumberjack.v1.SyncResponse.summary:type_name -> lumberjack.v1.SyncSummary
+	24, // 11: lumberjack.v1.SyncResponse.summary:type_name -> lumberjack.v1.SyncSummary
 	0,  // 12: lumberjack.v1.SyncSummary.status:type_name -> lumberjack.v1.SyncStatus
 	4,  // 13: lumberjack.v1.LumberjackService.Health:input_type -> lumberjack.v1.HealthRequest
 	6,  // 14: lumberjack.v1.LumberjackService.InitRepository:input_type -> lumberjack.v1.InitRepositoryRequest
@@ -1562,18 +1671,20 @@ var file_lumberjack_v1_lumberjack_proto_depIdxs = []int32{
 	14, // 18: lumberjack.v1.LumberjackService.ListLogins:input_type -> lumberjack.v1.ListLoginsRequest
 	16, // 19: lumberjack.v1.LumberjackService.ListWorktrees:input_type -> lumberjack.v1.ListWorktreesRequest
 	18, // 20: lumberjack.v1.LumberjackService.DeleteWorktree:input_type -> lumberjack.v1.DeleteWorktreeRequest
-	20, // 21: lumberjack.v1.LumberjackService.Sync:input_type -> lumberjack.v1.SyncRequest
-	5,  // 22: lumberjack.v1.LumberjackService.Health:output_type -> lumberjack.v1.HealthResponse
-	7,  // 23: lumberjack.v1.LumberjackService.InitRepository:output_type -> lumberjack.v1.InitRepositoryResponse
-	9,  // 24: lumberjack.v1.LumberjackService.ListRepositories:output_type -> lumberjack.v1.ListRepositoriesResponse
-	11, // 25: lumberjack.v1.LumberjackService.GetRepository:output_type -> lumberjack.v1.GetRepositoryResponse
-	13, // 26: lumberjack.v1.LumberjackService.SetLogin:output_type -> lumberjack.v1.SetLoginResponse
-	15, // 27: lumberjack.v1.LumberjackService.ListLogins:output_type -> lumberjack.v1.ListLoginsResponse
-	17, // 28: lumberjack.v1.LumberjackService.ListWorktrees:output_type -> lumberjack.v1.ListWorktreesResponse
-	19, // 29: lumberjack.v1.LumberjackService.DeleteWorktree:output_type -> lumberjack.v1.DeleteWorktreeResponse
-	21, // 30: lumberjack.v1.LumberjackService.Sync:output_type -> lumberjack.v1.SyncResponse
-	22, // [22:31] is the sub-list for method output_type
-	13, // [13:22] is the sub-list for method input_type
+	20, // 21: lumberjack.v1.LumberjackService.DeleteRepository:input_type -> lumberjack.v1.DeleteRepositoryRequest
+	22, // 22: lumberjack.v1.LumberjackService.Sync:input_type -> lumberjack.v1.SyncRequest
+	5,  // 23: lumberjack.v1.LumberjackService.Health:output_type -> lumberjack.v1.HealthResponse
+	7,  // 24: lumberjack.v1.LumberjackService.InitRepository:output_type -> lumberjack.v1.InitRepositoryResponse
+	9,  // 25: lumberjack.v1.LumberjackService.ListRepositories:output_type -> lumberjack.v1.ListRepositoriesResponse
+	11, // 26: lumberjack.v1.LumberjackService.GetRepository:output_type -> lumberjack.v1.GetRepositoryResponse
+	13, // 27: lumberjack.v1.LumberjackService.SetLogin:output_type -> lumberjack.v1.SetLoginResponse
+	15, // 28: lumberjack.v1.LumberjackService.ListLogins:output_type -> lumberjack.v1.ListLoginsResponse
+	17, // 29: lumberjack.v1.LumberjackService.ListWorktrees:output_type -> lumberjack.v1.ListWorktreesResponse
+	19, // 30: lumberjack.v1.LumberjackService.DeleteWorktree:output_type -> lumberjack.v1.DeleteWorktreeResponse
+	21, // 31: lumberjack.v1.LumberjackService.DeleteRepository:output_type -> lumberjack.v1.DeleteRepositoryResponse
+	23, // 32: lumberjack.v1.LumberjackService.Sync:output_type -> lumberjack.v1.SyncResponse
+	23, // [23:33] is the sub-list for method output_type
+	13, // [13:23] is the sub-list for method input_type
 	13, // [13:13] is the sub-list for extension type_name
 	13, // [13:13] is the sub-list for extension extendee
 	0,  // [0:13] is the sub-list for field type_name
@@ -1586,14 +1697,14 @@ func file_lumberjack_v1_lumberjack_proto_init() {
 	}
 	file_lumberjack_v1_lumberjack_proto_msgTypes[0].OneofWrappers = []any{}
 	file_lumberjack_v1_lumberjack_proto_msgTypes[1].OneofWrappers = []any{}
-	file_lumberjack_v1_lumberjack_proto_msgTypes[20].OneofWrappers = []any{}
+	file_lumberjack_v1_lumberjack_proto_msgTypes[22].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lumberjack_v1_lumberjack_proto_rawDesc), len(file_lumberjack_v1_lumberjack_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
