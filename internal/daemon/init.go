@@ -17,11 +17,11 @@ import (
 // defaults, stores a repository row, and adopts any worktrees git already has
 // checked out for it (directories created by hand or left by a prior run) so
 // they are tracked from the outset rather than re-created on the next sync. It
-// returns the branches of the worktrees adopted, and database.ErrRepositoryExists
-// if the path is already tracked.
+// returns the adopted worktrees as per-branch changes, and
+// database.ErrRepositoryExists if the path is already tracked.
 //
 // localPath must be absolute; the CLI resolves "." before calling.
-func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema.Repository, []string, error) {
+func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema.Repository, []WorktreeChange, error) {
 	clean := filepath.Clean(localPath)
 
 	remote, err := s.git.DefaultRemote(ctx, clean)
@@ -78,9 +78,10 @@ func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema
 // adoptExistingWorktrees records every worktree git already has checked out for
 // repo that Lumberjack is not tracking as a preexisting worktree (matched by
 // branch, with no PR number yet — a later sync links it to its open PR). It
-// returns the adopted branches. Reading worktrees is a purely local git
-// operation, so no gh account switch is needed. Callers must hold s.mu.
-func (s *Service) adoptExistingWorktrees(ctx context.Context, repo *schema.Repository) ([]string, error) {
+// returns the adopted worktrees as per-branch changes (each ActionAdopted with
+// no PR number yet). Reading worktrees is a purely local git operation, so no
+// gh account switch is needed. Callers must hold s.mu.
+func (s *Service) adoptExistingWorktrees(ctx context.Context, repo *schema.Repository) ([]WorktreeChange, error) {
 	stored, err := s.db.ListWorktrees(ctx, repo.ID)
 	if err != nil {
 		return nil, err
@@ -93,7 +94,7 @@ func (s *Service) adoptExistingWorktrees(ctx context.Context, repo *schema.Repos
 	if err != nil {
 		return nil, fmt.Errorf("listing existing worktrees: %w", err)
 	}
-	var adopted []string
+	var adopted []WorktreeChange
 	for _, r := range refs {
 		row := &schema.Worktree{
 			RepositoryID:  repo.ID,
@@ -104,7 +105,7 @@ func (s *Service) adoptExistingWorktrees(ctx context.Context, repo *schema.Repos
 		if err := s.db.CreateWorktree(ctx, row); err != nil {
 			return adopted, fmt.Errorf("recording adopted worktree %s: %w", r.Dir, err)
 		}
-		adopted = append(adopted, r.Branch)
+		adopted = append(adopted, WorktreeChange{Branch: r.Branch, Action: ActionAdopted})
 	}
 	return adopted, nil
 }

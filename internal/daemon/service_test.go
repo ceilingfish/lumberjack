@@ -214,8 +214,8 @@ func TestInitRepositoryAdoptsExistingWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitRepository: %v", err)
 	}
-	if len(adopted) != 1 || adopted[0] != "feature/x" {
-		t.Errorf("adopted=%v, want [feature/x]", adopted)
+	if len(adopted) != 1 || adopted[0].Branch != "feature/x" || adopted[0].Action != ActionAdopted {
+		t.Errorf("adopted=%v, want [{feature/x adopted}]", adopted)
 	}
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(wts) != 1 {
@@ -252,17 +252,17 @@ func TestSyncLinksAdoptedWorktreeToPR(t *testing.T) {
 	h.gh.prs = []github.PR{{Number: 7, HeadBranch: "feature/x"}}
 	h.git.addErr["feature/x"] = errors.New("a branch named 'feature/x' already exists")
 
-	var msgs []string
+	var changes []WorktreeChange
 	created, _, err := h.svc.SyncRepository(context.Background(), repo,
-		func(m string) { msgs = append(msgs, m) })
+		func(c WorktreeChange) { changes = append(changes, c) })
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if created != 0 {
 		t.Errorf("created=%d, want 0 (linked, not created)", created)
 	}
-	if !containsSubstr(msgs, "feature/x: updated") {
-		t.Errorf("expected an updated line, got %v", msgs)
+	if !hasAction(changes, "feature/x", ActionUpdated) {
+		t.Errorf("expected an updated change, got %v", changes)
 	}
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(wts) != 1 {
@@ -593,8 +593,8 @@ func TestSyncCreatesWorktrees(t *testing.T) {
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}, {Number: 2, HeadBranch: "b"}}
 
-	var msgs []string
-	created, removed, err := h.svc.SyncRepository(context.Background(), repo, func(m string) { msgs = append(msgs, m) })
+	var changes []WorktreeChange
+	created, removed, err := h.svc.SyncRepository(context.Background(), repo, func(c WorktreeChange) { changes = append(changes, c) })
 	if err != nil {
 		t.Fatalf("SyncRepository: %v", err)
 	}
@@ -615,8 +615,8 @@ func TestSyncCreatesWorktrees(t *testing.T) {
 	if !found {
 		t.Errorf("expected worktree dir n-a, got %+v", wts)
 	}
-	if len(msgs) == 0 {
-		t.Error("expected progress messages")
+	if len(changes) == 0 {
+		t.Error("expected progress changes")
 	}
 }
 
@@ -669,8 +669,8 @@ func TestSyncRetainsDirtyClosedWorktree(t *testing.T) {
 	h.git.dirty[wts[0].DirectoryPath] = true
 	h.gh.prs = nil
 
-	var msgs []string
-	_, removed, err := h.svc.SyncRepository(context.Background(), repo, func(m string) { msgs = append(msgs, m) })
+	var changes []WorktreeChange
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, func(c WorktreeChange) { changes = append(changes, c) })
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
@@ -680,42 +680,42 @@ func TestSyncRetainsDirtyClosedWorktree(t *testing.T) {
 	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 1 {
 		t.Errorf("expected worktree retained, got %d", len(got))
 	}
-	if !containsSubstr(msgs, "a: retained") {
-		t.Errorf("expected a per-branch retained line, got %v", msgs)
+	if !hasAction(changes, "a", ActionRetained) {
+		t.Errorf("expected a per-branch retained change, got %v", changes)
 	}
 }
 
-// TestSyncProgressLinesPerBranch checks the per-branch progress vocabulary:
+// TestSyncProgressChangesPerBranch checks the per-branch action vocabulary:
 // a new PR reports "checked out"; once its PR closes it reports "deleted".
-func TestSyncProgressLinesPerBranch(t *testing.T) {
+func TestSyncProgressChangesPerBranch(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
 
-	var created []string
+	var created []WorktreeChange
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo,
-		func(m string) { created = append(created, m) }); err != nil {
+		func(c WorktreeChange) { created = append(created, c) }); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if !containsSubstr(created, "a: checked out") {
-		t.Errorf("expected a checked-out line, got %v", created)
+	if !hasAction(created, "a", ActionCheckedOut) {
+		t.Errorf("expected a checked-out change, got %v", created)
 	}
 
 	h.gh.prs = nil
-	var deleted []string
+	var deleted []WorktreeChange
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo,
-		func(m string) { deleted = append(deleted, m) }); err != nil {
+		func(c WorktreeChange) { deleted = append(deleted, c) }); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	if !containsSubstr(deleted, "a: deleted") {
-		t.Errorf("expected a deleted line, got %v", deleted)
+	if !hasAction(deleted, "a", ActionDeleted) {
+		t.Errorf("expected a deleted change, got %v", deleted)
 	}
 }
 
-// containsSubstr reports whether any element of msgs contains sub.
-func containsSubstr(msgs []string, sub string) bool {
-	for _, m := range msgs {
-		if strings.Contains(m, sub) {
+// hasAction reports whether changes contains one for branch with the given action.
+func hasAction(changes []WorktreeChange, branch string, action WorktreeAction) bool {
+	for _, c := range changes {
+		if c.Branch == branch && c.Action == action {
 			return true
 		}
 	}
@@ -776,17 +776,17 @@ func TestSyncAdoptsExistingWorktree(t *testing.T) {
 	// Force AddWorktree to fail so the test proves adoption avoids it entirely.
 	h.git.addErr["feature/x"] = errors.New("a branch named 'feature/x' already exists")
 
-	var msgs []string
+	var changes []WorktreeChange
 	created, _, err := h.svc.SyncRepository(context.Background(), repo,
-		func(m string) { msgs = append(msgs, m) })
+		func(c WorktreeChange) { changes = append(changes, c) })
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if created != 1 {
 		t.Errorf("created=%d, want 1 (adopted)", created)
 	}
-	if !containsSubstr(msgs, "feature/x: adopted") {
-		t.Errorf("expected an adopted line, got %v", msgs)
+	if !hasAction(changes, "feature/x", ActionAdopted) {
+		t.Errorf("expected an adopted change, got %v", changes)
 	}
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(wts) != 1 {

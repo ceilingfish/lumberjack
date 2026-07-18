@@ -30,19 +30,34 @@ func newSyncCmd() *cobra.Command {
 	}
 }
 
-// runSync streams a sync of ref (empty = all repositories) and renders the
-// progress lines and per-repository summaries. Shared by `sync` and
-// `repositories --sync`.
+// runSync streams a sync of ref (empty = all repositories) and renders, per
+// repository, a branch/PR/action table of the changes followed by a summary
+// line. Shared by `sync` and `repositories --sync`.
 func runSync(ctx context.Context, cmd *cobra.Command, c *client.Client, ref string) error {
 	out := cmd.OutOrStdout()
+	// Buffer each repo's per-branch changes so the table can be column-aligned
+	// and printed once the repo completes. Repos stream sequentially, but keying
+	// by name keeps this correct regardless of interleaving.
+	changes := map[string][]*lumberjackv1.WorktreeChange{}
 	return c.Sync(ctx, ref, func(e *lumberjackv1.SyncResponse) error {
+		repo := e.GetRepository()
 		if !e.GetCompleted() {
-			_, err := fmt.Fprintf(out, "%s: %s\n", e.GetRepository(), e.GetMessage())
+			if ch := e.GetChange(); ch != nil {
+				changes[repo] = append(changes[repo], ch)
+			} else if msg := e.GetMessage(); msg != "" {
+				if _, err := fmt.Fprintf(out, "%s: %s\n", repo, msg); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if err := renderWorktreeChanges(out, changes[repo]); err != nil {
 			return err
 		}
+		delete(changes, repo)
 		s := e.GetSummary()
 		_, err := fmt.Fprintf(out, "%s: %s (+%d worktree(s), -%d)%s\n",
-			e.GetRepository(), summaryStatus(s),
+			repo, summaryStatus(s),
 			s.GetWorktreesCreated(), s.GetWorktreesRemoved(), summaryError(s))
 		return err
 	})

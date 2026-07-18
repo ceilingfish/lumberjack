@@ -90,6 +90,56 @@ func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree) error {
 	return t.flush()
 }
 
+// renderWorktreeChanges prints a branch/PR/action table of the per-branch
+// changes a sync or init made. It writes nothing when there are no changes.
+func renderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange) error {
+	if len(changes) == 0 {
+		return nil
+	}
+	t := newTabW(w)
+	t.row("BRANCH\tPR\tACTION\n")
+	for _, c := range changes {
+		t.row("%s\t%s\t%s\n", c.GetBranch(), changePR(c), changeAction(c))
+	}
+	return t.flush()
+}
+
+// changePR renders a change's PR reference, "-" when it has none.
+func changePR(c *lumberjackv1.WorktreeChange) string {
+	if c.PrNumber == nil {
+		return "-"
+	}
+	return fmt.Sprintf("#%d", c.GetPrNumber())
+}
+
+// changeAction renders the action verb, appending its detail in parentheses
+// when present (e.g. why a worktree was retained).
+func changeAction(c *lumberjackv1.WorktreeChange) string {
+	verb := actionVerb(c.GetAction())
+	if d := c.GetDetail(); d != "" {
+		return verb + " (" + d + ")"
+	}
+	return verb
+}
+
+// actionVerb maps the wire action enum onto its display verb.
+func actionVerb(a lumberjackv1.WorktreeAction) string {
+	switch a {
+	case lumberjackv1.WorktreeAction_WORKTREE_ACTION_CHECKED_OUT:
+		return "checked out"
+	case lumberjackv1.WorktreeAction_WORKTREE_ACTION_ADOPTED:
+		return "adopted"
+	case lumberjackv1.WorktreeAction_WORKTREE_ACTION_UPDATED:
+		return "updated"
+	case lumberjackv1.WorktreeAction_WORKTREE_ACTION_DELETED:
+		return "deleted"
+	case lumberjackv1.WorktreeAction_WORKTREE_ACTION_RETAINED:
+		return "retained"
+	default:
+		return "unknown"
+	}
+}
+
 // worktreeStatus renders the reconciliation state, prefixing a warning marker
 // when the worktree needs attention.
 func worktreeStatus(wt *lumberjackv1.Worktree) string {

@@ -80,6 +80,33 @@ enum CreatedBy {
   CREATED_BY_PREEXISTING = 2;
 }
 
+// WorktreeAction is what a sync (or init) did to a single branch's worktree,
+// reported per branch so the CLI can render a branch/PR/action table.
+enum WorktreeAction {
+  WORKTREE_ACTION_UNSPECIFIED = 0;
+  // Created a new worktree for an open PR.
+  WORKTREE_ACTION_CHECKED_OUT = 1;
+  // Adopted a directory git already had checked out into tracking.
+  WORKTREE_ACTION_ADOPTED = 2;
+  // Linked an already-tracked worktree to its open PR.
+  WORKTREE_ACTION_UPDATED = 3;
+  // Removed a worktree whose PR has closed.
+  WORKTREE_ACTION_DELETED = 4;
+  // Kept a closed-PR worktree that still holds unmerged local work.
+  WORKTREE_ACTION_RETAINED = 5;
+}
+
+// WorktreeChange is one per-branch progress row: what happened to the worktree
+// for a branch, the PR it relates to (absent when there is none, e.g. an
+// adoption before its PR is known), and an optional human-readable detail
+// (e.g. the reason a worktree was retained).
+message WorktreeChange {
+  string branch = 1;
+  optional int64 pr_number = 2;
+  WorktreeAction action = 3;
+  string detail = 4;
+}
+
 // Repository is one tracked repo. Fields mirror the `repositories` table
 // (docs/schema.md); mutable PR state is never carried here.
 message Repository {
@@ -142,10 +169,15 @@ message InitRepositoryRequest {
 
 message InitRepositoryResponse {
   Repository repository = 1;
-  // Branches of the worktrees adopted into tracking during init — directories
-  // git had already checked out for this repo but Lumberjack did not yet track.
-  // Empty for a fresh checkout with no sibling worktrees.
-  repeated string adopted_branches = 2;
+  // Deprecated: superseded by `adopted` (field 3), which carries the full
+  // per-branch change so init can render the same branch/PR/action table as
+  // sync. No longer populated by the daemon.
+  repeated string adopted_branches = 2 [deprecated = true];
+  // The worktrees adopted into tracking during init — directories git had
+  // already checked out for this repo but Lumberjack did not yet track (each
+  // with action ADOPTED and no PR number yet). Empty for a fresh checkout with
+  // no sibling worktrees.
+  repeated WorktreeChange adopted = 3;
 }
 
 message ListRepositoriesRequest {}
@@ -240,12 +272,17 @@ message SyncRequest {
 message SyncResponse {
   // Which repository this event concerns.
   string repository = 1;
-  // Human-readable progress line (e.g. "creating worktree for PR #42").
+  // Human-readable progress line, for events that are not a per-branch worktree
+  // change (worktree changes use `change` instead).
   string message = 2;
   // True on the final event for this repository.
   bool completed = 3;
   // Populated when completed = true.
   SyncSummary summary = 4;
+  // A per-branch worktree change (checked out / adopted / updated / deleted /
+  // retained), for progress events that concern one branch. Absent on the
+  // completion event and on plain `message` events.
+  WorktreeChange change = 5;
 }
 
 message SyncSummary {

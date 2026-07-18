@@ -51,6 +51,34 @@ func toProtoWorktree(v WorktreeView) *lumberjackv1.Worktree {
 	return pb
 }
 
+// toProtoChange maps a domain per-branch worktree change onto its wire message.
+func toProtoChange(c WorktreeChange) *lumberjackv1.WorktreeChange {
+	return &lumberjackv1.WorktreeChange{
+		Branch:   c.Branch,
+		PrNumber: c.PRNumber,
+		Action:   toProtoAction(c.Action),
+		Detail:   c.Detail,
+	}
+}
+
+// toProtoAction maps a domain WorktreeAction onto the wire enum.
+func toProtoAction(a WorktreeAction) lumberjackv1.WorktreeAction {
+	switch a {
+	case ActionCheckedOut:
+		return lumberjackv1.WorktreeAction_WORKTREE_ACTION_CHECKED_OUT
+	case ActionAdopted:
+		return lumberjackv1.WorktreeAction_WORKTREE_ACTION_ADOPTED
+	case ActionUpdated:
+		return lumberjackv1.WorktreeAction_WORKTREE_ACTION_UPDATED
+	case ActionDeleted:
+		return lumberjackv1.WorktreeAction_WORKTREE_ACTION_DELETED
+	case ActionRetained:
+		return lumberjackv1.WorktreeAction_WORKTREE_ACTION_RETAINED
+	default:
+		return lumberjackv1.WorktreeAction_WORKTREE_ACTION_UNSPECIFIED
+	}
+}
+
 // toProtoTimestamp maps an optional time onto an optional protobuf timestamp.
 func toProtoTimestamp(t *time.Time) *timestamppb.Timestamp {
 	if t == nil {

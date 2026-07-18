@@ -26,7 +26,7 @@ type stubService struct {
 	deletedForced  bool // set when a forced delete arrived
 	getNotFound    bool
 	syncEvents     []*lumberjackv1.SyncResponse
-	initAdopted    []string // branches InitRepository reports as adopted
+	initAdopted    []*lumberjackv1.WorktreeChange // worktrees InitRepository reports as adopted
 	lastInitPath   string
 	lastSyncTarget string
 	lastGetRef     string
@@ -60,7 +60,7 @@ func (s *stubService) InitRepository(_ context.Context, req *lumberjackv1.InitRe
 			LocalPath: req.GetLocalPath(), GithubOwner: "o", GithubName: "n",
 			WorktreeParentDir: filepath.Dir(req.GetLocalPath()), DirPrefix: "n",
 		},
-		AdoptedBranches: s.initAdopted,
+		Adopted: s.initAdopted,
 	}, nil
 }
 
@@ -169,14 +169,18 @@ func TestCmdInit(t *testing.T) {
 }
 
 func TestCmdInitReportsAdoptedWorktrees(t *testing.T) {
-	stub := &stubService{initAdopted: []string{"feature/x", "fix/y"}}
+	stub := &stubService{initAdopted: []*lumberjackv1.WorktreeChange{
+		{Branch: "feature/x", Action: lumberjackv1.WorktreeAction_WORKTREE_ACTION_ADOPTED},
+		{Branch: "fix/y", Action: lumberjackv1.WorktreeAction_WORKTREE_ACTION_ADOPTED},
+	}}
 	serveStub(t, stub)
 
 	out, err := run(t, "", "init", ".")
 	if err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	for _, want := range []string{"feature/x: adopted", "fix/y: adopted"} {
+	// A branch/PR/action table: header plus a row per adopted branch.
+	for _, want := range []string{"BRANCH", "PR", "ACTION", "feature/x", "fix/y", "adopted"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output %q missing %q", out, want)
 		}
@@ -209,8 +213,12 @@ func TestCmdRepositoriesList(t *testing.T) {
 }
 
 func TestCmdRepositoriesSync(t *testing.T) {
+	pr := int64(1)
 	stub := &stubService{syncEvents: []*lumberjackv1.SyncResponse{
-		{Repository: "a", Message: "creating worktree for PR #1"},
+		{Repository: "a", Change: &lumberjackv1.WorktreeChange{
+			Branch: "feature/x", PrNumber: &pr,
+			Action: lumberjackv1.WorktreeAction_WORKTREE_ACTION_CHECKED_OUT,
+		}},
 		{Repository: "a", Completed: true, Summary: &lumberjackv1.SyncSummary{WorktreesCreated: 1}},
 	}}
 	serveStub(t, stub)
@@ -221,8 +229,10 @@ func TestCmdRepositoriesSync(t *testing.T) {
 	if stub.lastSyncTarget != "" {
 		t.Errorf("expected all-repos sync (empty target), got %q", stub.lastSyncTarget)
 	}
-	if !strings.Contains(out, "creating worktree") || !strings.Contains(out, "synced") {
-		t.Errorf("out = %q", out)
+	for _, want := range []string{"BRANCH", "feature/x", "#1", "checked out", "synced"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("out %q missing %q", out, want)
+		}
 	}
 }
 

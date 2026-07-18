@@ -55,9 +55,13 @@ func (s *Server) InitRepository(ctx context.Context, req *lumberjackv1.InitRepos
 	if err != nil {
 		return nil, toStatus(err)
 	}
+	adoptedPB := make([]*lumberjackv1.WorktreeChange, len(adopted))
+	for i, c := range adopted {
+		adoptedPB[i] = toProtoChange(c)
+	}
 	return &lumberjackv1.InitRepositoryResponse{
-		Repository:      toProtoRepository(repo),
-		AdoptedBranches: adopted,
+		Repository: toProtoRepository(repo),
+		Adopted:    adoptedPB,
 	}, nil
 }
 
@@ -207,10 +211,10 @@ func (s *Server) Sync(req *lumberjackv1.SyncRequest, stream grpc.ServerStreaming
 // syncOne runs one repository's sync, streaming progress then a final summary.
 func (s *Server) syncOne(stream grpc.ServerStreamingServer[lumberjackv1.SyncResponse], repo *schema.Repository) error {
 	name := displayName(repo)
-	progress := func(msg string) {
+	progress := func(c WorktreeChange) {
 		// A send error (client hung up) surfaces via the next Send in the
-		// summary path; progress lines are best-effort.
-		_ = stream.Send(&lumberjackv1.SyncResponse{Repository: name, Message: msg})
+		// summary path; progress events are best-effort.
+		_ = stream.Send(&lumberjackv1.SyncResponse{Repository: name, Change: toProtoChange(c)})
 	}
 
 	created, removed, syncErr := s.svc.SyncRepository(stream.Context(), repo, progress)

@@ -52,12 +52,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 			repo.GetLocalPath(), repo.GetWorktreeParentDir()); err != nil {
 			return err
 		}
-		// One line per branch whose already-checked-out worktree we adopted.
-		for _, branch := range adopted {
-			if _, err := fmt.Fprintf(out, "%s: adopted\n", branch); err != nil {
-				return err
-			}
-		}
-		return nil
+		// A branch/PR/action table of the worktrees adopted during registration.
+		return renderWorktreeChanges(out, adopted)
 	})
 }

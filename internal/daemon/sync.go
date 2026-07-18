@@ -69,13 +69,36 @@ func NewService(db *database.Client, git GitOps, gh GHOps) *Service {
 	return &Service{db: db, git: git, gh: gh, now: time.Now}
 }
 
-// progressFn receives human-readable progress lines during a sync. It may be
-// nil.
-type progressFn func(msg string)
+// WorktreeAction is what a sync did to one branch's worktree — the domain
+// mirror of the lumberjack.v1.WorktreeAction enum, reported per branch so the
+// CLI can render a branch/PR/action table.
+type WorktreeAction string
 
-func (p progressFn) emit(format string, args ...any) {
+// The WorktreeAction values, one per thing a sync/init can do to a worktree.
+const (
+	ActionCheckedOut WorktreeAction = "checked out"
+	ActionAdopted    WorktreeAction = "adopted"
+	ActionUpdated    WorktreeAction = "updated"
+	ActionDeleted    WorktreeAction = "deleted"
+	ActionRetained   WorktreeAction = "retained"
+)
+
+// WorktreeChange is one per-branch progress event: what happened to a branch's
+// worktree, the PR it relates to (nil when none, e.g. adoption before its PR is
+// known), and an optional detail (e.g. why a worktree was retained).
+type WorktreeChange struct {
+	Branch   string
+	PRNumber *int64
+	Action   WorktreeAction
+	Detail   string
+}
+
+// progressFn receives per-branch worktree changes during a sync. It may be nil.
+type progressFn func(WorktreeChange)
+
+func (p progressFn) send(c WorktreeChange) {
 	if p != nil {
-		p(fmt.Sprintf(format, args...))
+		p(c)
 	}
 }
 
@@ -339,7 +362,7 @@ func (s *Service) linkWorktree(
 		*errs = append(*errs, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err))
 		return
 	}
-	progress.emit("%s: updated (linked to PR #%d)", pr.HeadBranch, num)
+	progress.send(WorktreeChange{Branch: pr.HeadBranch, PRNumber: &n, Action: ActionUpdated})
 }
 
 // adoptWorktree records an already-checked-out directory as a preexisting
@@ -359,7 +382,7 @@ func (s *Service) adoptWorktree(
 		*errs = append(*errs, fmt.Errorf("recording adopted worktree for PR #%d: %w", num, cerr))
 		return false
 	}
-	progress.emit("%s: adopted (PR #%d)", pr.HeadBranch, num)
+	progress.send(WorktreeChange{Branch: pr.HeadBranch, PRNumber: &n, Action: ActionAdopted})
 	return true
 }
 
@@ -386,7 +409,7 @@ func (s *Service) createWorktree(
 		_ = s.git.RemoveWorktree(ctx, repo.LocalPath, dir, true)
 		return "", false
 	}
-	progress.emit("%s: checked out (PR #%d)", pr.HeadBranch, num)
+	progress.send(WorktreeChange{Branch: pr.HeadBranch, PRNumber: &n, Action: ActionCheckedOut})
 	return dir, true
 }
 
@@ -490,7 +513,10 @@ func (s *Service) removeOne(
 		return false
 	}
 	if st.NeedsReconciliation {
-		progress.emit("%s: retained (%s)", wt.BranchName, st.Note)
+		progress.send(WorktreeChange{
+			Branch: wt.BranchName, PRNumber: wt.GithubPRNumber,
+			Action: ActionRetained, Detail: st.Note,
+		})
 		return false
 	}
 	if !st.Missing {
@@ -503,7 +529,10 @@ func (s *Service) removeOne(
 		*errs = append(*errs, derr)
 		return false
 	}
-	progress.emit("%s: deleted (PR closed)", wt.BranchName)
+	progress.send(WorktreeChange{
+		Branch: wt.BranchName, PRNumber: wt.GithubPRNumber,
+		Action: ActionDeleted, Detail: "PR closed",
+	})
 	return true
 }
 
