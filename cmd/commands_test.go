@@ -26,6 +26,7 @@ type stubService struct {
 	deletedForced  bool // set when a forced delete arrived
 	getNotFound    bool
 	syncEvents     []*lumberjackv1.SyncResponse
+	initAdopted    []string // branches InitRepository reports as adopted
 	lastInitPath   string
 	lastSyncTarget string
 	lastGetRef     string
@@ -54,10 +55,13 @@ func (s *stubService) ListLogins(context.Context, *lumberjackv1.ListLoginsReques
 
 func (s *stubService) InitRepository(_ context.Context, req *lumberjackv1.InitRepositoryRequest) (*lumberjackv1.InitRepositoryResponse, error) {
 	s.lastInitPath = req.GetLocalPath()
-	return &lumberjackv1.InitRepositoryResponse{Repository: &lumberjackv1.Repository{
-		LocalPath: req.GetLocalPath(), GithubOwner: "o", GithubName: "n",
-		WorktreeParentDir: filepath.Dir(req.GetLocalPath()), DirPrefix: "n",
-	}}, nil
+	return &lumberjackv1.InitRepositoryResponse{
+		Repository: &lumberjackv1.Repository{
+			LocalPath: req.GetLocalPath(), GithubOwner: "o", GithubName: "n",
+			WorktreeParentDir: filepath.Dir(req.GetLocalPath()), DirPrefix: "n",
+		},
+		AdoptedBranches: s.initAdopted,
+	}, nil
 }
 
 func (s *stubService) ListRepositories(context.Context, *lumberjackv1.ListRepositoriesRequest) (*lumberjackv1.ListRepositoriesResponse, error) {
@@ -161,6 +165,21 @@ func TestCmdInit(t *testing.T) {
 	}
 	if !filepath.IsAbs(stub.lastInitPath) {
 		t.Errorf("init path should be absolute: %q", stub.lastInitPath)
+	}
+}
+
+func TestCmdInitReportsAdoptedWorktrees(t *testing.T) {
+	stub := &stubService{initAdopted: []string{"feature/x", "fix/y"}}
+	serveStub(t, stub)
+
+	out, err := run(t, "", "init", ".")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	for _, want := range []string{"feature/x: adopted", "fix/y: adopted"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output %q missing %q", out, want)
+		}
 	}
 }
 

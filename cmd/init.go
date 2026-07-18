@@ -52,10 +52,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 			repo.GetLocalPath(), repo.GetWorktreeParentDir()); err != nil {
 			return err
 		}
-		if adopted > 0 {
-			if _, err := fmt.Fprintf(out,
-				"Adopted %d existing worktree(s) already checked out for this repository\n",
-				adopted); err != nil {
+		// One line per branch whose already-checked-out worktree we adopted.
+		for _, branch := range adopted {
+			if _, err := fmt.Fprintf(out, "%s: adopted\n", branch); err != nil {
 				return err
 			}
 		}

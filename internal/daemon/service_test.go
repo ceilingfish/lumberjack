@@ -214,8 +214,8 @@ func TestInitRepositoryAdoptsExistingWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitRepository: %v", err)
 	}
-	if adopted != 1 {
-		t.Errorf("adopted=%d, want 1", adopted)
+	if len(adopted) != 1 || adopted[0] != "feature/x" {
+		t.Errorf("adopted=%v, want [feature/x]", adopted)
 	}
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(wts) != 1 {
@@ -242,8 +242,8 @@ func TestSyncLinksAdoptedWorktreeToPR(t *testing.T) {
 	}
 	// Init adopts the hand-created worktree with no PR number.
 	repo, adopted, err := h.svc.InitRepository(context.Background(), dir)
-	if err != nil || adopted != 1 {
-		t.Fatalf("init: adopted=%d err=%v", adopted, err)
+	if err != nil || len(adopted) != 1 {
+		t.Fatalf("init: adopted=%v err=%v", adopted, err)
 	}
 
 	// A sync then sees an open PR on that branch: it must link the existing row,
@@ -252,12 +252,17 @@ func TestSyncLinksAdoptedWorktreeToPR(t *testing.T) {
 	h.gh.prs = []github.PR{{Number: 7, HeadBranch: "feature/x"}}
 	h.git.addErr["feature/x"] = errors.New("a branch named 'feature/x' already exists")
 
-	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	var msgs []string
+	created, _, err := h.svc.SyncRepository(context.Background(), repo,
+		func(m string) { msgs = append(msgs, m) })
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if created != 0 {
 		t.Errorf("created=%d, want 0 (linked, not created)", created)
+	}
+	if !containsSubstr(msgs, "feature/x: updated") {
+		t.Errorf("expected an updated line, got %v", msgs)
 	}
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(wts) != 1 {
@@ -675,6 +680,46 @@ func TestSyncRetainsDirtyClosedWorktree(t *testing.T) {
 	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 1 {
 		t.Errorf("expected worktree retained, got %d", len(got))
 	}
+	if !containsSubstr(msgs, "a: retained") {
+		t.Errorf("expected a per-branch retained line, got %v", msgs)
+	}
+}
+
+// TestSyncProgressLinesPerBranch checks the per-branch progress vocabulary:
+// a new PR reports "checked out"; once its PR closes it reports "deleted".
+func TestSyncProgressLinesPerBranch(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+
+	var created []string
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo,
+		func(m string) { created = append(created, m) }); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if !containsSubstr(created, "a: checked out") {
+		t.Errorf("expected a checked-out line, got %v", created)
+	}
+
+	h.gh.prs = nil
+	var deleted []string
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo,
+		func(m string) { deleted = append(deleted, m) }); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if !containsSubstr(deleted, "a: deleted") {
+		t.Errorf("expected a deleted line, got %v", deleted)
+	}
+}
+
+// containsSubstr reports whether any element of msgs contains sub.
+func containsSubstr(msgs []string, sub string) bool {
+	for _, m := range msgs {
+		if strings.Contains(m, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSyncPrunesMissingWorktree(t *testing.T) {
@@ -731,12 +776,17 @@ func TestSyncAdoptsExistingWorktree(t *testing.T) {
 	// Force AddWorktree to fail so the test proves adoption avoids it entirely.
 	h.git.addErr["feature/x"] = errors.New("a branch named 'feature/x' already exists")
 
-	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	var msgs []string
+	created, _, err := h.svc.SyncRepository(context.Background(), repo,
+		func(m string) { msgs = append(msgs, m) })
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 	if created != 1 {
 		t.Errorf("created=%d, want 1 (adopted)", created)
+	}
+	if !containsSubstr(msgs, "feature/x: adopted") {
+		t.Errorf("expected an adopted line, got %v", msgs)
 	}
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(wts) != 1 {

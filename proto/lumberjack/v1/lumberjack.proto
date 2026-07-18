@@ -142,10 +142,10 @@ message InitRepositoryRequest {
 
 message InitRepositoryResponse {
   Repository repository = 1;
-  // Number of already-checked-out worktrees adopted into tracking during init
-  // (directories git had registered for this repo but Lumberjack did not yet
-  // track). Zero for a fresh checkout with no sibling worktrees.
-  int32 adopted_worktrees = 2;
+  // Branches of the worktrees adopted into tracking during init — directories
+  // git had already checked out for this repo but Lumberjack did not yet track.
+  // Empty for a fresh checkout with no sibling worktrees.
+  repeated string adopted_branches = 2;
 }
 
 message ListRepositoriesRequest {}

@@ -56,8 +56,8 @@ func (s *Server) InitRepository(ctx context.Context, req *lumberjackv1.InitRepos
 		return nil, toStatus(err)
 	}
 	return &lumberjackv1.InitRepositoryResponse{
-		Repository:       toProtoRepository(repo),
-		AdoptedWorktrees: int32(adopted),
+		Repository:      toProtoRepository(repo),
+		AdoptedBranches: adopted,
 	}, nil
 }
 

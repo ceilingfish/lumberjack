@@ -334,11 +334,12 @@ func (s *Service) linkWorktree(
 	ctx context.Context, num int64, pr github.PR, wt schema.Worktree,
 	progress progressFn, errs *[]error,
 ) {
-	progress.emit("linking PR #%d to existing worktree %s (%s)", num, baseName(wt.DirectoryPath), pr.HeadBranch)
 	n := num
 	if err := s.db.SetWorktreePR(ctx, wt.ID, &n); err != nil {
 		*errs = append(*errs, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err))
+		return
 	}
+	progress.emit("%s: updated (linked to PR #%d)", pr.HeadBranch, num)
 }
 
 // adoptWorktree records an already-checked-out directory as a preexisting
@@ -348,7 +349,6 @@ func (s *Service) adoptWorktree(
 	ctx context.Context, repo *schema.Repository, num int64, pr github.PR,
 	dir string, progress progressFn, errs *[]error,
 ) bool {
-	progress.emit("adopting existing worktree %s for PR #%d (%s)", baseName(dir), num, pr.HeadBranch)
 	n := num
 	row := &schema.Worktree{
 		RepositoryID: repo.ID, GithubPRNumber: &n,
@@ -359,6 +359,7 @@ func (s *Service) adoptWorktree(
 		*errs = append(*errs, fmt.Errorf("recording adopted worktree for PR #%d: %w", num, cerr))
 		return false
 	}
+	progress.emit("%s: adopted (PR #%d)", pr.HeadBranch, num)
 	return true
 }
 
@@ -369,7 +370,6 @@ func (s *Service) createWorktree(
 	usedDirs map[string]bool, progress progressFn, errs *[]error,
 ) (string, bool) {
 	dir := s.resolveDir(repo, pr, usedDirs)
-	progress.emit("creating worktree for PR #%d (%s)", num, pr.HeadBranch)
 	if aerr := s.git.AddWorktree(ctx, repo.LocalPath, dir, repo.DefaultRemote, pr.HeadBranch); aerr != nil {
 		*errs = append(*errs, fmt.Errorf("PR #%d (%s): %w", num, pr.HeadBranch, aerr))
 		return "", false
@@ -386,6 +386,7 @@ func (s *Service) createWorktree(
 		_ = s.git.RemoveWorktree(ctx, repo.LocalPath, dir, true)
 		return "", false
 	}
+	progress.emit("%s: checked out (PR #%d)", pr.HeadBranch, num)
 	return dir, true
 }
 
@@ -489,11 +490,10 @@ func (s *Service) removeOne(
 		return false
 	}
 	if st.NeedsReconciliation {
-		progress.emit("retaining %s: %s", baseName(wt.DirectoryPath), st.Note)
+		progress.emit("%s: retained (%s)", wt.BranchName, st.Note)
 		return false
 	}
 	if !st.Missing {
-		progress.emit("removing %s (PR closed)", baseName(wt.DirectoryPath))
 		if rmErr := s.git.RemoveWorktree(ctx, repo.LocalPath, wt.DirectoryPath, false); rmErr != nil {
 			*errs = append(*errs, fmt.Errorf("removing %s: %w", wt.DirectoryPath, rmErr))
 			return false
@@ -503,6 +503,7 @@ func (s *Service) removeOne(
 		*errs = append(*errs, derr)
 		return false
 	}
+	progress.emit("%s: deleted (PR closed)", wt.BranchName)
 	return true
 }
 
