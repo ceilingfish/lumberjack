@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": "skills/go-code-review/SKILL.md",
       "computedHash": "48b7d7ad2fcfeb1415d2743bd7eb4a33c6314bef43dd0bef98c4194b23bd700a"
+    },
+    "ponytail": {
+      "source": "dietrichgebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail/SKILL.md",
+      "computedHash": "210fa0831f649ce9f8a305f7b7c8cf2a0dd09ac4dd53067109941b96e7811d4e"
     }
   }
 }
