@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/daemon"
@@ -101,6 +102,12 @@ func newService(socketPath string) (service.Service, error) {
 		DisplayName: "Lumberjack Daemon",
 		Description: "Tracks a GitHub repository's open PRs and reconciles git worktrees.",
 		Arguments:   args,
+		// launchd starts agents with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin),
+		// which omits Homebrew and other user tool directories — so the daemon
+		// can't find `gh` and crash-loops. Bake the install-time PATH (the user's
+		// login shell PATH, which resolved `gh` when they installed) into the
+		// service's environment so runtime lookups match install-time lookups.
+		EnvVars: serviceEnv(),
 		Option: service.KeyValue{
 			"UserService": true, // ~/Library/LaunchAgents, runs as the user
 			"RunAtLoad":   true, // start at login
@@ -108,4 +115,16 @@ func newService(socketPath string) (service.Service, error) {
 		},
 	}
 	return service.New(&program{socketPath: socketPath}, cfg)
+}
+
+// serviceEnv is the environment baked into the installed service. It carries the
+// install-time PATH forward so the daemon resolves `gh` (and git) under launchd's
+// otherwise-minimal PATH. If PATH is somehow unset, we omit it and let the
+// service manager supply its default rather than pinning an empty value.
+func serviceEnv() map[string]string {
+	env := map[string]string{}
+	if path := os.Getenv("PATH"); path != "" {
+		env["PATH"] = path
+	}
+	return env
 }
