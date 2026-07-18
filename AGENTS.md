@@ -28,3 +28,16 @@ The gRPC contract is the boundary between the two. Design implications:
 - **Non-trivial task logic lives in `scripts/`, not inline in `.mise.toml`.** `mise` tasks should stay one-liners that call a script in `scripts/` (e.g. `scripts/coverage.sh`).
 - **Tests live next to the code**, in the same package directory as the code they test.
 - **Ship as a single self-contained binary** — no cgo, no C toolchain, no bundled libraries. Everything Lumberjack owns (SQLite engine, migrations) is compiled or embedded into the one executable. The exceptions are **`git` and `gh`, which are required host prerequisites**: Lumberjack shells out to the system `git` for all worktree operations and to the GitHub CLI (`gh`) for GitHub API access and authentication, rather than reimplementing them. Reusing `gh` also lets Lumberjack inherit the user's existing `gh auth login` credentials.
+
+## Shell completion
+
+Cobra generates the completion script; `cmd/completion.go` adds dynamic suggestions (repository names and `gh` logins come from the daemon over gRPC, guarded by a short timeout so a slow or stopped daemon never stalls the shell).
+
+Install it by sourcing the script from your shell rc — the `shell-completion` mise task prints it for the shell you name:
+
+```sh
+# ~/.zshrc  (bash/fish/powershell: swap the shell name)
+eval "$(mise run shell-completion zsh)"
+```
+
+The task runs `go run . completion <shell>`, so it recompiles on each shell start. For a faster startup, generate the file once instead: `lumberjack completion zsh > "${fpath[1]}/_lumberjack"`.

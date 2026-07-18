@@ -17,6 +17,14 @@ func newInitCmd() *cobra.Command {
 			"directory) so the daemon tracks its open PRs and reconciles " +
 			"worktrees. The path must be a GitHub repository checkout.",
 		Args: cobra.MaximumNArgs(1),
+		// The single positional is a repository checkout path; complete
+		// directories only, and nothing once one is given.
+		ValidArgsFunction: func(_ *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return nil, cobra.ShellCompDirectiveFilterDirs
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "."
 			if len(args) == 1 {

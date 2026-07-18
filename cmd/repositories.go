@@ -10,6 +10,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// verbSetLogin is the `repositories NAME set-login` sub-verb.
+const verbSetLogin = "set-login"
+
 func newRepositoriesCmd() *cobra.Command {
 	var (
 		sync  bool
@@ -50,7 +53,27 @@ func newRepositoriesCmd() *cobra.Command {
 
 	c.Flags().BoolVar(&sync, "sync", false, "synchronise all repositories, streaming progress")
 	c.Flags().BoolVar(&force, "force", false, "skip the confirmation prompt when deleting a worktree")
+	c.ValidArgsFunction = completeRepositories
 	return c
+}
+
+// completeRepositories drives positional completion for `repositories ...`,
+// mirroring the argument grammar dispatchRepository routes on: a repository
+// NAME first, then the sub-verb, then the login for `set-login` or `delete`
+// after a worktree name.
+func completeRepositories(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+	switch {
+	case len(args) == 0:
+		return completeRepositoryNames(cmd), cobra.ShellCompDirectiveNoFileComp
+	case len(args) == 1:
+		return []string{"sync", "worktrees", "worktree", verbSetLogin}, cobra.ShellCompDirectiveNoFileComp
+	case len(args) == 2 && args[1] == verbSetLogin:
+		return completeLogins(cmd, args[0]), cobra.ShellCompDirectiveNoFileComp
+	case len(args) == 3 && args[1] == "worktree":
+		return []string{"delete"}, cobra.ShellCompDirectiveNoFileComp
+	default:
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
 }
 
 // dispatchRepository routes `repositories NAME ...` to detail, worktree listing,
@@ -80,11 +103,11 @@ func dispatchRepository(ctx context.Context, cmd *cobra.Command, cl *client.Clie
 	case len(rest) == 3 && rest[0] == "worktree" && rest[2] == "delete":
 		return deleteWorktree(ctx, cmd, cl, name, rest[1], force)
 
-	case len(rest) == 1 && rest[0] == "set-login":
+	case len(rest) == 1 && rest[0] == verbSetLogin:
 		// No LOGIN given — setLogin offers an interactive picker.
 		return setLogin(ctx, cmd, cl, name, "")
 
-	case len(rest) == 2 && rest[0] == "set-login":
+	case len(rest) == 2 && rest[0] == verbSetLogin:
 		return setLogin(ctx, cmd, cl, name, rest[1])
 
 	default:

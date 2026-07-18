@@ -19,6 +19,18 @@ func newSetLoginCmd() *cobra.Command {
 			"To target a repository by name from anywhere, use " +
 			"`lumberjack repositories NAME set-login [LOGIN]`.",
 		Args: cobra.MaximumNArgs(1),
+		// The optional LOGIN completes to the gh accounts authenticated for the
+		// current directory's repository.
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			ref, err := cwdAbs()
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return completeLogins(cmd, ref), cobra.ShellCompDirectiveNoFileComp
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			abs, err := cwdAbs()
 			if err != nil {
