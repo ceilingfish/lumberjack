@@ -13,6 +13,12 @@
       "skillPath": "skills/ponytail/SKILL.md",
       "computedHash": "210fa0831f649ce9f8a305f7b7c8cf2a0dd09ac4dd53067109941b96e7811d4e"
     },
+    "ponytail-review": {
+      "source": "dietrichgebert/ponytail",
+      "sourceType": "github",
+      "skillPath": "skills/ponytail-review/SKILL.md",
+      "computedHash": "4646594fcd75455533f7ff1425f4f1c5ba0fa65f88241bf262b1c4fc275f049a"
+    },
     "triage": {
       "source": "mattpocock/skills",
       "sourceType": "github",
