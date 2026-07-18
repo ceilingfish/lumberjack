@@ -91,11 +91,11 @@ stdout and registers nothing with launchd — handy for iterating. To register i
 as a login service, that is a separate step, and it matters how you do it.
 
 **Installed service:** to register the daemon so it starts at login, install
-from a **built binary**, never from `go run`. The `install` task builds one and
-installs it in a single step:
+from a **built binary**, never from `go run`. The `install-daemon` task builds
+one and installs it in a single step:
 
 ```sh
-mise run install        # go build -o bin/lumberjack . && daemon install
+mise run install-daemon   # go build -o bin/lumberjack . && daemon install
 ./bin/lumberjack daemon start
 ```
 
@@ -114,7 +114,7 @@ stops and removes the old registration then reinstalls with the new binary path
 and environment:
 
 ```sh
-mise run install -- --force
+mise run install-daemon -- --force
 ./bin/lumberjack daemon start
 ```
 

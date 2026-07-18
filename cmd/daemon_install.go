@@ -59,7 +59,7 @@ func newDaemonInstallCmd() *cobra.Command {
 // service against such a path leaves the service manager pointing at a binary
 // that moves or disappears on the next build — the daemon then fails to launch
 // (and, under KeepAlive, crash-loops). Installing must be done from a durable
-// binary, e.g. `mise run install`, or `mise build` then
+// binary, e.g. `mise run install-daemon`, or `mise build` then
 // `./bin/lumberjack daemon install`.
 func checkStableExecutable(exe string) error {
 	if !isEphemeralBuild(exe) {
@@ -71,7 +71,7 @@ func checkStableExecutable(exe string) error {
 			"and is pruned from the build cache over time, so the installed service "+
 			"would soon point at a binary that has moved or gone. Install from a "+
 			"durable binary instead:\n\n"+
-			"    mise run install\n"+
+			"    mise run install-daemon\n"+
 			"    # or: mise build && ./bin/lumberjack daemon install",
 		exe)
 }
