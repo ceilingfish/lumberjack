@@ -31,15 +31,26 @@ service LumberjackService {
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
 
   // GetRepository returns one repo's last-sync detail —
-  // `lumberjack repository NAME`.
+  // `lumberjack repositories NAME`.
   rpc GetRepository(GetRepositoryRequest) returns (GetRepositoryResponse);
 
+  // SetLogin sets the gh account a repository operates under —
+  // `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
+  // checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
+  // is not authenticated as for the repository's host.
+  rpc SetLogin(SetLoginRequest) returns (SetLoginResponse);
+
+  // ListLogins returns the gh accounts authenticated for a repository's host —
+  // the candidates set-login accepts. The CLI uses it to offer an interactive
+  // picker when `set-login` is run without a login.
+  rpc ListLogins(ListLoginsRequest) returns (ListLoginsResponse);
+
   // ListWorktrees lists a repo's worktrees with live reconciliation status —
-  // `lumberjack repository NAME worktrees`.
+  // `lumberjack repositories NAME worktrees`.
   rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
 
   // DeleteWorktree removes a worktree —
-  // `lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+  // `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
   rpc DeleteWorktree(DeleteWorktreeRequest) returns (DeleteWorktreeResponse);
 
   // Sync reconciles worktrees against open PRs. With an empty repository it
@@ -78,6 +89,9 @@ message Repository {
   SyncStatus last_sync_status = 10;
   optional string last_sync_error = 11;
   google.protobuf.Timestamp created_at = 12;
+  // The gh account this repo was registered under; the daemon switches to it
+  // before operating on the repo. Empty for repos tracked before login capture.
+  string login = 13;
 }
 
 // Worktree is the live view of a local worktree: the stored branch <-> directory
@@ -138,6 +152,32 @@ message GetRepositoryRequest {
 
 message GetRepositoryResponse {
   Repository repository = 1;
+}
+
+message SetLoginRequest {
+  // A repository name (dir prefix / GitHub name) or its local path; the daemon
+  // resolves either form.
+  string repository = 1;
+  // The gh account login the repository should operate under henceforth.
+  string login = 2;
+}
+
+message SetLoginResponse {
+  Repository repository = 1;
+}
+
+message ListLoginsRequest {
+  // A repository name (dir prefix / GitHub name) or its local path; the daemon
+  // resolves either form and lists the gh accounts for its host.
+  string repository = 1;
+}
+
+message ListLoginsResponse {
+  // The gh account logins authenticated for the repository's host.
+  repeated string logins = 1;
+  // The login the repository currently operates under, if any — the CLI
+  // pre-selects it in the picker. Empty for repos tracked before login capture.
+  string current = 2;
 }
 
 message ListWorktreesRequest {

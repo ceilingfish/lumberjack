@@ -147,6 +147,86 @@ func TestAuthenticatedUser(t *testing.T) {
 	}
 }
 
+func TestActiveLogin(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `{"hosts":{"github.com":[{"state":"success","active":true,` +
+			`"host":"github.com","login":"ceilingfish"}]}}`, nil
+	})
+	login, err := c.ActiveLogin(context.Background(), "github.com")
+	if err != nil {
+		t.Fatalf("ActiveLogin: %v", err)
+	}
+	if login != "ceilingfish" {
+		t.Errorf("login = %q, want ceilingfish", login)
+	}
+	if len(gotArgs) < 3 || gotArgs[0] != "auth" || gotArgs[1] != "status" || gotArgs[2] != "--active" {
+		t.Errorf("expected `auth status --active` invocation, got %v", gotArgs)
+	}
+}
+
+func TestActiveLoginPicksActiveEntry(t *testing.T) {
+	// Without --active narrowing, several accounts may be listed for a host; the
+	// active one must win.
+	c := fakeClient(func(...string) (string, error) {
+		return `{"hosts":{"github.com":[` +
+			`{"active":false,"login":"personal"},` +
+			`{"active":true,"login":"work"}]}}`, nil
+	})
+	login, err := c.ActiveLogin(context.Background(), "github.com")
+	if err != nil {
+		t.Fatalf("ActiveLogin: %v", err)
+	}
+	if login != "work" {
+		t.Errorf("login = %q, want work", login)
+	}
+}
+
+func TestActiveLoginNoAccountForHost(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `{"hosts":{"github.com":[{"active":true,"login":"x"}]}}`, nil
+	})
+	if _, err := c.ActiveLogin(context.Background(), "ghe.acme.corp"); err == nil {
+		t.Error("expected error when host has no account")
+	}
+}
+
+func TestActiveLoginBadJSON(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "not json", nil })
+	if _, err := c.ActiveLogin(context.Background(), "github.com"); err == nil {
+		t.Error("expected JSON parse error")
+	}
+}
+
+func TestActiveLoginPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("not logged in") })
+	if _, err := c.ActiveLogin(context.Background(), "github.com"); err == nil {
+		t.Error("expected error to propagate from gh")
+	}
+}
+
+func TestSwitchAccount(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return "", nil
+	})
+	if err := c.SwitchAccount(context.Background(), "github.com", "work"); err != nil {
+		t.Fatalf("SwitchAccount: %v", err)
+	}
+	want := []string{"auth", "switch", "--hostname", "github.com", "--user", "work"}
+	if len(gotArgs) != len(want) {
+		t.Fatalf("args = %v, want %v", gotArgs, want)
+	}
+	for i := range want {
+		if gotArgs[i] != want[i] {
+			t.Errorf("args = %v, want %v", gotArgs, want)
+			break
+		}
+	}
+}
+
 func TestRepoInfoBadJSON(t *testing.T) {
 	c := fakeClient(func(...string) (string, error) { return "not json", nil })
 	if _, err := c.RepoInfo(context.Background(), "/repo"); err == nil {

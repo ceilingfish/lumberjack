@@ -89,6 +89,17 @@ func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Tim
 	return nil
 }
 
+// UpdateLogin sets the gh account a repository operates under. An empty login
+// is allowed and clears it (reverting the repo to "no account switching").
+func (c *Client) UpdateLogin(ctx context.Context, repoID int64, login string) error {
+	if _, err := c.NewUpdate().Model((*schema.Repository)(nil)).
+		Set("login = ?", login).
+		Where("id = ?", repoID).Exec(ctx); err != nil {
+		return fmt.Errorf("updating repository login: %w", err)
+	}
+	return nil
+}
+
 // repositoryByID fetches one repository by primary key (nil, sql.ErrNoRows on
 // miss). Used internally by tests and the sync engine.
 func (c *Client) repositoryByID(ctx context.Context, id int64) (*schema.Repository, error) {

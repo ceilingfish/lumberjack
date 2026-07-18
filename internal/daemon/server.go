@@ -79,6 +79,41 @@ func (s *Server) GetRepository(ctx context.Context, req *lumberjackv1.GetReposit
 	return &lumberjackv1.GetRepositoryResponse{Repository: toProtoRepository(repo)}, nil
 }
 
+// SetLogin sets the gh account a repository operates under.
+func (s *Server) SetLogin(ctx context.Context, req *lumberjackv1.SetLoginRequest) (*lumberjackv1.SetLoginResponse, error) {
+	if req.GetRepository() == "" {
+		return nil, status.Error(codes.InvalidArgument, "repository is required")
+	}
+	if req.GetLogin() == "" {
+		return nil, status.Error(codes.InvalidArgument, "login is required")
+	}
+	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	updated, err := s.svc.SetLogin(ctx, repo, req.GetLogin())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &lumberjackv1.SetLoginResponse{Repository: toProtoRepository(updated)}, nil
+}
+
+// ListLogins returns the gh accounts authenticated for a repository's host.
+func (s *Server) ListLogins(ctx context.Context, req *lumberjackv1.ListLoginsRequest) (*lumberjackv1.ListLoginsResponse, error) {
+	if req.GetRepository() == "" {
+		return nil, status.Error(codes.InvalidArgument, "repository is required")
+	}
+	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	logins, err := s.svc.ListLogins(ctx, repo)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &lumberjackv1.ListLoginsResponse{Logins: logins, Current: repo.Login}, nil
+}
+
 // ListWorktrees returns a repository's worktrees with live reconciliation.
 func (s *Server) ListWorktrees(ctx context.Context, req *lumberjackv1.ListWorktreesRequest) (*lumberjackv1.ListWorktreesResponse, error) {
 	repo, err := s.db.FindRepository(ctx, req.GetRepository())

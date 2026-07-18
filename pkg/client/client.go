@@ -114,6 +114,26 @@ func (c *Client) GetRepository(ctx context.Context, ref string) (*lumberjackv1.R
 	return resp.GetRepository(), nil
 }
 
+// SetLogin sets the gh account the repository resolved by ref operates under,
+// returning the updated repository.
+func (c *Client) SetLogin(ctx context.Context, ref, login string) (*lumberjackv1.Repository, error) {
+	resp, err := c.svc.SetLogin(ctx, &lumberjackv1.SetLoginRequest{Repository: ref, Login: login})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetRepository(), nil
+}
+
+// ListLogins returns the gh accounts authenticated for the host of the
+// repository resolved by ref, plus the login it currently operates under.
+func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, current string, err error) {
+	resp, err := c.svc.ListLogins(ctx, &lumberjackv1.ListLoginsRequest{Repository: ref})
+	if err != nil {
+		return nil, "", mapError(err)
+	}
+	return resp.GetLogins(), resp.GetCurrent(), nil
+}
+
 // ListWorktrees returns a repository's worktrees with live reconciliation.
 func (c *Client) ListWorktrees(ctx context.Context, ref string) ([]*lumberjackv1.Worktree, error) {
 	resp, err := c.svc.ListWorktrees(ctx, &lumberjackv1.ListWorktreesRequest{Repository: ref})

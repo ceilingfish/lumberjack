@@ -23,6 +23,7 @@ func toProtoRepository(r *schema.Repository) *lumberjackv1.Repository {
 		GithubName:        r.GithubName,
 		DefaultRemote:     r.DefaultRemote,
 		Host:              r.Host,
+		Login:             r.Login,
 		LastSyncStatus:    toProtoSyncStatus(r.LastSyncStatus),
 		LastSyncError:     r.LastSyncError,
 		CreatedAt:         timestamppb.New(r.CreatedAt),

@@ -26,6 +26,19 @@ func (s *Service) DeleteWorktree(ctx context.Context, repo *schema.Repository, r
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	var res DeleteResult
+	err := s.withRepoLogin(ctx, repo, func() error {
+		var derr error
+		res, derr = s.deleteWorktreeLocked(ctx, repo, ref, force)
+		return derr
+	})
+	return res, err
+}
+
+// deleteWorktreeLocked is the body of DeleteWorktree, run under s.mu with gh's
+// active account already switched to the repository's login (the git fetch it
+// performs authenticates through gh's active account).
+func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Repository, ref string, force bool) (DeleteResult, error) {
 	wt, err := s.db.FindWorktree(ctx, repo.ID, ref)
 	if err != nil {
 		return DeleteResult{}, err

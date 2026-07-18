@@ -152,6 +152,80 @@ func (c *Client) AuthenticatedUser(ctx context.Context) (string, error) {
 	return c.run(ctx, "", "api", "user", "--jq", ".login")
 }
 
+// ActiveLogin returns the login of the account gh currently has active for
+// host (github.com or a GitHub Enterprise host). Lumberjack records this at
+// init time and switches back to it before operating on a repository so
+// account-switching (`gh auth switch`) is transparent to the user. It errors
+// if no account is active for host.
+func (c *Client) ActiveLogin(ctx context.Context, host string) (string, error) {
+	out, err := c.run(ctx, "", "auth", "status", "--active", "--json", "hosts")
+	if err != nil {
+		return "", err
+	}
+	// `gh auth status --active --json hosts` shapes as
+	//   {"hosts":{"<host>":[{"active":true,"login":"...","host":"..."}]}}
+	// with --active narrowing each host's list to its active account.
+	var v struct {
+		Hosts map[string][]struct {
+			Active bool   `json:"active"`
+			Login  string `json:"login"`
+		} `json:"hosts"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return "", fmt.Errorf("parsing gh auth status: %w", err)
+	}
+	accounts, ok := v.Hosts[host]
+	if !ok {
+		return "", fmt.Errorf("gh has no active account for %s", host)
+	}
+	for _, a := range accounts {
+		if a.Active && a.Login != "" {
+			return a.Login, nil
+		}
+	}
+	// --active should already have filtered to the active account; fall back to
+	// the first listed login so a gh output change can't silently break us.
+	if len(accounts) > 0 && accounts[0].Login != "" {
+		return accounts[0].Login, nil
+	}
+	return "", fmt.Errorf("gh has no active account for %s", host)
+}
+
+// ListLogins returns every gh account authenticated for host, in the order gh
+// reports them. It is the set of logins a repository may be switched to; an
+// empty slice means gh has no accounts for host at all.
+func (c *Client) ListLogins(ctx context.Context, host string) ([]string, error) {
+	out, err := c.run(ctx, "", "auth", "status", "--json", "hosts")
+	if err != nil {
+		return nil, err
+	}
+	// Without --active, `gh auth status --json hosts` lists every account per
+	// host: {"hosts":{"<host>":[{"login":"...","host":"..."}, ...]}}.
+	var v struct {
+		Hosts map[string][]struct {
+			Login string `json:"login"`
+		} `json:"hosts"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return nil, fmt.Errorf("parsing gh auth status: %w", err)
+	}
+	var logins []string
+	for _, a := range v.Hosts[host] {
+		if a.Login != "" {
+			logins = append(logins, a.Login)
+		}
+	}
+	return logins, nil
+}
+
+// SwitchAccount makes login the active gh account for host
+// (`gh auth switch`). Callers pair it with ActiveLogin to restore the prior
+// account after an operation completes.
+func (c *Client) SwitchAccount(ctx context.Context, host, login string) error {
+	_, err := c.run(ctx, "", "auth", "switch", "--hostname", host, "--user", login)
+	return err
+}
+
 // ListOpenPRs returns the open pull requests for repo. The limit is high
 // enough to cover any realistic single repo; gh caps the page itself.
 func (c *Client) ListOpenPRs(ctx context.Context, repo RepoInfo) ([]PR, error) {

@@ -39,9 +39,12 @@ Because client and server always run on the same machine, the daemon listens on 
 ## Commands
 
 `lumberjack repositories` should show the list of tracked repositories
-`lumberjack repository NAME` should show details of the last sync for a named repository
-`lumberjack repository NAME worktrees` should show a list of worktrees checked out for a repository, with their path, and if they need reconciliation, a warning
-`lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits
+`lumberjack repositories NAME` should show details of the last sync for a named repository
+`lumberjack repositories NAME sync` Triggers a synchronisation of the named repository specifically
+`lumberjack repositories NAME worktrees` should show a list of worktrees checked out for a repository, with their path, and if they need reconciliation, a warning
+`lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits
+`lumberjack repositories NAME set-login LOGIN` sets the `gh` account the named repository operates under (the daemon switches to it before any git/gh operation and restores the prior account after). LOGIN must be an account `gh` is authenticated as for the repository's host, otherwise the update is rejected. Omit LOGIN to pick from the authenticated accounts interactively (↑/↓, enter to confirm)
+`lumberjack set-login [LOGIN]` within the context of a tracked repo sets the `gh` account for that repo specifically; the same validation and interactive picker apply
 `lumberjack repositories --sync` Triggers a synchronisation of all repositories
 `lumberjack sync` Within the context of a tracked repo synchronises worktrees for that repo specifically
 `lumberjack daemon` Runs the background daemon (the gRPC server) in the foreground. This is the process that owns the database and worktrees and runs the hourly sync loop; normally it is managed by a service supervisor rather than invoked by hand.

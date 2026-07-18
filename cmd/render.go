@@ -58,6 +58,9 @@ func renderRepositoryDetail(w io.Writer, r *lumberjackv1.Repository) error {
 	t.row("Name:\t%s\n", r.GetDirPrefix())
 	t.row("Path:\t%s\n", r.GetLocalPath())
 	t.row("GitHub:\t%s/%s (%s)\n", r.GetGithubOwner(), r.GetGithubName(), r.GetHost())
+	if r.GetLogin() != "" {
+		t.row("Login:\t%s\n", r.GetLogin())
+	}
 	t.row("Worktrees dir:\t%s\n", r.GetWorktreeParentDir())
 	t.row("Last synced:\t%s\n", timestamp(r.GetLastSyncedAt()))
 	t.row("Status:\t%s\n", syncStatus(r))

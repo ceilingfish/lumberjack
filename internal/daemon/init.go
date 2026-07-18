@@ -37,6 +37,13 @@ func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema
 		return nil, fmt.Errorf("%s is not a GitHub repository: %w", clean, err)
 	}
 
+	// Access is confirmed under the currently-active gh account: record which
+	// login that is so the daemon can switch to it before future operations.
+	login, err := s.gh.ActiveLogin(ctx, info.Host)
+	if err != nil {
+		return nil, fmt.Errorf("determining active GitHub account: %w", err)
+	}
+
 	repo := &schema.Repository{
 		LocalPath: clean,
 		// Sibling worktrees live next to the main checkout by default.
@@ -48,6 +55,7 @@ func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema
 		GithubName:    info.Name,
 		DefaultRemote: remote,
 		Host:          info.Host,
+		Login:         login,
 	}
 	if err := s.db.CreateRepository(ctx, repo); err != nil {
 		return nil, err

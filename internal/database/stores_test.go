@@ -36,6 +36,50 @@ func TestCreateAndListRepositories(t *testing.T) {
 	}
 }
 
+func TestRepositoryLoginRoundTrips(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+
+	r := newRepo("/a", "a", "A")
+	r.Login = "work-account"
+	if err := c.CreateRepository(ctx, r); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	got, err := c.FindRepository(ctx, "/a")
+	if err != nil {
+		t.Fatalf("FindRepository: %v", err)
+	}
+	if got.Login != "work-account" {
+		t.Errorf("Login = %q, want work-account", got.Login)
+	}
+}
+
+func TestUpdateLogin(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	if err := c.CreateRepository(ctx, repo); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	if err := c.UpdateLogin(ctx, repo.ID, "work-account"); err != nil {
+		t.Fatalf("UpdateLogin: %v", err)
+	}
+	got, _ := c.repositoryByID(ctx, repo.ID)
+	if got.Login != "work-account" {
+		t.Errorf("Login = %q, want work-account", got.Login)
+	}
+
+	// A second call overwrites the previous login.
+	if err := c.UpdateLogin(ctx, repo.ID, "personal"); err != nil {
+		t.Fatalf("UpdateLogin: %v", err)
+	}
+	got, _ = c.repositoryByID(ctx, repo.ID)
+	if got.Login != "personal" {
+		t.Errorf("Login = %q, want personal", got.Login)
+	}
+}
+
 func TestCreateRepositoryDuplicate(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()

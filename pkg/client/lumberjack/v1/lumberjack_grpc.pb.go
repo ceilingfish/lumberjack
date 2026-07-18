@@ -32,6 +32,8 @@ const (
 	LumberjackService_InitRepository_FullMethodName   = "/lumberjack.v1.LumberjackService/InitRepository"
 	LumberjackService_ListRepositories_FullMethodName = "/lumberjack.v1.LumberjackService/ListRepositories"
 	LumberjackService_GetRepository_FullMethodName    = "/lumberjack.v1.LumberjackService/GetRepository"
+	LumberjackService_SetLogin_FullMethodName         = "/lumberjack.v1.LumberjackService/SetLogin"
+	LumberjackService_ListLogins_FullMethodName       = "/lumberjack.v1.LumberjackService/ListLogins"
 	LumberjackService_ListWorktrees_FullMethodName    = "/lumberjack.v1.LumberjackService/ListWorktrees"
 	LumberjackService_DeleteWorktree_FullMethodName   = "/lumberjack.v1.LumberjackService/DeleteWorktree"
 	LumberjackService_Sync_FullMethodName             = "/lumberjack.v1.LumberjackService/Sync"
@@ -53,13 +55,22 @@ type LumberjackServiceClient interface {
 	// ListRepositories lists tracked repos — `lumberjack repositories`.
 	ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error)
 	// GetRepository returns one repo's last-sync detail —
-	// `lumberjack repository NAME`.
+	// `lumberjack repositories NAME`.
 	GetRepository(ctx context.Context, in *GetRepositoryRequest, opts ...grpc.CallOption) (*GetRepositoryResponse, error)
+	// SetLogin sets the gh account a repository operates under —
+	// `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
+	// checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
+	// is not authenticated as for the repository's host.
+	SetLogin(ctx context.Context, in *SetLoginRequest, opts ...grpc.CallOption) (*SetLoginResponse, error)
+	// ListLogins returns the gh accounts authenticated for a repository's host —
+	// the candidates set-login accepts. The CLI uses it to offer an interactive
+	// picker when `set-login` is run without a login.
+	ListLogins(ctx context.Context, in *ListLoginsRequest, opts ...grpc.CallOption) (*ListLoginsResponse, error)
 	// ListWorktrees lists a repo's worktrees with live reconciliation status —
-	// `lumberjack repository NAME worktrees`.
+	// `lumberjack repositories NAME worktrees`.
 	ListWorktrees(ctx context.Context, in *ListWorktreesRequest, opts ...grpc.CallOption) (*ListWorktreesResponse, error)
 	// DeleteWorktree removes a worktree —
-	// `lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+	// `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
 	DeleteWorktree(ctx context.Context, in *DeleteWorktreeRequest, opts ...grpc.CallOption) (*DeleteWorktreeResponse, error)
 	// Sync reconciles worktrees against open PRs. With an empty repository it
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
@@ -109,6 +120,26 @@ func (c *lumberjackServiceClient) GetRepository(ctx context.Context, in *GetRepo
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetRepositoryResponse)
 	err := c.cc.Invoke(ctx, LumberjackService_GetRepository_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lumberjackServiceClient) SetLogin(ctx context.Context, in *SetLoginRequest, opts ...grpc.CallOption) (*SetLoginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetLoginResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_SetLogin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lumberjackServiceClient) ListLogins(ctx context.Context, in *ListLoginsRequest, opts ...grpc.CallOption) (*ListLoginsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListLoginsResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_ListLogins_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -170,13 +201,22 @@ type LumberjackServiceServer interface {
 	// ListRepositories lists tracked repos — `lumberjack repositories`.
 	ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error)
 	// GetRepository returns one repo's last-sync detail —
-	// `lumberjack repository NAME`.
+	// `lumberjack repositories NAME`.
 	GetRepository(context.Context, *GetRepositoryRequest) (*GetRepositoryResponse, error)
+	// SetLogin sets the gh account a repository operates under —
+	// `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
+	// checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
+	// is not authenticated as for the repository's host.
+	SetLogin(context.Context, *SetLoginRequest) (*SetLoginResponse, error)
+	// ListLogins returns the gh accounts authenticated for a repository's host —
+	// the candidates set-login accepts. The CLI uses it to offer an interactive
+	// picker when `set-login` is run without a login.
+	ListLogins(context.Context, *ListLoginsRequest) (*ListLoginsResponse, error)
 	// ListWorktrees lists a repo's worktrees with live reconciliation status —
-	// `lumberjack repository NAME worktrees`.
+	// `lumberjack repositories NAME worktrees`.
 	ListWorktrees(context.Context, *ListWorktreesRequest) (*ListWorktreesResponse, error)
 	// DeleteWorktree removes a worktree —
-	// `lumberjack repository NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+	// `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
 	DeleteWorktree(context.Context, *DeleteWorktreeRequest) (*DeleteWorktreeResponse, error)
 	// Sync reconciles worktrees against open PRs. With an empty repository it
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
@@ -203,6 +243,12 @@ func (UnimplementedLumberjackServiceServer) ListRepositories(context.Context, *L
 }
 func (UnimplementedLumberjackServiceServer) GetRepository(context.Context, *GetRepositoryRequest) (*GetRepositoryResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetRepository not implemented")
+}
+func (UnimplementedLumberjackServiceServer) SetLogin(context.Context, *SetLoginRequest) (*SetLoginResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetLogin not implemented")
+}
+func (UnimplementedLumberjackServiceServer) ListLogins(context.Context, *ListLoginsRequest) (*ListLoginsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListLogins not implemented")
 }
 func (UnimplementedLumberjackServiceServer) ListWorktrees(context.Context, *ListWorktreesRequest) (*ListWorktreesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorktrees not implemented")
@@ -306,6 +352,42 @@ func _LumberjackService_GetRepository_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LumberjackService_SetLogin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetLoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).SetLogin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_SetLogin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).SetLogin(ctx, req.(*SetLoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LumberjackService_ListLogins_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListLoginsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).ListLogins(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_ListLogins_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).ListLogins(ctx, req.(*ListLoginsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _LumberjackService_ListWorktrees_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListWorktreesRequest)
 	if err := dec(in); err != nil {
@@ -375,6 +457,14 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetRepository",
 			Handler:    _LumberjackService_GetRepository_Handler,
+		},
+		{
+			MethodName: "SetLogin",
+			Handler:    _LumberjackService_SetLogin_Handler,
+		},
+		{
+			MethodName: "ListLogins",
+			Handler:    _LumberjackService_ListLogins_Handler,
 		},
 		{
 			MethodName: "ListWorktrees",

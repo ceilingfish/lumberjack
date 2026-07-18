@@ -9,6 +9,7 @@ require (
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
 	go.uber.org/fx v1.24.0
+	golang.org/x/term v0.43.0
 	google.golang.org/grpc v1.82.0
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.53.0

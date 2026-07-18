@@ -44,6 +44,7 @@ func (f *fakeGit) DefaultRemote(context.Context, string) (string, error) {
 	}
 	return f.remotes, nil
 }
+
 func (f *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
 	return f.remoteURL, f.urlErr
 }
@@ -76,6 +77,16 @@ type fakeGH struct {
 	prsErr  error
 	user    string
 	userErr error
+	// active is the account gh reports as currently signed in; switchErr forces
+	// SwitchAccount to fail. switches records each (host, login) switch made.
+	active    string
+	activeErr error
+	switchErr error
+	switches  [][2]string
+	// logins is what ListLogins reports for any host; loginsErr forces it to
+	// fail. A nil logins slice means gh has no accounts.
+	logins    []string
+	loginsErr error
 }
 
 func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {
@@ -88,6 +99,23 @@ func (f *fakeGH) ListOpenPRs(context.Context, github.RepoInfo) ([]github.PR, err
 
 func (f *fakeGH) AuthenticatedUser(context.Context) (string, error) {
 	return f.user, f.userErr
+}
+
+func (f *fakeGH) ActiveLogin(context.Context, string) (string, error) {
+	return f.active, f.activeErr
+}
+
+func (f *fakeGH) SwitchAccount(_ context.Context, host, login string) error {
+	if f.switchErr != nil {
+		return f.switchErr
+	}
+	f.switches = append(f.switches, [2]string{host, login})
+	f.active = login
+	return nil
+}
+
+func (f *fakeGH) ListLogins(context.Context, string) ([]string, error) {
+	return f.logins, f.loginsErr
 }
 
 // harness bundles a Service over a temp DB with controllable fakes.
@@ -228,6 +256,207 @@ func TestInitRepositoryDuplicate(t *testing.T) {
 	_, err := h.svc.InitRepository(context.Background(), dir)
 	if !errors.Is(err, database.ErrRepositoryExists) {
 		t.Errorf("expected ErrRepositoryExists, got %v", err)
+	}
+}
+
+func TestInitRepositoryRecordsLogin(t *testing.T) {
+	h := newHarness(t)
+	h.gh.active = "work-account"
+
+	repo, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "myrepo"))
+	if err != nil {
+		t.Fatalf("InitRepository: %v", err)
+	}
+	if repo.Login != "work-account" {
+		t.Errorf("Login = %q, want work-account", repo.Login)
+	}
+	// It must be persisted, not just returned.
+	got, _ := h.db.FindRepository(context.Background(), repo.LocalPath)
+	if got.Login != "work-account" {
+		t.Errorf("persisted Login = %q, want work-account", got.Login)
+	}
+}
+
+func TestInitRepositoryActiveLoginErrorAborts(t *testing.T) {
+	h := newHarness(t)
+	h.gh.activeErr = errors.New("no active account")
+	if _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
+		t.Error("expected init to fail when the active account can't be determined")
+	}
+}
+
+// repoWithLogin inserts a tracked repo registered under a given login.
+func (h *harness) repoWithLogin(t *testing.T, login string) *schema.Repository {
+	t.Helper()
+	r := h.repo(t)
+	r.Login = login
+	if _, err := h.db.NewUpdate().Model(r).Column("login").WherePK().Exec(context.Background()); err != nil {
+		t.Fatalf("set login: %v", err)
+	}
+	return r
+}
+
+func TestSetLoginPersistsAndTakesEffect(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t) // no login initially
+	h.gh.logins = []string{"personal", "work"}
+
+	updated, err := h.svc.SetLogin(context.Background(), repo, "work")
+	if err != nil {
+		t.Fatalf("SetLogin: %v", err)
+	}
+	if updated.Login != "work" {
+		t.Errorf("returned Login = %q, want work", updated.Login)
+	}
+	// Persisted, not just mutated in memory.
+	got, _ := h.db.FindRepository(context.Background(), repo.LocalPath)
+	if got.Login != "work" {
+		t.Errorf("persisted Login = %q, want work", got.Login)
+	}
+
+	// A subsequent operation on the reloaded repo now switches accounts.
+	h.gh.active = "personal"
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), got, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	if len(h.gh.switches) == 0 || h.gh.switches[0] != [2]string{"github.com", "work"} {
+		t.Errorf("expected switch to work, got %v", h.gh.switches)
+	}
+}
+
+func TestSetLoginEmptyRejected(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	if _, err := h.svc.SetLogin(context.Background(), repo, ""); err == nil {
+		t.Error("expected an empty login to be rejected")
+	}
+}
+
+func TestSetLoginUnknownAccountRejected(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.logins = []string{"personal", "work"}
+
+	_, err := h.svc.SetLogin(context.Background(), repo, "ghost")
+	if err == nil {
+		t.Fatal("expected an unauthenticated login to be rejected")
+	}
+	if !strings.Contains(err.Error(), "ghost") || !strings.Contains(err.Error(), "personal") {
+		t.Errorf("error should name the bad login and the available ones, got %v", err)
+	}
+	// Nothing persisted.
+	got, _ := h.db.FindRepository(context.Background(), repo.LocalPath)
+	if got.Login != "" {
+		t.Errorf("login should be unchanged, got %q", got.Login)
+	}
+}
+
+func TestListLoginsReportsAccountsAndCurrent(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repoWithLogin(t, "work")
+	h.gh.logins = []string{"personal", "work"}
+
+	logins, err := h.svc.ListLogins(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("ListLogins: %v", err)
+	}
+	if len(logins) != 2 || logins[0] != "personal" || logins[1] != "work" {
+		t.Errorf("logins = %v, want [personal work]", logins)
+	}
+}
+
+func TestSyncSwitchesToRepoLoginAndRestores(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repoWithLogin(t, "work")
+	h.gh.active = "personal" // a different account is active
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	// Switched to the repo's login for the operation, then back to personal.
+	want := [][2]string{{"github.com", "work"}, {"github.com", "personal"}}
+	if fmt.Sprintf("%v", h.gh.switches) != fmt.Sprintf("%v", want) {
+		t.Errorf("switches = %v, want %v", h.gh.switches, want)
+	}
+	if h.gh.active != "personal" {
+		t.Errorf("active account not restored: %q", h.gh.active)
+	}
+}
+
+func TestSyncNoSwitchWhenAlreadyActive(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repoWithLogin(t, "work")
+	h.gh.active = "work" // already the right account
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	if len(h.gh.switches) != 0 {
+		t.Errorf("expected no account switches, got %v", h.gh.switches)
+	}
+}
+
+func TestSyncNoSwitchWhenLoginUnset(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t) // empty Login (pre-capture repo)
+	h.gh.active = "personal"
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	if len(h.gh.switches) != 0 {
+		t.Errorf("empty-login repo must not switch accounts, got %v", h.gh.switches)
+	}
+}
+
+func TestSyncSwitchFailureAborts(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repoWithLogin(t, "work")
+	h.gh.active = "personal"
+	h.gh.switchErr = errors.New("account not found")
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err == nil {
+		t.Error("expected sync to fail when the account switch fails")
+	}
+}
+
+func TestDeleteWorktreeSwitchesLogin(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repoWithLogin(t, "work")
+	h.gh.active = "personal"
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+	h.gh.switches = nil // ignore the switches from seeding
+
+	if _, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false); err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if len(h.gh.switches) != 2 || h.gh.active != "personal" {
+		t.Errorf("delete should switch to work then restore personal, switches=%v active=%q", h.gh.switches, h.gh.active)
+	}
+}
+
+func TestWorktreeViewsSwitchesLogin(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repoWithLogin(t, "work")
+	h.gh.active = "personal"
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+	h.gh.switches = nil
+
+	if _, err := h.svc.WorktreeViews(context.Background(), repo); err != nil {
+		t.Fatalf("WorktreeViews: %v", err)
+	}
+	if len(h.gh.switches) != 2 || h.gh.active != "personal" {
+		t.Errorf("views should switch to work then restore personal, switches=%v active=%q", h.gh.switches, h.gh.active)
 	}
 }
 

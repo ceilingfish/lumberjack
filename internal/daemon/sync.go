@@ -32,6 +32,14 @@ type GHOps interface {
 	// AuthenticatedUser names the account gh is signed in as, so init can point
 	// at credentials when a repository is not accessible.
 	AuthenticatedUser(ctx context.Context) (string, error)
+	// ActiveLogin reports the account gh has active for a host; SwitchAccount
+	// changes it. Together they let the daemon operate on a repo under the
+	// account it was registered with and restore the prior account afterwards.
+	ActiveLogin(ctx context.Context, host string) (string, error)
+	SwitchAccount(ctx context.Context, host, login string) error
+	// ListLogins reports every gh account authenticated for a host — the logins
+	// set-login accepts and the picker offers.
+	ListLogins(ctx context.Context, host string) ([]string, error)
 }
 
 // Service is the daemon's domain layer: it owns every worktree mutation
@@ -77,6 +85,37 @@ func repoInfo(repo *schema.Repository) github.RepoInfo {
 	return github.RepoInfo{Owner: repo.GithubOwner, Name: repo.GithubName, Host: repo.Host}
 }
 
+// withRepoLogin runs fn with gh's active account switched to the one the
+// repository was registered under, restoring the previously-active account
+// afterwards. Both git (via gh's credential helper) and gh calls inherit the
+// active account, so any operation on a repo must run under its own login.
+//
+// Repos tracked before login capture (empty Login) run fn unchanged. gh's
+// active account is process-global, so callers must hold s.mu.
+func (s *Service) withRepoLogin(ctx context.Context, repo *schema.Repository, fn func() error) (err error) {
+	if repo.Login == "" {
+		return fn()
+	}
+	current, aerr := s.gh.ActiveLogin(ctx, repo.Host)
+	if aerr != nil {
+		return fmt.Errorf("checking active GitHub account: %w", aerr)
+	}
+	if current == repo.Login {
+		return fn()
+	}
+	if serr := s.gh.SwitchAccount(ctx, repo.Host, repo.Login); serr != nil {
+		return fmt.Errorf("switching to GitHub account %q: %w", repo.Login, serr)
+	}
+	defer func() {
+		// Restore the account that was active before. A restore failure must not
+		// mask fn's own error, but is surfaced when fn otherwise succeeded.
+		if serr := s.gh.SwitchAccount(ctx, repo.Host, current); serr != nil && err == nil {
+			err = fmt.Errorf("restoring GitHub account %q: %w", current, serr)
+		}
+	}()
+	return fn()
+}
+
 // fetchOpenPRs fetches remote refs and returns the open PRs indexed by number.
 func (s *Service) fetchOpenPRs(ctx context.Context, repo *schema.Repository) (map[int64]github.PR, error) {
 	if err := s.git.Fetch(ctx, repo.LocalPath, repo.DefaultRemote); err != nil {
@@ -97,26 +136,38 @@ func (s *Service) fetchOpenPRs(ctx context.Context, repo *schema.Repository) (ma
 // each stored row plus its reconciliation status, computed fresh from git and
 // gh (never cached — docs/schema.md).
 func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([]WorktreeView, error) {
-	openByNum, err := s.fetchOpenPRs(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	stored, err := s.db.ListWorktrees(ctx, repo.ID)
-	if err != nil {
-		return nil, err
-	}
-	views := make([]WorktreeView, 0, len(stored))
-	for i := range stored {
-		wt := stored[i]
-		open := wt.GithubPRNumber != nil
-		if open {
-			_, open = openByNum[*wt.GithubPRNumber]
-		}
-		st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, open)
+	// Serialise with worktree mutations: gh account switching is process-global,
+	// so a concurrent sync must not change the active account mid-read.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var views []WorktreeView
+	err := s.withRepoLogin(ctx, repo, func() error {
+		openByNum, err := s.fetchOpenPRs(ctx, repo)
 		if err != nil {
-			return nil, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, err)
+			return err
 		}
-		views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: open})
+		stored, err := s.db.ListWorktrees(ctx, repo.ID)
+		if err != nil {
+			return err
+		}
+		views = make([]WorktreeView, 0, len(stored))
+		for i := range stored {
+			wt := stored[i]
+			open := wt.GithubPRNumber != nil
+			if open {
+				_, open = openByNum[*wt.GithubPRNumber]
+			}
+			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, open)
+			if rerr != nil {
+				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
+			}
+			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: open})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return views, nil
 }
@@ -130,6 +181,17 @@ func (s *Service) SyncRepository(ctx context.Context, repo *schema.Repository, p
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	err = s.withRepoLogin(ctx, repo, func() error {
+		var serr error
+		created, removed, serr = s.syncRepositoryLocked(ctx, repo, progress)
+		return serr
+	})
+	return created, removed, err
+}
+
+// syncRepositoryLocked is the body of SyncRepository, run under s.mu with gh's
+// active account already switched to the repository's login.
+func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Repository, progress progressFn) (created, removed int, err error) {
 	start := s.now()
 	run, runErr := s.db.StartSyncRun(ctx, repo.ID, start)
 	if runErr != nil {
