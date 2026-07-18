@@ -17,19 +17,22 @@ import (
 // status logic without touching the real service manager. It records which
 // control methods were called.
 type fakeLifecycle struct {
-	status     service.Status
-	statusErr  error
-	installErr error
-	startErr   error
-	stopErr    error
+	status       service.Status
+	statusErr    error
+	installErr   error
+	uninstallErr error
+	startErr     error
+	stopErr      error
 
-	installed bool
-	started   bool
-	stopped   bool
+	installed   bool
+	uninstalled bool
+	started     bool
+	stopped     bool
 }
 
 func (f *fakeLifecycle) Status() (service.Status, error) { return f.status, f.statusErr }
 func (f *fakeLifecycle) Install() error                  { f.installed = true; return f.installErr }
+func (f *fakeLifecycle) Uninstall() error               { f.uninstalled = true; return f.uninstallErr }
 func (f *fakeLifecycle) Start() error                    { f.started = true; return f.startErr }
 func (f *fakeLifecycle) Stop() error                     { f.stopped = true; return f.stopErr }
 
@@ -78,19 +81,55 @@ func TestCmdDaemonStatusEndToEnd(t *testing.T) {
 func TestInstallDaemon(t *testing.T) {
 	var buf bytes.Buffer
 	f := &fakeLifecycle{}
-	if err := installDaemon(&buf, f); err != nil {
+	if err := installDaemon(&buf, f, false); err != nil {
 		t.Fatalf("installDaemon: %v", err)
 	}
 	if !f.installed {
 		t.Error("Install was not called")
+	}
+	if f.uninstalled {
+		t.Error("Uninstall should not be called without --force")
 	}
 	if !strings.Contains(buf.String(), "installed") {
 		t.Errorf("out = %q", buf.String())
 	}
 
 	// Install failure is wrapped and surfaced.
-	if err := installDaemon(&buf, &fakeLifecycle{installErr: errors.New("boom")}); err == nil {
+	if err := installDaemon(&buf, &fakeLifecycle{installErr: errors.New("boom")}, false); err == nil {
 		t.Error("expected install error")
+	}
+}
+
+// TestInstallDaemonForce: --force removes any existing registration (Stop +
+// Uninstall) before installing, so an "already exists" error can never occur.
+func TestInstallDaemonForce(t *testing.T) {
+	var buf bytes.Buffer
+	f := &fakeLifecycle{status: service.StatusRunning}
+	if err := installDaemon(&buf, f, true); err != nil {
+		t.Fatalf("installDaemon force: %v", err)
+	}
+	if !f.uninstalled {
+		t.Error("Uninstall was not called under --force")
+	}
+	if !f.installed {
+		t.Error("Install was not called under --force")
+	}
+
+	// A not-installed starting state is not an error: force still installs.
+	f = &fakeLifecycle{uninstallErr: service.ErrNotInstalled, stopErr: service.ErrNotInstalled}
+	if err := installDaemon(&buf, f, true); err != nil {
+		t.Fatalf("force over not-installed: %v", err)
+	}
+	if !f.installed {
+		t.Error("Install was not called when nothing was previously installed")
+	}
+
+	// A real Uninstall failure aborts before reinstalling.
+	f = &fakeLifecycle{uninstallErr: errors.New("boom")}
+	if err := installDaemon(&buf, f, true); err == nil {
+		t.Error("expected uninstall error to surface")
+	} else if f.installed {
+		t.Error("Install should not run after a failed Uninstall")
 	}
 }
 

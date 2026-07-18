@@ -24,6 +24,7 @@ type lifecycle interface {
 	Start() error
 	Stop() error
 	Install() error
+	Uninstall() error
 }
 
 // newDaemonCmd is the `daemon` parent. It owns no behaviour itself; its
