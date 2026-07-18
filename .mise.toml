@@ -20,6 +20,14 @@ run = "go build -o bin/lumberjack ."
 description = "Run the daemon in the foreground (development mode)"
 run = "go run ."
 
+# Emits the Cobra shell-completion script for the given shell to stdout, so it
+# can be sourced directly. mise appends the trailing shell name as an argument.
+# Install (zsh): add to ~/.zshrc  ->  eval "$(mise run shell-completion zsh)"
+# Bash/fish/powershell work the same: mise run shell-completion <shell>
+[tasks.shell-completion]
+description = 'Print the shell completion script, e.g. eval "$(mise run shell-completion zsh)"'
+run = "go run . completion"
+
 [tasks.test]
 description = "Run the test suite"
 run = "go test ./..."
