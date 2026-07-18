@@ -21,9 +21,9 @@ run = "go build -o bin/lumberjack ."
 # Installs the daemon as a login service from a freshly built, durable binary.
 # `daemon install` refuses a `go run` build, so installing must go through a
 # real binary — extra args are forwarded (e.g. `mise run install -- --force`).
-[tasks.install]
+[tasks.install-daemon]
 description = "Build a durable binary and install the daemon as a login service"
-run = "go build -o bin/lumberjack . && ./bin/lumberjack daemon install"
+run = "go build -o bin/lumberjack . && ./bin/lumberjack daemon install --force"
 
 [tasks.dev]
 description = "Run the CLI from source"
