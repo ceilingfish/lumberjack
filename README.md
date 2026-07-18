@@ -75,6 +75,49 @@ Copy `bin/lumberjack` somewhere on your `PATH` (e.g. `~/.local/bin`).
 
 ---
 
+## Running from source
+
+For day-to-day development there are two ways to run the daemon, and it matters
+which you use.
+
+**Foreground (development):** run the daemon in the foreground, tied to your
+terminal, with logs on stdout. Stop it with Ctrl-C. Nothing is registered with
+launchd.
+
+```sh
+mise run dev            # = `go run . daemon run`
+```
+
+**Installed service:** to register the daemon so it starts at login, always
+install from a **built binary**, never from `go run`:
+
+```sh
+mise run build                    # produces ./bin/lumberjack
+./bin/lumberjack daemon install   # add --force to upgrade an existing install
+./bin/lumberjack daemon start
+```
+
+> **Why not `go run . daemon install`?** `go run` compiles to a throwaway binary
+> under a temporary `go-build` directory that is **deleted when the process
+> exits**. Installing bakes that path into the LaunchAgent, so launchd is left
+> pointing at a binary that no longer exists — the daemon fails to launch and,
+> under `KeepAlive`, crash-loops; a later `daemon start` then fails with
+> `launchctl … Load failed: 5`. `daemon install` refuses to run from a `go run`
+> build for exactly this reason and points you back here.
+
+After rebuilding, upgrade the installed service in place with:
+
+```sh
+mise run build
+./bin/lumberjack daemon install --force
+./bin/lumberjack daemon start
+```
+
+`--force` stops and removes the old registration, then reinstalls with the new
+binary path and environment.
+
+---
+
 ## Setup
 
 ### 1. Install and start the daemon
