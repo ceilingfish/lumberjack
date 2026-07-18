@@ -43,6 +43,18 @@ func (c *Client) FindWorktree(ctx context.Context, repoID int64, ref string) (*s
 	return nil, ErrWorktreeNotFound
 }
 
+// SetWorktreePR links a worktree row to a PR number (or clears it when nil).
+// It lets sync associate an adopted worktree — tracked by branch but with no PR
+// yet — to the open PR whose branch it holds, without recreating anything.
+func (c *Client) SetWorktreePR(ctx context.Context, id int64, prNumber *int64) error {
+	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
+		Set("github_pr_number = ?", prNumber).
+		Where("id = ?", id).Exec(ctx); err != nil {
+		return fmt.Errorf("updating worktree PR: %w", err)
+	}
+	return nil
+}
+
 // DeleteWorktree removes a worktree row by primary key.
 func (c *Client) DeleteWorktree(ctx context.Context, id int64) error {
 	if _, err := c.NewDelete().Model((*schema.Worktree)(nil)).

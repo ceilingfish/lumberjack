@@ -127,20 +127,40 @@ func (g *Git) RemoveWorktree(ctx context.Context, repoPath, dir string, force bo
 	return err
 }
 
-// ListWorktrees returns the directory paths of every worktree registered on
-// repoPath, parsed from `git worktree list --porcelain`.
-func (g *Git) ListWorktrees(ctx context.Context, repoPath string) ([]string, error) {
+// Ref is one entry from `git worktree list`: the worktree's directory and the
+// branch checked out there. Branch is empty for a detached-HEAD worktree. It
+// lets the sync engine match an already-checked-out directory to the PR whose
+// branch it holds and adopt it rather than trying to recreate it.
+type Ref struct {
+	Dir    string
+	Branch string
+}
+
+// ListWorktrees returns every worktree registered on repoPath (including the
+// main working tree), parsed from `git worktree list --porcelain`.
+func (g *Git) ListWorktrees(ctx context.Context, repoPath string) ([]Ref, error) {
 	out, err := g.run(ctx, repoPath, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
-	var dirs []string
+	var (
+		refs []Ref
+		cur  *Ref
+	)
 	for _, line := range strings.Split(out, "\n") {
 		if p, ok := strings.CutPrefix(line, "worktree "); ok {
-			dirs = append(dirs, p)
+			refs = append(refs, Ref{Dir: p})
+			cur = &refs[len(refs)-1]
+			continue
+		}
+		if cur == nil {
+			continue
+		}
+		if b, ok := strings.CutPrefix(line, "branch refs/heads/"); ok {
+			cur.Branch = b
 		}
 	}
-	return dirs, nil
+	return refs, nil
 }
 
 // IsDirty reports whether the worktree at dir has uncommitted changes

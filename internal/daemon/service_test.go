@@ -13,6 +13,7 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/github"
+	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
 
 // fakeGit satisfies GitOps against real temp directories so worktree.Reconcile
@@ -27,6 +28,11 @@ type fakeGit struct {
 	remoteErr error
 	remoteURL string
 	urlErr    error
+	// worktrees is what ListWorktrees reports — the worktrees git already has
+	// registered (used to exercise adoption of hand-checked-out directories).
+	// listErr forces the listing to fail.
+	worktrees []worktree.Ref
+	listErr   error
 }
 
 func newFakeGit() *fakeGit {
@@ -59,6 +65,10 @@ func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error
 
 func (f *fakeGit) RemoveWorktree(_ context.Context, _, dir string, _ bool) error {
 	return os.RemoveAll(dir)
+}
+
+func (f *fakeGit) ListWorktrees(context.Context, string) ([]worktree.Ref, error) {
+	return f.worktrees, f.listErr
 }
 
 func (f *fakeGit) IsDirty(_ context.Context, dir string) (bool, error) {
@@ -176,7 +186,7 @@ func TestInitRepository(t *testing.T) {
 	h := newHarness(t)
 	dir := filepath.Join(h.parent, "myrepo")
 
-	repo, err := h.svc.InitRepository(context.Background(), dir)
+	repo, _, err := h.svc.InitRepository(context.Background(), dir)
 	if err != nil {
 		t.Fatalf("InitRepository: %v", err)
 	}
@@ -188,10 +198,83 @@ func TestInitRepository(t *testing.T) {
 	}
 }
 
+func TestInitRepositoryAdoptsExistingWorktrees(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.parent, "myrepo")
+	existing := filepath.Join(h.parent, "myrepo-feature")
+	// git reports the main checkout plus a hand-created worktree; only the latter
+	// is adoptable (the main checkout and detached HEADs are skipped).
+	h.git.worktrees = []worktree.Ref{
+		{Dir: dir, Branch: "main"},
+		{Dir: existing, Branch: "feature/x"},
+		{Dir: filepath.Join(h.parent, "detached"), Branch: ""},
+	}
+
+	repo, adopted, err := h.svc.InitRepository(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("InitRepository: %v", err)
+	}
+	if adopted != 1 {
+		t.Errorf("adopted=%d, want 1", adopted)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 tracked worktree, got %d", len(wts))
+	}
+	if wts[0].DirectoryPath != existing || wts[0].BranchName != "feature/x" {
+		t.Errorf("adopted wrong worktree: %+v", wts[0])
+	}
+	if wts[0].CreatedBy != schema.CreatedByPreexisting {
+		t.Errorf("created_by=%q, want %q", wts[0].CreatedBy, schema.CreatedByPreexisting)
+	}
+	if wts[0].GithubPRNumber != nil {
+		t.Errorf("adopted worktree should have no PR number yet, got %v", *wts[0].GithubPRNumber)
+	}
+}
+
+func TestSyncLinksAdoptedWorktreeToPR(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.parent, "n")
+	existing := filepath.Join(h.parent, "n-feature")
+	h.git.worktrees = []worktree.Ref{
+		{Dir: dir, Branch: "main"},
+		{Dir: existing, Branch: "feature/x"},
+	}
+	// Init adopts the hand-created worktree with no PR number.
+	repo, adopted, err := h.svc.InitRepository(context.Background(), dir)
+	if err != nil || adopted != 1 {
+		t.Fatalf("init: adopted=%d err=%v", adopted, err)
+	}
+
+	// A sync then sees an open PR on that branch: it must link the existing row,
+	// not try to recreate the branch (which would fail — it is already checked
+	// out). AddWorktree failing proves creation was never attempted.
+	h.gh.prs = []github.PR{{Number: 7, HeadBranch: "feature/x"}}
+	h.git.addErr["feature/x"] = errors.New("a branch named 'feature/x' already exists")
+
+	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if created != 0 {
+		t.Errorf("created=%d, want 0 (linked, not created)", created)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 worktree, got %d", len(wts))
+	}
+	if wts[0].GithubPRNumber == nil || *wts[0].GithubPRNumber != 7 {
+		t.Errorf("worktree not linked to PR #7: %+v", wts[0])
+	}
+	if wts[0].CreatedBy != schema.CreatedByPreexisting {
+		t.Errorf("created_by=%q, want preexisting (adoption preserved)", wts[0].CreatedBy)
+	}
+}
+
 func TestInitRepositoryNotGitHub(t *testing.T) {
 	h := newHarness(t)
 	h.gh.infoErr = errors.New("not a repo")
-	if _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
+	if _, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
 		t.Error("expected error for non-GitHub repo")
 	}
 }
@@ -202,7 +285,7 @@ func TestInitRepository404GitHubRemoteHintsCredentials(t *testing.T) {
 	h.git.remoteURL = "https://github.com/ceilingfish/lumberjack.git"
 	h.gh.user = "work-account"
 
-	_, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
+	_, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
 	if err == nil {
 		t.Fatal("expected error for inaccessible GitHub repo")
 	}
@@ -219,7 +302,7 @@ func TestInitRepository404NonGitHubRemoteFallsBack(t *testing.T) {
 	h.gh.infoErr = fmt.Errorf("%w: HTTP 404", github.ErrRepoNotFound)
 	h.git.remoteURL = "https://gitlab.com/someone/thing.git"
 
-	_, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
+	_, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -254,7 +337,7 @@ func TestGithubRepoSlug(t *testing.T) {
 func TestInitRepositoryNoRemote(t *testing.T) {
 	h := newHarness(t)
 	h.git.remoteErr = errors.New("no remotes")
-	if _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
+	if _, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
 		t.Error("expected error when repo has no remote")
 	}
 }
@@ -262,10 +345,10 @@ func TestInitRepositoryNoRemote(t *testing.T) {
 func TestInitRepositoryDuplicate(t *testing.T) {
 	h := newHarness(t)
 	dir := filepath.Join(h.parent, "dup")
-	if _, err := h.svc.InitRepository(context.Background(), dir); err != nil {
+	if _, _, err := h.svc.InitRepository(context.Background(), dir); err != nil {
 		t.Fatalf("first init: %v", err)
 	}
-	_, err := h.svc.InitRepository(context.Background(), dir)
+	_, _, err := h.svc.InitRepository(context.Background(), dir)
 	if !errors.Is(err, database.ErrRepositoryExists) {
 		t.Errorf("expected ErrRepositoryExists, got %v", err)
 	}
@@ -275,7 +358,7 @@ func TestInitRepositoryRecordsLogin(t *testing.T) {
 	h := newHarness(t)
 	h.gh.active = "work-account"
 
-	repo, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "myrepo"))
+	repo, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "myrepo"))
 	if err != nil {
 		t.Fatalf("InitRepository: %v", err)
 	}
@@ -292,7 +375,7 @@ func TestInitRepositoryRecordsLogin(t *testing.T) {
 func TestInitRepositoryActiveLoginErrorAborts(t *testing.T) {
 	h := newHarness(t)
 	h.gh.activeErr = errors.New("no active account")
-	if _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
+	if _, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x")); err == nil {
 		t.Error("expected init to fail when the active account can't be determined")
 	}
 }
@@ -630,6 +713,70 @@ func TestSyncAddWorktreeErrorIsCollected(t *testing.T) {
 	got, _ := h.db.FindRepository(context.Background(), repo.LocalPath)
 	if got.LastSyncStatus == nil || *got.LastSyncStatus != schema.SyncStatusError {
 		t.Errorf("expected error sync status, got %v", got.LastSyncStatus)
+	}
+}
+
+func TestSyncAdoptsExistingWorktree(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/x"}}
+
+	// The branch is already checked out by hand in a directory git knows about,
+	// so recreating it would fail with "a branch named ... already exists".
+	existing := filepath.Join(h.parent, "hand-checkout")
+	if err := os.MkdirAll(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/x"}}
+	// Force AddWorktree to fail so the test proves adoption avoids it entirely.
+	h.git.addErr["feature/x"] = errors.New("a branch named 'feature/x' already exists")
+
+	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if created != 1 {
+		t.Errorf("created=%d, want 1 (adopted)", created)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 tracked worktree, got %d", len(wts))
+	}
+	if wts[0].DirectoryPath != existing {
+		t.Errorf("adopted dir=%q, want %q", wts[0].DirectoryPath, existing)
+	}
+	if wts[0].CreatedBy != schema.CreatedByPreexisting {
+		t.Errorf("created_by=%q, want %q", wts[0].CreatedBy, schema.CreatedByPreexisting)
+	}
+}
+
+func TestSyncDoesNotAdoptTrackedWorktree(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+
+	// First sync creates and tracks the worktree.
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+
+	// git now reports that worktree; a second sync must not re-adopt it as a
+	// second row nor flip its created_by.
+	h.git.worktrees = []worktree.Ref{{Dir: wts[0].DirectoryPath, Branch: "a"}}
+	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if created != 0 {
+		t.Errorf("created=%d, want 0", created)
+	}
+	got, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 worktree, got %d", len(got))
+	}
+	if got[0].CreatedBy != schema.CreatedByLumberjack {
+		t.Errorf("created_by=%q, want %q", got[0].CreatedBy, schema.CreatedByLumberjack)
 	}
 }
 

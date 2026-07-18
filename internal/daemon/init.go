@@ -14,16 +14,19 @@ import (
 
 // InitRepository registers the repository checked out at localPath: it
 // confirms the checkout is a GitHub repo (via gh), derives the worktree naming
-// defaults, and stores a repository row. It returns database.ErrRepositoryExists
-// if the path is already tracked.
+// defaults, stores a repository row, and adopts any worktrees git already has
+// checked out for it (directories created by hand or left by a prior run) so
+// they are tracked from the outset rather than re-created on the next sync. It
+// returns the number of worktrees adopted, and database.ErrRepositoryExists if
+// the path is already tracked.
 //
 // localPath must be absolute; the CLI resolves "." before calling.
-func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema.Repository, error) {
+func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema.Repository, int, error) {
 	clean := filepath.Clean(localPath)
 
 	remote, err := s.git.DefaultRemote(ctx, clean)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	info, err := s.gh.RepoInfo(ctx, clean)
 	if err != nil {
@@ -31,17 +34,17 @@ func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema
 		// rather than "not a GitHub repo" — surface a switch-credentials hint.
 		if errors.Is(err, github.ErrRepoNotFound) {
 			if hint := s.credentialHint(ctx, clean, remote); hint != "" {
-				return nil, errors.New(hint)
+				return nil, 0, errors.New(hint)
 			}
 		}
-		return nil, fmt.Errorf("%s is not a GitHub repository: %w", clean, err)
+		return nil, 0, fmt.Errorf("%s is not a GitHub repository: %w", clean, err)
 	}
 
 	// Access is confirmed under the currently-active gh account: record which
 	// login that is so the daemon can switch to it before future operations.
 	login, err := s.gh.ActiveLogin(ctx, info.Host)
 	if err != nil {
-		return nil, fmt.Errorf("determining active GitHub account: %w", err)
+		return nil, 0, fmt.Errorf("determining active GitHub account: %w", err)
 	}
 
 	repo := &schema.Repository{
@@ -57,10 +60,53 @@ func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema
 		Host:          info.Host,
 		Login:         login,
 	}
+
+	// Serialise the repo insert and worktree adoption with the daemon's other
+	// worktree mutations: the daemon is the single writer (AGENTS.md).
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := s.db.CreateRepository(ctx, repo); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return repo, nil
+	adopted, err := s.adoptExistingWorktrees(ctx, repo)
+	if err != nil {
+		return repo, adopted, err
+	}
+	return repo, adopted, nil
+}
+
+// adoptExistingWorktrees records every worktree git already has checked out for
+// repo that Lumberjack is not tracking as a preexisting worktree (matched by
+// branch, with no PR number yet — a later sync links it to its open PR). It
+// returns the number adopted. Reading worktrees is a purely local git operation,
+// so no gh account switch is needed. Callers must hold s.mu.
+func (s *Service) adoptExistingWorktrees(ctx context.Context, repo *schema.Repository) (int, error) {
+	stored, err := s.db.ListWorktrees(ctx, repo.ID)
+	if err != nil {
+		return 0, err
+	}
+	tracked := make(map[string]bool, len(stored))
+	for _, wt := range stored {
+		tracked[wt.DirectoryPath] = true
+	}
+	refs, err := s.untrackedWorktrees(ctx, repo, tracked)
+	if err != nil {
+		return 0, fmt.Errorf("listing existing worktrees: %w", err)
+	}
+	adopted := 0
+	for _, r := range refs {
+		row := &schema.Worktree{
+			RepositoryID:  repo.ID,
+			BranchName:    r.Branch,
+			DirectoryPath: r.Dir,
+			CreatedBy:     schema.CreatedByPreexisting,
+		}
+		if err := s.db.CreateWorktree(ctx, row); err != nil {
+			return adopted, fmt.Errorf("recording adopted worktree %s: %w", r.Dir, err)
+		}
+		adopted++
+	}
+	return adopted, nil
 }
 
 // credentialHint builds the "you may need to switch credentials" message shown

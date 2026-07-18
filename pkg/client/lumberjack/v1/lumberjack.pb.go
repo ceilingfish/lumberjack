@@ -540,10 +540,14 @@ func (x *InitRepositoryRequest) GetLocalPath() string {
 }
 
 type InitRepositoryResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Repository    *Repository            `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Repository *Repository            `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
+	// Number of already-checked-out worktrees adopted into tracking during init
+	// (directories git had registered for this repo but Lumberjack did not yet
+	// track). Zero for a fresh checkout with no sibling worktrees.
+	AdoptedWorktrees int32 `protobuf:"varint,2,opt,name=adopted_worktrees,json=adoptedWorktrees,proto3" json:"adopted_worktrees,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *InitRepositoryResponse) Reset() {
@@ -581,6 +585,13 @@ func (x *InitRepositoryResponse) GetRepository() *Repository {
 		return x.Repository
 	}
 	return nil
+}
+
+func (x *InitRepositoryResponse) GetAdoptedWorktrees() int32 {
+	if x != nil {
+		return x.AdoptedWorktrees
+	}
+	return 0
 }
 
 type ListRepositoriesRequest struct {
@@ -1512,11 +1523,12 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"started_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"6\n" +
 	"\x15InitRepositoryRequest\x12\x1d\n" +
 	"\n" +
-	"local_path\x18\x01 \x01(\tR\tlocalPath\"S\n" +
+	"local_path\x18\x01 \x01(\tR\tlocalPath\"\x80\x01\n" +
 	"\x16InitRepositoryResponse\x129\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\v2\x19.lumberjack.v1.RepositoryR\n" +
-	"repository\"\x19\n" +
+	"repository\x12+\n" +
+	"\x11adopted_worktrees\x18\x02 \x01(\x05R\x10adoptedWorktrees\"\x19\n" +
 	"\x17ListRepositoriesRequest\"Y\n" +
 	"\x18ListRepositoriesResponse\x12=\n" +
 	"\frepositories\x18\x01 \x03(\v2\x19.lumberjack.v1.RepositoryR\frepositories\"6\n" +

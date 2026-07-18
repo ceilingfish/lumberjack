@@ -124,11 +124,11 @@ func TestClientHealth(t *testing.T) {
 
 func TestClientInitAndAlreadyExists(t *testing.T) {
 	c := startStub(t)
-	repo, err := c.InitRepository(context.Background(), "/new")
+	repo, _, err := c.InitRepository(context.Background(), "/new")
 	if err != nil || repo.GetDirPrefix() != "repo" {
 		t.Errorf("InitRepository = %v, %v", repo, err)
 	}
-	_, err = c.InitRepository(context.Background(), "/dupe")
+	_, _, err = c.InitRepository(context.Background(), "/dupe")
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}

@@ -51,11 +51,14 @@ func (s *Server) InitRepository(ctx context.Context, req *lumberjackv1.InitRepos
 	if req.GetLocalPath() == "" {
 		return nil, status.Error(codes.InvalidArgument, "local_path is required")
 	}
-	repo, err := s.svc.InitRepository(ctx, req.GetLocalPath())
+	repo, adopted, err := s.svc.InitRepository(ctx, req.GetLocalPath())
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &lumberjackv1.InitRepositoryResponse{Repository: toProtoRepository(repo)}, nil
+	return &lumberjackv1.InitRepositoryResponse{
+		Repository:       toProtoRepository(repo),
+		AdoptedWorktrees: int32(adopted),
+	}, nil
 }
 
 // ListRepositories returns every tracked repository.

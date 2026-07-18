@@ -140,18 +140,21 @@ func TestAddListRemoveWorktree(t *testing.T) {
 		t.Fatalf("AddWorktree: %v", err)
 	}
 
-	dirs, err := g.ListWorktrees(ctx, main)
+	refs, err := g.ListWorktrees(ctx, main)
 	if err != nil {
 		t.Fatalf("ListWorktrees: %v", err)
 	}
 	found := false
-	for _, d := range dirs {
-		if filepath.Base(d) == "wt-bar" {
+	for _, r := range refs {
+		if filepath.Base(r.Dir) == "wt-bar" {
 			found = true
+			if r.Branch != "feature/bar" {
+				t.Errorf("branch = %q, want feature/bar", r.Branch)
+			}
 		}
 	}
 	if !found {
-		t.Errorf("new worktree not listed: %v", dirs)
+		t.Errorf("new worktree not listed: %v", refs)
 	}
 
 	if err := g.RemoveWorktree(ctx, main, dir, false); err != nil {

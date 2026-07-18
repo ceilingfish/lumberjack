@@ -87,13 +87,15 @@ func (c *Client) Health(ctx context.Context) (*lumberjackv1.HealthResponse, erro
 	return resp, mapError(err)
 }
 
-// InitRepository registers the repository at localPath.
-func (c *Client) InitRepository(ctx context.Context, localPath string) (*lumberjackv1.Repository, error) {
+// InitRepository registers the repository at localPath, returning the stored
+// repository and the number of already-checked-out worktrees adopted into
+// tracking during registration.
+func (c *Client) InitRepository(ctx context.Context, localPath string) (*lumberjackv1.Repository, int, error) {
 	resp, err := c.svc.InitRepository(ctx, &lumberjackv1.InitRepositoryRequest{LocalPath: localPath})
 	if err != nil {
-		return nil, mapError(err)
+		return nil, 0, mapError(err)
 	}
-	return resp.GetRepository(), nil
+	return resp.GetRepository(), int(resp.GetAdoptedWorktrees()), nil
 }
 
 // ListRepositories returns every tracked repository.
