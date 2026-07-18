@@ -106,7 +106,7 @@ func TestServerListWorktrees(t *testing.T) {
 	srv := newServer(h)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	resp, err := srv.ListWorktrees(context.Background(), &lumberjackv1.ListWorktreesRequest{Repository: "n"})
 	if err != nil {
@@ -129,7 +129,7 @@ func TestServerDeleteWorktree(t *testing.T) {
 	srv := newServer(h)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	resp, err := srv.DeleteWorktree(context.Background(),
 		&lumberjackv1.DeleteWorktreeRequest{Repository: "n", Worktree: "a"})
@@ -152,7 +152,7 @@ func TestServerDeleteRepository(t *testing.T) {
 	srv := newServer(h)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	resp, err := srv.DeleteRepository(context.Background(),
 		&lumberjackv1.DeleteRepositoryRequest{Repository: "n"})

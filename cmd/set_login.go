@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ceilingfish/lumberjack/pkg/client"
@@ -65,7 +66,7 @@ func setLogin(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref, l
 			return err
 		}
 		if len(logins) == 0 {
-			return fmt.Errorf("gh has no authenticated accounts for this repository's host; run `gh auth login` first")
+			return errors.New("gh has no authenticated accounts for this repository's host; run `gh auth login` first")
 		}
 		login, err = loginPicker(cmd, logins, current)
 		if err != nil {

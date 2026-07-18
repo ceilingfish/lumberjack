@@ -217,5 +217,4 @@ func TestDialDefault(t *testing.T) {
 		t.Fatalf("Dial: %v", err)
 	}
 	_ = c.Close()
-	_ = os.Remove
 }

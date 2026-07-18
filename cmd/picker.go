@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,7 +11,7 @@ import (
 )
 
 // errPickCancelled is returned by the picker when the user aborts the menu.
-var errPickCancelled = fmt.Errorf("cancelled")
+var errPickCancelled = errors.New("cancelled")
 
 // loginPicker chooses a login from candidates interactively. It is a package
 // var so tests can substitute a deterministic selection for the raw-terminal
@@ -37,7 +38,7 @@ const (
 func pickLogin(cmd *cobra.Command, logins []string, current string) (string, error) {
 	fd := int(os.Stdin.Fd())
 	if !term.IsTerminal(fd) {
-		return "", fmt.Errorf("no login given and no interactive terminal to choose one; pass a login, e.g. `lumberjack set-login LOGIN`")
+		return "", errors.New("no login given and no interactive terminal to choose one; pass a login, e.g. `lumberjack set-login LOGIN`")
 	}
 	out := cmd.ErrOrStderr()
 	sel := indexOf(logins, current)
