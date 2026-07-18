@@ -41,8 +41,17 @@ type Prober interface {
 //
 // p must have fetched the repo first so remote-tracking refs are current.
 func Reconcile(ctx context.Context, p Prober, dir string, prOpen bool) (Status, error) {
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+	info, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		// Genuinely gone from disk — safe to prune from tracking.
 		return Status{Missing: true, Note: "worktree directory is missing"}, nil
+	case err != nil:
+		// A permission or transient I/O error is not the same as missing; do
+		// not let it masquerade as a prunable worktree.
+		return Status{}, fmt.Errorf("stat worktree directory: %w", err)
+	case !info.IsDir():
+		return Status{Missing: true, Note: "worktree path is not a directory"}, nil
 	}
 
 	dirty, err := p.IsDirty(ctx, dir)

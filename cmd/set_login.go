@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/ceilingfish/lumberjack/pkg/client"
@@ -36,19 +37,15 @@ func newSetLoginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			login := ""
+			if len(args) == 1 {
+				login = args[0]
+			}
 			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
-				return setLogin(ctx, cmd, c, abs, firstArg(args))
+				return setLogin(ctx, cmd, c, abs, login)
 			})
 		},
 	}
-}
-
-// firstArg returns args[0] or "" — the optional LOGIN positional.
-func firstArg(args []string) string {
-	if len(args) == 0 {
-		return ""
-	}
-	return args[0]
 }
 
 // setLogin sets the gh login for the repository resolved by ref and reports the
@@ -65,7 +62,7 @@ func setLogin(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref, l
 			return err
 		}
 		if len(logins) == 0 {
-			return fmt.Errorf("gh has no authenticated accounts for this repository's host; run `gh auth login` first")
+			return errors.New("gh has no authenticated accounts for this repository's host; run `gh auth login` first")
 		}
 		login, err = loginPicker(cmd, logins, current)
 		if err != nil {

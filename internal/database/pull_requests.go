@@ -51,13 +51,3 @@ func (c *Client) ReplaceOpenPRs(ctx context.Context, repoID int64, prs []Tracked
 		return nil
 	})
 }
-
-// ListPRs returns the tracked open PRs for a repository.
-func (c *Client) ListPRs(ctx context.Context, repoID int64) ([]schema.PullRequest, error) {
-	var prs []schema.PullRequest
-	if err := c.NewSelect().Model(&prs).
-		Where("repository_id = ?", repoID).Order("github_pr_number ASC").Scan(ctx); err != nil {
-		return nil, fmt.Errorf("listing pull requests: %w", err)
-	}
-	return prs, nil
-}

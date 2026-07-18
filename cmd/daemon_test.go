@@ -32,7 +32,7 @@ type fakeLifecycle struct {
 
 func (f *fakeLifecycle) Status() (service.Status, error) { return f.status, f.statusErr }
 func (f *fakeLifecycle) Install() error                  { f.installed = true; return f.installErr }
-func (f *fakeLifecycle) Uninstall() error               { f.uninstalled = true; return f.uninstallErr }
+func (f *fakeLifecycle) Uninstall() error                { f.uninstalled = true; return f.uninstallErr }
 func (f *fakeLifecycle) Start() error                    { f.started = true; return f.startErr }
 func (f *fakeLifecycle) Stop() error                     { f.stopped = true; return f.stopErr }
 
@@ -104,9 +104,9 @@ func TestInstallDaemon(t *testing.T) {
 // with actionable guidance; durable paths pass.
 func TestCheckStableExecutable(t *testing.T) {
 	ephemeral := []string{
-		"/var/folders/xb/T/go-build2170204171/b001/exe/lumberjack",             // temp work dir
-		"/tmp/go-build123/b001/exe/lumberjack",                                 // temp work dir
-		"/Users/tom/Library/Caches/go-build/42/42dd568…-d/lumberjack",          // persistent build cache
+		"/var/folders/xb/T/go-build2170204171/b001/exe/lumberjack",    // temp work dir
+		"/tmp/go-build123/b001/exe/lumberjack",                        // temp work dir
+		"/Users/tom/Library/Caches/go-build/42/42dd568…-d/lumberjack", // persistent build cache
 	}
 	for _, p := range ephemeral {
 		err := checkStableExecutable(p)

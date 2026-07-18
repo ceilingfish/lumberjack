@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
@@ -26,7 +27,7 @@ func (s *Service) SetLogin(ctx context.Context, repo *schema.Repository, login s
 	if err != nil {
 		return nil, fmt.Errorf("listing gh accounts for %s: %w", repo.Host, err)
 	}
-	if !contains(logins, login) {
+	if !slices.Contains(logins, login) {
 		return nil, fmt.Errorf("%q is not a gh account authenticated for %s (available: %s); run `gh auth login` first",
 			login, repo.Host, available(logins))
 	}
@@ -54,15 +55,6 @@ func (s *Service) SetLogin(ctx context.Context, repo *schema.Repository, login s
 // candidates SetLogin accepts.
 func (s *Service) ListLogins(ctx context.Context, repo *schema.Repository) ([]string, error) {
 	return s.gh.ListLogins(ctx, repo.Host)
-}
-
-func contains(ss []string, s string) bool {
-	for _, v := range ss {
-		if v == s {
-			return true
-		}
-	}
-	return false
 }
 
 // available renders a login list for an error message, or "none" when empty.

@@ -172,6 +172,11 @@ func (c *Client) DeleteRepository(ctx context.Context, ref string) (*lumberjackv
 // Sync reconciles one repository (ref set) or all of them (ref empty),
 // invoking onEvent for each streamed progress update until the stream ends.
 func (c *Client) Sync(ctx context.Context, ref string, onEvent func(*lumberjackv1.SyncResponse) error) error {
+	// Cancel on any early return so an abandoned stream (callback error, or a
+	// caller that stops reading) releases the underlying gRPC stream instead of
+	// leaking it until the parent context is done.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	stream, err := c.svc.Sync(ctx, &lumberjackv1.SyncRequest{Repository: ref})
 	if err != nil {
 		return mapError(err)

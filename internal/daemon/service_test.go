@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -180,6 +181,16 @@ func (h *harness) repo(t *testing.T) *schema.Repository {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 	return r
+}
+
+// seedSync runs an initial reconciliation to establish state for a test,
+// failing fast if the setup sync itself errors (so tests fail on their own
+// assertions, not a broken fixture).
+func (h *harness) seedSync(t *testing.T, repo *schema.Repository) {
+	t.Helper()
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("seed SyncRepository: %v", err)
+	}
 }
 
 func TestInitRepository(t *testing.T) {
@@ -505,7 +516,7 @@ func TestSyncSwitchesToRepoLoginAndRestores(t *testing.T) {
 	}
 	// Switched to the repo's login for the operation, then back to personal.
 	want := [][2]string{{"github.com", "work"}, {"github.com", "personal"}}
-	if fmt.Sprintf("%v", h.gh.switches) != fmt.Sprintf("%v", want) {
+	if !reflect.DeepEqual(h.gh.switches, want) {
 		t.Errorf("switches = %v, want %v", h.gh.switches, want)
 	}
 	if h.gh.active != "personal" {
@@ -641,7 +652,7 @@ func TestSyncRemovesClosedCleanWorktree(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	// PR #1 closes: clean worktree should be removed.
 	h.gh.prs = nil
@@ -662,7 +673,7 @@ func TestSyncRetainsDirtyClosedWorktree(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	// Mark the worktree dirty and its PR closed.
@@ -726,7 +737,7 @@ func TestSyncPrunesMissingWorktree(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	_ = os.RemoveAll(wts[0].DirectoryPath) // directory vanishes by hand
@@ -862,7 +873,7 @@ func TestWorktreeViews(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	views, err := h.svc.WorktreeViews(context.Background(), repo)
 	if err != nil {
@@ -877,7 +888,7 @@ func TestDeleteWorktreeClean(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 
 	res, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false)
 	if err != nil {
@@ -892,7 +903,7 @@ func TestDeleteWorktreeNeedsConfirmation(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	h.git.localOnly[wts[0].DirectoryPath] = 3
 
@@ -927,7 +938,7 @@ func TestDeleteWorktreeMissingDir(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	_ = os.RemoveAll(wts[0].DirectoryPath)
 
@@ -948,7 +959,7 @@ func TestNowInjectable(t *testing.T) {
 	fixed := time.Unix(1000, 0)
 	h.svc.now = func() time.Time { return fixed }
 	repo := h.repo(t)
-	_, _, _ = h.svc.SyncRepository(context.Background(), repo, nil)
+	h.seedSync(t, repo)
 	run, _ := h.db.LatestSyncRun(context.Background(), repo.ID)
 	if run == nil || !run.StartedAt.Equal(fixed) {
 		t.Errorf("expected injected time, got %+v", run)

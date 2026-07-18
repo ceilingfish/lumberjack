@@ -2,6 +2,8 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -49,9 +51,7 @@ func (c *Client) LatestSyncRun(ctx context.Context, repoID int64) (*schema.SyncR
 		Order("started_at DESC").Limit(1).Scan(ctx)
 	if err != nil {
 		// No rows is not an error here — a never-synced repo simply has none.
-		count, cErr := c.NewSelect().Model((*schema.SyncRun)(nil)).
-			Where("repository_id = ?", repoID).Count(ctx)
-		if cErr == nil && count == 0 {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("loading latest sync run: %w", err)

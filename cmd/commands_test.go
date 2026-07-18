@@ -207,7 +207,7 @@ func TestCmdRepositoriesList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repositories: %v", err)
 	}
-	if !strings.Contains(out, "a") || !strings.Contains(out, "/p/b") || !strings.Contains(out, "never synced") {
+	if !strings.Contains(out, "/p/a") || !strings.Contains(out, "/p/b") || !strings.Contains(out, "never synced") {
 		t.Errorf("out = %q", out)
 	}
 }

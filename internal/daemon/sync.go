@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -241,7 +240,7 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		if fErr := s.db.FinishSyncRun(ctx, run, finish, created, removed, err); fErr != nil && err == nil {
 			err = fErr
 		}
-		if uErr := s.db.UpdateSyncResult(ctx, repo.ID, finish, err, ""); uErr != nil && err == nil {
+		if uErr := s.db.UpdateSyncResult(ctx, repo.ID, finish, err); uErr != nil && err == nil {
 			err = uErr
 		}
 	}()
@@ -535,6 +534,3 @@ func (s *Service) removeOne(
 	})
 	return true
 }
-
-// baseName is filepath.Base, aliased so progress lines stay readable.
-func baseName(p string) string { return filepath.Base(p) }
