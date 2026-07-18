@@ -4,6 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
@@ -28,6 +31,13 @@ func newDaemonInstallCmd() *cobra.Command {
 			"reinstalled with the current binary path, socket, and environment.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			exe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("resolving current executable: %w", err)
+			}
+			if err := checkStableExecutable(exe); err != nil {
+				return err
+			}
 			svc, err := newService(socketPath)
 			if err != nil {
 				return err
@@ -40,6 +50,33 @@ func newDaemonInstallCmd() *cobra.Command {
 	c.Flags().BoolVar(&force, "force", false,
 		"Reinstall over an existing install (upgrade the registered binary and environment)")
 	return c
+}
+
+// checkStableExecutable refuses to install when the running binary is an
+// ephemeral `go run` build. Such builds live in a temporary go-build directory
+// that is deleted once the process exits, so the service manager would be left
+// pointing at a path that soon vanishes — the daemon then fails to launch (and,
+// under KeepAlive, crash-loops). Installing must be done from a durable binary,
+// e.g. `mise build` then `./bin/lumberjack daemon install`.
+func checkStableExecutable(exe string) error {
+	if !isEphemeralBuild(exe) {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing to install the daemon from a temporary `go run` build (%s): "+
+			"its path is deleted when the process exits. Build a durable binary "+
+			"first, then install from it:\n\n"+
+			"    mise build\n"+
+			"    ./bin/lumberjack daemon install",
+		exe)
+}
+
+// isEphemeralBuild reports whether path looks like a throwaway binary produced
+// by `go run`, which places the compiled executable under a `go-build` cache
+// directory in the system temp area. ToSlash normalises separators so the match
+// holds on Windows too.
+func isEphemeralBuild(path string) bool {
+	return strings.Contains(filepath.ToSlash(path), "/go-build")
 }
 
 // installDaemon registers svc with the service manager and reports next steps.

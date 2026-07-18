@@ -100,6 +100,36 @@ func TestInstallDaemon(t *testing.T) {
 	}
 }
 
+// TestCheckStableExecutable: installs from a `go run` temp build are refused
+// with actionable guidance; durable paths pass.
+func TestCheckStableExecutable(t *testing.T) {
+	ephemeral := []string{
+		"/var/folders/xb/T/go-build2170204171/b001/exe/lumberjack",
+		"/tmp/go-build123/b001/exe/lumberjack",
+	}
+	for _, p := range ephemeral {
+		err := checkStableExecutable(p)
+		if err == nil {
+			t.Errorf("checkStableExecutable(%q) = nil, want error", p)
+			continue
+		}
+		if !strings.Contains(err.Error(), "mise build") {
+			t.Errorf("error for %q lacks build guidance: %v", p, err)
+		}
+	}
+
+	durable := []string{
+		"/Users/tom.parrish/Code/ceilingfish/Lumberjack/bin/lumberjack",
+		"/usr/local/bin/lumberjack",
+		"/opt/homebrew/bin/lumberjack",
+	}
+	for _, p := range durable {
+		if err := checkStableExecutable(p); err != nil {
+			t.Errorf("checkStableExecutable(%q) = %v, want nil", p, err)
+		}
+	}
+}
+
 // TestInstallDaemonForce: --force removes any existing registration (Stop +
 // Uninstall) before installing, so an "already exists" error can never occur.
 func TestInstallDaemonForce(t *testing.T) {
