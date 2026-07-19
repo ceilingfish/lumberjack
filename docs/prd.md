@@ -30,7 +30,7 @@ A background daemon process should query this database on an hourly basis and ch
 Lumberjack runs as two cooperating processes:
 
 - **The daemon is the server and the sole owner of state.** It owns the SQLite database, runs schema migrations on startup, drives the hourly sync loop, and performs every worktree operation (create, checkout, delete, and reconciliation checks). Because only the daemon touches the database and the working trees, there is a single writer — no two processes can race on the DB or corrupt a worktree. The daemon is started with `lumberjack daemon`.
-- **The CLI is a thin client.** Every user-facing command (`repositories`, `repository`, `sync`, etc.) is a request to the daemon. The CLI never opens the database or shells out to `git` for worktrees itself; it asks the daemon to do the work and renders the result. If the daemon is not running, the CLI says so clearly rather than silently operating on stale or half-owned state.
+- **The CLI is a thin client.** Every user-facing command (`list`, `status`, `sync`, etc.) is a request to the daemon. The CLI never opens the database or shells out to `git` for worktrees itself; it asks the daemon to do the work and renders the result. If the daemon is not running, the CLI says so clearly rather than silently operating on stale or half-owned state.
 
 The two processes communicate over a **gRPC API** whose service and message definitions are the contract between them. The daemon exposes this API; the CLI consumes it through a generated gRPC client published in `pkg/client/`, so any other tooling that wants to talk to a Lumberjack daemon can reuse the same client.
 
@@ -38,16 +38,15 @@ Because client and server always run on the same machine, the daemon listens on 
 
 ## Commands
 
-`lumberjack repositories` should show the list of tracked repositories
-`lumberjack repositories NAME` should show details of the last sync for a named repository
-`lumberjack status` shows the same last-sync detail as `lumberjack repositories NAME`, but for the tracked repository at the current working directory
-`lumberjack repositories NAME sync` Triggers a synchronisation of the named repository specifically
-`lumberjack repositories NAME worktrees` should show a list of worktrees checked out for a repository, with their path, and if they need reconciliation, a warning
-`lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits
-`lumberjack repositories NAME set-login LOGIN` sets the `gh` account the named repository operates under (the daemon switches to it before any git/gh operation and restores the prior account after). LOGIN must be an account `gh` is authenticated as for the repository's host, and the daemon verifies that account can actually reach the repository on GitHub before saving — otherwise the update is rejected. Omit LOGIN to pick from the authenticated accounts interactively (↑/↓, enter to confirm)
-`lumberjack set-login [LOGIN]` within the context of a tracked repo sets the `gh` account for that repo specifically; the same validation and interactive picker apply
-`lumberjack repositories --sync` Triggers a synchronisation of all repositories
-`lumberjack sync` Within the context of a tracked repo synchronises worktrees for that repo specifically
+`lumberjack list` should show the list of tracked repositories
+`lumberjack status [--repository NAME]` should show details of the last sync for the tracked repository at the current working directory, or for the named repository when `--repository NAME` is given
+`lumberjack sync [--repository NAME]` synchronises worktrees for the current-directory repo, or the named repository, specifically
+`lumberjack worktrees [--repository NAME]` should show a list of worktrees checked out for the current-directory repo, or the named repository, with their path, and if they need reconciliation, a warning
+`lumberjack worktree delete BRANCH_OR_DIRECTORY_NAME [--repository NAME]` will delete the worktree, if the tip of the local worktree doesn't match the tip merged remote, then we should ask for confirmation with a warning that the user will lose X commits
+`lumberjack set-login [LOGIN] [--repository NAME]` sets the `gh` account the current-directory repository, or the named repository, operates under (the daemon switches to it before any git/gh operation and restores the prior account after). LOGIN must be an account `gh` is authenticated as for the repository's host, and the daemon verifies that account can actually reach the repository on GitHub before saving — otherwise the update is rejected. Omit LOGIN to pick from the authenticated accounts interactively (↑/↓, enter to confirm)
+`lumberjack sync-all` Triggers a synchronisation of all repositories
+
+Every scoped command above (`status`, `sync`, `worktrees`, `worktree delete`, `set-login`) resolves its target the same way: `--repository NAME` when given, otherwise the tracked repository at the current working directory. Neither present is a clear error rather than acting on the wrong repo.
 `lumberjack daemon` Runs the background daemon (the gRPC server) in the foreground. This is the process that owns the database and worktrees and runs the hourly sync loop; normally it is managed by a service supervisor rather than invoked by hand.
 `lumberjack doctor` Checks that the required host prerequisites are available and reports their location and version. It verifies that `git` and `gh` can be found (honouring `LUMBERJACK_GIT_PATH` and `LUMBERJACK_GITHUB_CLI_PATH`, otherwise searching the system `PATH`), and that `gh` is authenticated. Exits non-zero if any check fails, so it can be used in scripts.
 

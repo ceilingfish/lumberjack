@@ -25,7 +25,7 @@ One row per tracked repo. This is the identity Lumberjack syncs against.
 | `default_remote`      | text      | Usually `origin`, but not assumed                                                                                        |
 | `host`                | text      | `github.com` vs. GitHub Enterprise; needed for the API base URL                                                          |
 | `login`               | text      | The `gh` account the repo was registered under (`gh auth status --active`). The daemon switches to it (`gh auth switch`) before any operation and restores the prior account after. Empty for repos tracked before this column existed — no switching |
-| `last_synced_at`      | timestamp | For `lumberjack repositories NAME`                                                                                         |
+| `last_synced_at`      | timestamp | For `lumberjack status`                                                                                                  |
 | `last_sync_status`    | text      | `ok` / `error`                                                                                                           |
 | `last_sync_error`     | text      | Nullable; last error message                                                                                             |
 | `etag_pulls`          | text      | ETag from the last PR-list request, for conditional (304) fetches                                                        |
@@ -61,11 +61,11 @@ The local side, and the crucial branch ↔ directory mapping. Holds only what gi
 
 Unique constraint on (`repository_id`, `directory_path`).
 
-`lumberjack repositories NAME worktrees` displays just **directory**, **branch**, and **last synced at** from this table. Reconciliation status (dirty tree, local-only commits, orphaned) is computed live from git when needed, not stored.
+`lumberjack worktrees` displays just **directory**, **branch**, and **last synced at** from this table. Reconciliation status (dirty tree, local-only commits, orphaned) is computed live from git when needed, not stored.
 
 ### `sync_runs`
 
-Optional but recommended — audit log for `lumberjack repositories NAME` detail and daemon debugging.
+Optional but recommended — audit log for `lumberjack status` detail and daemon debugging.
 
 | Column              | Type      | Notes                      |
 | ------------------- | --------- | -------------------------- |

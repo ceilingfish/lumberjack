@@ -10,21 +10,40 @@ import (
 )
 
 func newSyncCmd() *cobra.Command {
-	return &cobra.Command{
+	var repository string
+
+	c := &cobra.Command{
 		Use:   "sync",
-		Short: "Synchronise worktrees for the repository in the current directory",
+		Short: "Synchronise worktrees for a repository",
 		Long: "Reconciles worktrees for the tracked repository at the current " +
-			"working directory against its open PRs. Run it from the repo's " +
-			"main checkout. To sync every tracked repository, use " +
-			"`lumberjack repositories --sync`.",
+			"working directory, or for the repository named by --repository, " +
+			"against its open PRs. To sync every tracked repository, use " +
+			"`lumberjack sync-all`.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			abs, err := cwdAbs()
+			ref, err := resolveRepositoryRef(repository)
 			if err != nil {
 				return err
 			}
 			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
-				return runSync(ctx, cmd, c, abs)
+				return runSync(ctx, cmd, c, ref)
+			})
+		},
+	}
+
+	addRepositoryFlag(c, &repository)
+	return c
+}
+
+func newSyncAllCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync-all",
+		Short: "Synchronise worktrees for every tracked repository",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
+				// Empty ref syncs every tracked repository.
+				return runSync(ctx, cmd, c, "")
 			})
 		},
 	}
@@ -32,7 +51,7 @@ func newSyncCmd() *cobra.Command {
 
 // runSync streams a sync of ref (empty = all repositories) and renders, per
 // repository, a branch/PR/action table of the changes followed by a summary
-// line. Shared by `sync` and `repositories --sync`.
+// line. Shared by `sync` and `sync-all`.
 func runSync(ctx context.Context, cmd *cobra.Command, c *client.Client, ref string) error {
 	out := cmd.OutOrStdout()
 	// Buffer each repo's per-branch changes so the table can be column-aligned

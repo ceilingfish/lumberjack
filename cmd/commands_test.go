@@ -187,32 +187,32 @@ func TestCmdInitReportsAdoptedWorktrees(t *testing.T) {
 	}
 }
 
-func TestCmdRepositoriesEmpty(t *testing.T) {
+func TestCmdListEmpty(t *testing.T) {
 	serveStub(t, &stubService{})
-	out, err := run(t, "", "repositories")
+	out, err := run(t, "", "list")
 	if err != nil {
-		t.Fatalf("repositories: %v", err)
+		t.Fatalf("list: %v", err)
 	}
 	if !strings.Contains(out, "No repositories tracked") {
 		t.Errorf("out = %q", out)
 	}
 }
 
-func TestCmdRepositoriesList(t *testing.T) {
+func TestCmdList(t *testing.T) {
 	serveStub(t, &stubService{repos: []*lumberjackv1.Repository{
 		{DirPrefix: "a", LocalPath: "/p/a", LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK},
 		{DirPrefix: "b", LocalPath: "/p/b"},
 	}})
-	out, err := run(t, "", "repositories")
+	out, err := run(t, "", "list")
 	if err != nil {
-		t.Fatalf("repositories: %v", err)
+		t.Fatalf("list: %v", err)
 	}
 	if !strings.Contains(out, "/p/a") || !strings.Contains(out, "/p/b") || !strings.Contains(out, "never synced") {
 		t.Errorf("out = %q", out)
 	}
 }
 
-func TestCmdRepositoriesSync(t *testing.T) {
+func TestCmdSyncAll(t *testing.T) {
 	pr := int64(1)
 	stub := &stubService{syncEvents: []*lumberjackv1.SyncResponse{
 		{Repository: "a", Change: &lumberjackv1.WorktreeChange{
@@ -222,9 +222,9 @@ func TestCmdRepositoriesSync(t *testing.T) {
 		{Repository: "a", Completed: true, Summary: &lumberjackv1.SyncSummary{WorktreesCreated: 1}},
 	}}
 	serveStub(t, stub)
-	out, err := run(t, "", "repositories", "--sync")
+	out, err := run(t, "", "sync-all")
 	if err != nil {
-		t.Fatalf("repositories --sync: %v", err)
+		t.Fatalf("sync-all: %v", err)
 	}
 	if stub.lastSyncTarget != "" {
 		t.Errorf("expected all-repos sync (empty target), got %q", stub.lastSyncTarget)
@@ -236,15 +236,15 @@ func TestCmdRepositoriesSync(t *testing.T) {
 	}
 }
 
-func TestCmdRepositorySync(t *testing.T) {
+func TestCmdSyncNamedRepository(t *testing.T) {
 	stub := &stubService{syncEvents: []*lumberjackv1.SyncResponse{
 		{Repository: "n", Message: "creating worktree for PR #1"},
 		{Repository: "n", Completed: true, Summary: &lumberjackv1.SyncSummary{WorktreesCreated: 1}},
 	}}
 	serveStub(t, stub)
-	out, err := run(t, "", "repositories", "n", "sync")
+	out, err := run(t, "", "sync", "--repository", "n")
 	if err != nil {
-		t.Fatalf("repositories n sync: %v", err)
+		t.Fatalf("sync --repository n: %v", err)
 	}
 	if stub.lastSyncTarget != "n" {
 		t.Errorf("expected sync target %q, got %q", "n", stub.lastSyncTarget)
@@ -254,11 +254,11 @@ func TestCmdRepositorySync(t *testing.T) {
 	}
 }
 
-func TestCmdRepositoryDetail(t *testing.T) {
+func TestCmdStatusNamedRepository(t *testing.T) {
 	serveStub(t, &stubService{})
-	out, err := run(t, "", "repositories", "n")
+	out, err := run(t, "", "status", "--repository", "n")
 	if err != nil {
-		t.Fatalf("repository: %v", err)
+		t.Fatalf("status --repository n: %v", err)
 	}
 	if !strings.Contains(out, "GitHub:") || !strings.Contains(out, "o/n") {
 		t.Errorf("out = %q", out)
@@ -272,7 +272,7 @@ func TestCmdStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("status: %v", err)
 	}
-	// Same detail view as `repositories NAME`.
+	// Same detail view as `status --repository NAME`.
 	if !strings.Contains(out, "GitHub:") || !strings.Contains(out, "o/n") {
 		t.Errorf("out = %q", out)
 	}
@@ -282,15 +282,31 @@ func TestCmdStatus(t *testing.T) {
 	}
 }
 
-func TestCmdRepositoryNotFound(t *testing.T) {
+func TestCmdWorktreesCurrentRepo(t *testing.T) {
+	// worktrees with no --repository lists the current-directory repo's
+	// worktrees — a new capability that did not exist under `repositories`.
+	num := int64(7)
+	serveStub(t, &stubService{worktrees: []*lumberjackv1.Worktree{
+		{DirectoryPath: "/p/n-x", BranchName: "feature/x", GithubPrNumber: &num},
+	}})
+	out, err := run(t, "", "worktrees")
+	if err != nil {
+		t.Fatalf("worktrees: %v", err)
+	}
+	if !strings.Contains(out, "n-x") || !strings.Contains(out, "#7") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdStatusNamedRepositoryNotFound(t *testing.T) {
 	serveStub(t, &stubService{getNotFound: true})
-	_, err := run(t, "", "repositories", "ghost")
+	_, err := run(t, "", "status", "--repository", "ghost")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected not-found error, got %v", err)
 	}
 }
 
-func TestCmdRepositoryWorktrees(t *testing.T) {
+func TestCmdWorktreesNamedRepository(t *testing.T) {
 	num := int64(7)
 	serveStub(t, &stubService{worktrees: []*lumberjackv1.Worktree{
 		{
@@ -298,7 +314,7 @@ func TestCmdRepositoryWorktrees(t *testing.T) {
 			NeedsReconciliation: true, ReconciliationNote: "uncommitted changes",
 		},
 	}})
-	out, err := run(t, "", "repositories", "n", "worktrees")
+	out, err := run(t, "", "worktrees", "--repository", "n")
 	if err != nil {
 		t.Fatalf("worktrees: %v", err)
 	}
@@ -307,9 +323,20 @@ func TestCmdRepositoryWorktrees(t *testing.T) {
 	}
 }
 
+func TestCmdWorktreesEmpty(t *testing.T) {
+	serveStub(t, &stubService{})
+	out, err := run(t, "", "worktrees", "--repository", "n")
+	if err != nil {
+		t.Fatalf("worktrees: %v", err)
+	}
+	if !strings.Contains(out, "No worktrees tracked") {
+		t.Errorf("out = %q", out)
+	}
+}
+
 func TestCmdWorktreeDeleteClean(t *testing.T) {
 	serveStub(t, &stubService{})
-	out, err := run(t, "", "repositories", "n", "worktree", "feature/x", "delete")
+	out, err := run(t, "", "worktree", "delete", "feature/x", "--repository", "n")
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -321,7 +348,7 @@ func TestCmdWorktreeDeleteClean(t *testing.T) {
 func TestCmdWorktreeDeleteConfirmYes(t *testing.T) {
 	stub := &stubService{deleteConfirm: true}
 	serveStub(t, stub)
-	out, err := run(t, "y\n", "repositories", "n", "worktree", "feature/x", "delete")
+	out, err := run(t, "y\n", "worktree", "delete", "feature/x", "--repository", "n")
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -333,7 +360,7 @@ func TestCmdWorktreeDeleteConfirmYes(t *testing.T) {
 func TestCmdWorktreeDeleteConfirmNo(t *testing.T) {
 	stub := &stubService{deleteConfirm: true}
 	serveStub(t, stub)
-	out, err := run(t, "n\n", "repositories", "n", "worktree", "feature/x", "delete")
+	out, err := run(t, "n\n", "worktree", "delete", "feature/x", "--repository", "n")
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}
@@ -346,7 +373,7 @@ func TestCmdWorktreeDeleteForceFlag(t *testing.T) {
 	stub := &stubService{deleteConfirm: true}
 	serveStub(t, stub)
 	// --force skips the prompt and forces immediately.
-	_, err := run(t, "", "repositories", "n", "worktree", "feature/x", "delete", "--force")
+	_, err := run(t, "", "worktree", "delete", "feature/x", "--repository", "n", "--force")
 	if err != nil {
 		t.Fatalf("delete --force: %v", err)
 	}
@@ -355,18 +382,18 @@ func TestCmdWorktreeDeleteForceFlag(t *testing.T) {
 	}
 }
 
-func TestCmdRepositoryBadSubcommand(t *testing.T) {
+func TestCmdRepositoriesIsUnknownCommand(t *testing.T) {
 	serveStub(t, &stubService{})
-	_, err := run(t, "", "repositories", "n", "bogus")
-	if err == nil || !strings.Contains(err.Error(), "unrecognised") {
-		t.Errorf("expected unrecognised-command error, got %v", err)
+	_, err := run(t, "", "repositories")
+	if err == nil || !strings.Contains(err.Error(), "unknown command") {
+		t.Errorf("expected `repositories` to be an unknown command, got %v", err)
 	}
 }
 
-func TestCmdRepositorySetLoginExplicit(t *testing.T) {
+func TestCmdSetLoginNamedRepositoryExplicit(t *testing.T) {
 	stub := &stubService{}
 	serveStub(t, stub)
-	out, err := run(t, "", "repositories", "n", "set-login", "work")
+	out, err := run(t, "", "set-login", "work", "--repository", "n")
 	if err != nil {
 		t.Fatalf("set-login: %v", err)
 	}
@@ -381,7 +408,7 @@ func TestCmdRepositorySetLoginExplicit(t *testing.T) {
 func TestCmdSetLoginRejectedByDaemon(t *testing.T) {
 	stub := &stubService{loginErr: status.Error(codes.InvalidArgument, `"ghost" is not a gh account authenticated for github.com`)}
 	serveStub(t, stub)
-	_, err := run(t, "", "repositories", "n", "set-login", "ghost")
+	_, err := run(t, "", "set-login", "ghost", "--repository", "n")
 	if err == nil || !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("expected rejection naming the login, got %v", err)
 	}
@@ -400,7 +427,7 @@ func TestCmdSetLoginPicker(t *testing.T) {
 	}
 	t.Cleanup(func() { loginPicker = prev })
 
-	out, err := run(t, "", "repositories", "n", "set-login")
+	out, err := run(t, "", "set-login", "--repository", "n")
 	if err != nil {
 		t.Fatalf("set-login (picker): %v", err)
 	}
@@ -417,7 +444,7 @@ func TestCmdSetLoginPicker(t *testing.T) {
 
 func TestCmdSetLoginPickerNoAccounts(t *testing.T) {
 	serveStub(t, &stubService{logins: nil})
-	_, err := run(t, "", "repositories", "n", "set-login")
+	_, err := run(t, "", "set-login", "--repository", "n")
 	if err == nil || !strings.Contains(err.Error(), "gh auth login") {
 		t.Errorf("expected a no-accounts error pointing at gh auth login, got %v", err)
 	}

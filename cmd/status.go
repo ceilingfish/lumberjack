@@ -8,20 +8,21 @@ import (
 )
 
 func newStatusCmd() *cobra.Command {
-	return &cobra.Command{
+	var repository string
+
+	c := &cobra.Command{
 		Use:   "status",
-		Short: "Show last-sync detail for the repository in the current directory",
-		Long: "Shows the same detail as `lumberjack repositories NAME`, but for the " +
-			"tracked repository at the current working directory. Run it from the " +
-			"repo's checkout.",
+		Short: "Show last-sync detail for a repository",
+		Long: "Shows last-sync detail for the tracked repository at the current " +
+			"working directory, or for the repository named by --repository.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			abs, err := cwdAbs()
+			ref, err := resolveRepositoryRef(repository)
 			if err != nil {
 				return err
 			}
 			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
-				repo, err := c.GetRepository(ctx, abs)
+				repo, err := c.GetRepository(ctx, ref)
 				if err != nil {
 					return err
 				}
@@ -29,4 +30,7 @@ func newStatusCmd() *cobra.Command {
 			})
 		},
 	}
+
+	addRepositoryFlag(c, &repository)
+	return c
 }
