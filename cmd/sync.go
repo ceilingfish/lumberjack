@@ -106,11 +106,7 @@ func runSync(ctx context.Context, cmd *cobra.Command, c *client.Client, ref stri
 	}
 
 	if format == present.JSON {
-		if results == nil {
-			results = []syncResult{}
-		}
-		enc := json.NewEncoder(out)
-		return enc.Encode(results)
+		return present.WriteJSONArray(out, results)
 	}
 	return nil
 }

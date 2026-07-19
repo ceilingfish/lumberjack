@@ -116,17 +116,6 @@ func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree, color bool) erro
 	return t.flush()
 }
 
-// emitWorktreeChanges renders a branch/PR/action table of the per-branch
-// changes a sync or init made. It writes nothing when there are no changes
-// and format is not JSON; under JSON it always writes a bare array (possibly
-// empty).
-func emitWorktreeChanges(w io.Writer, format present.Format, changes []*lumberjackv1.WorktreeChange) error {
-	if format == present.JSON {
-		return present.WriteJSONList(w, changes)
-	}
-	return renderWorktreeChanges(w, changes, format == present.Color)
-}
-
 // renderWorktreeChanges prints a branch/PR/action table of the per-branch
 // changes a sync or init made. It writes nothing when there are no changes.
 func renderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange, color bool) error {
@@ -187,7 +176,7 @@ func worktreeStatus(wt *lumberjackv1.Worktree, color bool) string {
 	case wt.GetNeedsReconciliation():
 		return present.StatusWarn("⚠ "+note, color)
 	default:
-		return note
+		return present.Neutral(note, color)
 	}
 }
 
@@ -209,5 +198,5 @@ func timestamp(ts *timestamppb.Timestamp, color bool) string {
 	if ts == nil {
 		return present.Dim("never", color)
 	}
-	return ts.AsTime().Local().Format("2006-01-02 15:04")
+	return present.Neutral(ts.AsTime().Local().Format("2006-01-02 15:04"), color)
 }

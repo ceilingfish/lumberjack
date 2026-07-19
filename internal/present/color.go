@@ -11,13 +11,19 @@ package present
 // — required for text/tabwriter to keep columns aligned, since it counts
 // escape bytes toward cell width (see #2's "tabwriter alignment" constraint).
 const (
-	ansiAction = "36" // cyan — action verbs
-	ansiPath   = "34" // blue — file-system paths
-	ansiBranch = "32" // green — git branch names
-	ansiOK     = "32" // green — status: ok
-	ansiWarn   = "33" // yellow — status: warning
-	ansiErr    = "31" // red — status: error
-	ansiDim    = "2"  // dim — de-emphasis (e.g. "-" / "never")
+	ansiAction  = "36" // cyan — action verbs
+	ansiPath    = "34" // blue — file-system paths
+	ansiBranch  = "32" // green — git branch names
+	ansiOK      = "32" // green — status: ok
+	ansiWarn    = "33" // yellow — status: warning
+	ansiErr     = "31" // red — status: error
+	ansiDim     = "02" // dim — de-emphasis (e.g. "-" / "never"); the leading
+	// zero keeps every SGR code in this package exactly 2 digits (terminals
+	// parse SGR parameters as plain decimal numbers, so "02" behaves
+	// identically to "2") — see the invariant documented above.
+	ansiNeutral = "39" // default foreground — a visual no-op used purely to
+	// keep a cell's escape-code overhead equal to its colourised siblings
+	// in the same table column.
 )
 
 func colorize(code, s string, enabled bool) string {
@@ -47,3 +53,8 @@ func StatusErr(s string, enabled bool) string { return colorize(ansiErr, s, enab
 
 // Dim de-emphasises a value such as "-" or "never".
 func Dim(s string, enabled bool) string { return colorize(ansiDim, s, enabled) }
+
+// Neutral wraps a value with a no-op colour (default foreground) so it
+// carries the same escape-code overhead as its colourised column siblings,
+// without visually changing it.
+func Neutral(s string, enabled bool) string { return colorize(ansiNeutral, s, enabled) }
