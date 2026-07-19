@@ -136,6 +136,28 @@ func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, c
 	return resp.GetLogins(), resp.GetCurrent(), nil
 }
 
+// GetSetupConsent reports whether the repository resolved by ref has
+// `.lumberjack.yml` run-command setup steps pending the local user's consent,
+// plus the command strings for a consent prompt.
+func (c *Client) GetSetupConsent(ctx context.Context, ref string) (pending bool, commands []string, err error) {
+	resp, err := c.svc.GetSetupConsent(ctx, &lumberjackv1.GetSetupConsentRequest{Repository: ref})
+	if err != nil {
+		return false, nil, mapError(err)
+	}
+	return resp.GetPending(), resp.GetRunCommands(), nil
+}
+
+// SetSetupConsent records the local user's consent to run the current
+// trusted `.lumberjack.yml` run-command steps for the repository resolved by
+// ref, returning the updated repository.
+func (c *Client) SetSetupConsent(ctx context.Context, ref string) (*lumberjackv1.Repository, error) {
+	resp, err := c.svc.SetSetupConsent(ctx, &lumberjackv1.SetSetupConsentRequest{Repository: ref})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetRepository(), nil
+}
+
 // ListWorktrees returns a repository's worktrees with live reconciliation.
 func (c *Client) ListWorktrees(ctx context.Context, ref string) ([]*lumberjackv1.Worktree, error) {
 	resp, err := c.svc.ListWorktrees(ctx, &lumberjackv1.ListWorktreesRequest{Repository: ref})

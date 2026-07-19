@@ -32,6 +32,12 @@ type Repository struct {
 	LastSyncStatus *string    `bun:"last_sync_status"`
 	LastSyncError  *string    `bun:"last_sync_error"`
 	CreatedAt      time.Time  `bun:"created_at,notnull,default:current_timestamp"`
+	// SetupConsentFingerprint is the content fingerprint (internal/setup.
+	// Fingerprint) of the `.lumberjack.yml` run-command steps the local user
+	// has consented to run for this repository. Empty means no consent yet;
+	// a mismatch against the trusted config's current fingerprint means
+	// consent is stale (the config changed since) and must be re-requested.
+	SetupConsentFingerprint string `bun:"setup_consent_fingerprint,notnull"`
 }
 
 // PullRequest is a PR the daemon is tracking, mapped to its head branch.
@@ -60,6 +66,10 @@ type Worktree struct {
 	CreatedBy      string     `bun:"created_by,notnull"`
 	LastSyncedAt   *time.Time `bun:"last_synced_at"`
 	CreatedAt      time.Time  `bun:"created_at,notnull,default:current_timestamp"`
+	// SetupError names the setup step that failed when this worktree was
+	// cloned (empty/nil when setup succeeded or the repository has no setup
+	// steps configured). Surfaced alongside the live reconciliation status.
+	SetupError *string `bun:"setup_error"`
 }
 
 // SyncRun is an audit-log entry for a single reconciliation of a repository.

@@ -34,6 +34,14 @@ type fakeGit struct {
 	// listErr forces the listing to fail.
 	worktrees []worktree.Ref
 	listErr   error
+	// defaultBranch is what DefaultBranch reports; defaultBranchErr forces it
+	// to fail. configFiles maps "ref:path" to the trusted config content
+	// ShowFile serves; a missing entry reports found=false. showFileErr forces
+	// ShowFile to fail.
+	defaultBranch    string
+	defaultBranchErr error
+	configFiles      map[string][]byte
+	showFileErr      error
 }
 
 func newFakeGit() *fakeGit {
@@ -78,6 +86,24 @@ func (f *fakeGit) IsDirty(_ context.Context, dir string) (bool, error) {
 
 func (f *fakeGit) LocalOnlyCommits(_ context.Context, dir string) (int64, error) {
 	return f.localOnly[dir], nil
+}
+
+func (f *fakeGit) DefaultBranch(context.Context, string, string) (string, error) {
+	if f.defaultBranchErr != nil {
+		return "", f.defaultBranchErr
+	}
+	if f.defaultBranch == "" {
+		return "main", nil
+	}
+	return f.defaultBranch, nil
+}
+
+func (f *fakeGit) ShowFile(_ context.Context, _, ref, path string) ([]byte, bool, error) {
+	if f.showFileErr != nil {
+		return nil, false, f.showFileErr
+	}
+	data, ok := f.configFiles[ref+":"+path]
+	return data, ok, nil
 }
 
 // fakeGH satisfies GHOps.

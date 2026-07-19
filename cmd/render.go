@@ -67,6 +67,9 @@ func renderRepositoryDetail(w io.Writer, r *lumberjackv1.Repository) error {
 	if r.GetLastSyncError() != "" {
 		t.row("Last error:\t%s\n", r.GetLastSyncError())
 	}
+	if r.GetSetupConsentPending() {
+		t.row("Setup steps:\t⚠ run-command consent pending\n")
+	}
 	return t.flush()
 }
 

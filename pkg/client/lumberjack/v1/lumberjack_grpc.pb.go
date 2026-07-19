@@ -38,6 +38,8 @@ const (
 	LumberjackService_DeleteWorktree_FullMethodName   = "/lumberjack.v1.LumberjackService/DeleteWorktree"
 	LumberjackService_DeleteRepository_FullMethodName = "/lumberjack.v1.LumberjackService/DeleteRepository"
 	LumberjackService_Sync_FullMethodName             = "/lumberjack.v1.LumberjackService/Sync"
+	LumberjackService_GetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/GetSetupConsent"
+	LumberjackService_SetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/SetSetupConsent"
 )
 
 // LumberjackServiceClient is the client API for LumberjackService service.
@@ -82,6 +84,16 @@ type LumberjackServiceClient interface {
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
 	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncResponse], error)
+	// GetSetupConsent reports whether a repository's `.lumberjack.yml`
+	// run-command setup steps are pending the local user's consent — either
+	// never consented, or consented to a config that has since changed. The CLI
+	// uses this at `init` and on later interactions to prompt for consent.
+	GetSetupConsent(ctx context.Context, in *GetSetupConsentRequest, opts ...grpc.CallOption) (*GetSetupConsentResponse, error)
+	// SetSetupConsent records the local user's consent to run a repository's
+	// current trusted `.lumberjack.yml` run-command steps. Consent is bound to
+	// the config's content: a later change to `.lumberjack.yml` makes it
+	// pending again.
+	SetSetupConsent(ctx context.Context, in *SetSetupConsentRequest, opts ...grpc.CallOption) (*SetSetupConsentResponse, error)
 }
 
 type lumberjackServiceClient struct {
@@ -201,6 +213,26 @@ func (c *lumberjackServiceClient) Sync(ctx context.Context, in *SyncRequest, opt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LumberjackService_SyncClient = grpc.ServerStreamingClient[SyncResponse]
 
+func (c *lumberjackServiceClient) GetSetupConsent(ctx context.Context, in *GetSetupConsentRequest, opts ...grpc.CallOption) (*GetSetupConsentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSetupConsentResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_GetSetupConsent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lumberjackServiceClient) SetSetupConsent(ctx context.Context, in *SetSetupConsentRequest, opts ...grpc.CallOption) (*SetSetupConsentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetSetupConsentResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_SetSetupConsent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LumberjackServiceServer is the server API for LumberjackService service.
 // All implementations must embed UnimplementedLumberjackServiceServer
 // for forward compatibility.
@@ -243,6 +275,16 @@ type LumberjackServiceServer interface {
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
 	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
 	Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error
+	// GetSetupConsent reports whether a repository's `.lumberjack.yml`
+	// run-command setup steps are pending the local user's consent — either
+	// never consented, or consented to a config that has since changed. The CLI
+	// uses this at `init` and on later interactions to prompt for consent.
+	GetSetupConsent(context.Context, *GetSetupConsentRequest) (*GetSetupConsentResponse, error)
+	// SetSetupConsent records the local user's consent to run a repository's
+	// current trusted `.lumberjack.yml` run-command steps. Consent is bound to
+	// the config's content: a later change to `.lumberjack.yml` makes it
+	// pending again.
+	SetSetupConsent(context.Context, *SetSetupConsentRequest) (*SetSetupConsentResponse, error)
 	mustEmbedUnimplementedLumberjackServiceServer()
 }
 
@@ -282,6 +324,12 @@ func (UnimplementedLumberjackServiceServer) DeleteRepository(context.Context, *D
 }
 func (UnimplementedLumberjackServiceServer) Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedLumberjackServiceServer) GetSetupConsent(context.Context, *GetSetupConsentRequest) (*GetSetupConsentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSetupConsent not implemented")
+}
+func (UnimplementedLumberjackServiceServer) SetSetupConsent(context.Context, *SetSetupConsentRequest) (*SetSetupConsentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetSetupConsent not implemented")
 }
 func (UnimplementedLumberjackServiceServer) mustEmbedUnimplementedLumberjackServiceServer() {}
 func (UnimplementedLumberjackServiceServer) testEmbeddedByValue()                           {}
@@ -477,6 +525,42 @@ func _LumberjackService_Sync_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LumberjackService_SyncServer = grpc.ServerStreamingServer[SyncResponse]
 
+func _LumberjackService_GetSetupConsent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSetupConsentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).GetSetupConsent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_GetSetupConsent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).GetSetupConsent(ctx, req.(*GetSetupConsentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LumberjackService_SetSetupConsent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSetupConsentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).SetSetupConsent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_SetSetupConsent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).SetSetupConsent(ctx, req.(*SetSetupConsentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LumberjackService_ServiceDesc is the grpc.ServiceDesc for LumberjackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -519,6 +603,14 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteRepository",
 			Handler:    _LumberjackService_DeleteRepository_Handler,
+		},
+		{
+			MethodName: "GetSetupConsent",
+			Handler:    _LumberjackService_GetSetupConsent_Handler,
+		},
+		{
+			MethodName: "SetSetupConsent",
+			Handler:    _LumberjackService_SetSetupConsent_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

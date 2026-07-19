@@ -30,6 +30,7 @@ One row per tracked repo. This is the identity Lumberjack syncs against.
 | `last_sync_error`     | text      | Nullable; last error message                                                                                             |
 | `etag_pulls`          | text      | ETag from the last PR-list request, for conditional (304) fetches                                                        |
 | `created_at`          | timestamp |                                                                                                                          |
+| `setup_consent_fingerprint` | text | Content fingerprint (sha256) of the trusted `.lumberjack.yml` run-command steps the local user has consented to run. Empty means not consented. A mismatch against the trusted config's current fingerprint means consent is pending (never given, or the config changed since) |
 
 ### `pull_requests`
 
@@ -58,6 +59,7 @@ The local side, and the crucial branch ↔ directory mapping. Holds only what gi
 | `created_by`       | text      | `lumberjack` vs. `preexisting` — a safety rail so the daemon never deletes a human-made worktree                       |
 | `last_synced_at`   | timestamp | When Lumberjack last reconciled this worktree                                                                          |
 | `created_at`       | timestamp |                                                                                                                        |
+| `setup_error`      | text      | Nullable; names the `.lumberjack.yml` setup step that failed when this worktree was cloned (fail-fast — later steps are skipped, the worktree is kept). Folded into the live reconciliation note/status |
 
 Unique constraint on (`repository_id`, `directory_path`).
 

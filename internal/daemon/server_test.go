@@ -101,6 +101,64 @@ func TestServerListAndGetRepository(t *testing.T) {
 	}
 }
 
+func TestServerGetSetupConsent(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{
+		"origin/main:.lumberjack.yml": []byte(`
+steps:
+  - type: run-command
+    run_command:
+      command: echo hi
+`),
+	}
+
+	resp, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"})
+	if err != nil {
+		t.Fatalf("GetSetupConsent: %v", err)
+	}
+	if !resp.GetPending() {
+		t.Error("expected pending=true")
+	}
+	if len(resp.GetRunCommands()) != 1 || resp.GetRunCommands()[0] != "echo hi" {
+		t.Errorf("RunCommands = %v", resp.GetRunCommands())
+	}
+}
+
+func TestServerGetSetupConsentEmptyRepository(t *testing.T) {
+	srv := newServer(newHarness(t))
+	_, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v", err)
+	}
+}
+
+func TestServerSetSetupConsent(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{
+		"origin/main:.lumberjack.yml": []byte(`
+steps:
+  - type: run-command
+    run_command:
+      command: echo hi
+`),
+	}
+
+	if _, err := srv.SetSetupConsent(context.Background(), &lumberjackv1.SetSetupConsentRequest{Repository: "n"}); err != nil {
+		t.Fatalf("SetSetupConsent: %v", err)
+	}
+	resp, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"})
+	if err != nil {
+		t.Fatalf("GetSetupConsent: %v", err)
+	}
+	if resp.GetPending() {
+		t.Error("expected pending=false after SetSetupConsent")
+	}
+}
+
 func TestServerListWorktrees(t *testing.T) {
 	h := newHarness(t)
 	srv := newServer(h)

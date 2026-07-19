@@ -13,6 +13,9 @@ import (
 func displayName(repo *schema.Repository) string { return repo.DirPrefix }
 
 // toProtoRepository maps a stored repository row onto its wire message.
+// SetupConsentPending is left false here — computing it requires reading the
+// trusted `.lumberjack.yml` from git, so callers that want it set it
+// afterwards via Server.decorateSetupConsent.
 func toProtoRepository(r *schema.Repository) *lumberjackv1.Repository {
 	pb := &lumberjackv1.Repository{
 		Id:                r.ID,

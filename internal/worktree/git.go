@@ -127,6 +127,50 @@ func (g *Git) RemoveWorktree(ctx context.Context, repoPath, dir string, force bo
 	return err
 }
 
+// DefaultBranch returns the short name of remote's default branch (e.g.
+// "main"), used to read the trusted setup-steps config from the base branch
+// rather than whatever branch a worktree is being cloned for. It relies on
+// the local `refs/remotes/<remote>/HEAD` symbolic ref, set by `git clone` and
+// by `git remote set-head`; if it is missing (e.g. the checkout predates
+// Lumberjack or wasn't made with `git clone`), it asks the remote directly
+// (`git remote set-head --auto`) and retries once.
+func (g *Git) DefaultBranch(ctx context.Context, repoPath, remote string) (string, error) {
+	out, err := g.run(ctx, repoPath, "symbolic-ref", "--short", "refs/remotes/"+remote+"/HEAD")
+	if err != nil {
+		if _, serr := g.run(ctx, repoPath, "remote", "set-head", remote, "--auto"); serr != nil {
+			return "", fmt.Errorf("determining default branch for remote %s: %w", remote, err)
+		}
+		out, err = g.run(ctx, repoPath, "symbolic-ref", "--short", "refs/remotes/"+remote+"/HEAD")
+		if err != nil {
+			return "", fmt.Errorf("determining default branch for remote %s: %w", remote, err)
+		}
+	}
+	return strings.TrimPrefix(out, remote+"/"), nil
+}
+
+// ShowFile reads path as it exists at ref (e.g. "origin/main"), via `git
+// show`. It returns found=false (with no error) when the ref exists but the
+// path does not — the caller's config file is simply absent there, which is
+// not itself a failure.
+func (g *Git) ShowFile(ctx context.Context, repoPath, ref, path string) (data []byte, found bool, err error) {
+	cmd := exec.CommandContext(ctx, g.bin, "show", ref+":"+path)
+	cmd.Dir = repoPath
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if strings.Contains(msg, "does not exist in") || strings.Contains(msg, "exists on disk, but not in") {
+			return nil, false, nil
+		}
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, false, fmt.Errorf("git show %s:%s: %s", ref, path, msg)
+	}
+	return stdout.Bytes(), true, nil
+}
+
 // Ref is one entry from `git worktree list`: the worktree's directory and the
 // branch checked out there. Branch is empty for a detached-HEAD worktree. It
 // lets the sync engine match an already-checked-out directory to the PR whose
