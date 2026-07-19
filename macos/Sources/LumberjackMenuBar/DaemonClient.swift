@@ -8,7 +8,10 @@ import NIOPosix
 /// warm and transparently reconnects — the piece that lets the menu bar app
 /// recover when the daemon restarts without the app needing its own retry
 /// loop around every call.
-final class DaemonClient {
+/// Only ever created, used, and closed from `AppState`'s `@MainActor` context;
+/// `@unchecked` because gRPC's generated client types aren't marked `Sendable`
+/// even though nothing here is actually shared across isolation domains.
+final class DaemonClient: @unchecked Sendable {
     private let group: EventLoopGroup
     private let channel: GRPCChannel
     let service: Lumberjack_V1_LumberjackServiceAsyncClient

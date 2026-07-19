@@ -4,6 +4,7 @@ import UserNotifications
 /// Posts native macOS notifications for worktree clone/delete events. A thin
 /// wrapper so the rest of the app depends on an intent ("a worktree appeared")
 /// rather than the UserNotifications API directly.
+@MainActor
 struct Notifier {
     /// Test seam: when set, notifications are handed to this closure as
     /// (title, body) instead of going through UserNotifications, so logic
