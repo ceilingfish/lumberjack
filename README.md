@@ -235,3 +235,14 @@ lumberjack daemon start     # start it again
 
 If the daemon isn't running, CLI commands that need it will say so clearly rather
 than fall back to touching your repositories directly.
+
+---
+
+## macOS menu-bar app (optional)
+
+A native menu-bar companion app is available under [`macos/`](macos/README.md):
+a live view of tracked repositories and their worktrees, with a native
+notification when a worktree is cloned or deleted. It's a separate, opt-in
+install — it doesn't affect the CLI/daemon install above — built with Xcode
+from a Swift package that talks to the same daemon over its Unix socket. See
+`macos/README.md` for building, installing, and running it.

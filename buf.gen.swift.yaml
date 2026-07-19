@@ -1,0 +1,19 @@
+version: v2
+# Swift codegen for the macOS menu-bar app (macos/), kept separate from
+# buf.gen.yaml (Go) so regenerating one never touches the other. Run from the
+# repo root:
+#
+#   buf generate --template buf.gen.swift.yaml
+#
+# Like the Go plugins, these are remote (buf.build fetches them), so no local
+# protoc/protoc-gen-swift toolchain is required — only `buf` and network
+# access. Regenerate whenever proto/lumberjack/v1/lumberjack.proto changes.
+plugins:
+  # Message types (*.pb.swift).
+  - remote: buf.build/apple/swift
+    out: macos/Sources/LumberjackMenuBar/Generated
+  # gRPC client stubs (*.grpc.swift). The app only ever calls the daemon, so
+  # server-side stubs are skipped.
+  - remote: buf.build/grpc/swift
+    out: macos/Sources/LumberjackMenuBar/Generated
+    opt: Client=true,Server=false

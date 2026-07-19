@@ -31,3 +31,7 @@ vendor/
 # Agent skills installed from skills-lock.json via `mise run skills`
 /.agents/
 /.claude/
+
+# Swift build artifacts for the macOS menu-bar app (macos/)
+macos/.build/
+macos/.swiftpm/
