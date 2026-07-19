@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
@@ -31,6 +32,10 @@ func newDaemonInstallCmd() *cobra.Command {
 			"reinstalled with the current binary path, socket, and environment.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
 			exe, err := os.Executable()
 			if err != nil {
 				return fmt.Errorf("resolving current executable: %w", err)
@@ -42,7 +47,7 @@ func newDaemonInstallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return installDaemon(cmd.OutOrStdout(), svc, force)
+			return installDaemon(cmd.OutOrStdout(), svc, force, format)
 		},
 	}
 	c.Flags().StringVar(&socketPath, "socket", "",
@@ -87,7 +92,7 @@ func isEphemeralBuild(path string) bool {
 // installDaemon registers svc with the service manager and reports next steps.
 // When force is set, an existing install is removed first so the registration is
 // refreshed with the current binary path and environment — the upgrade path.
-func installDaemon(out io.Writer, svc lifecycle, force bool) error {
+func installDaemon(out io.Writer, svc lifecycle, force bool, format present.Format) error {
 	if force {
 		if err := reinstallDaemon(svc); err != nil {
 			return err
@@ -95,9 +100,8 @@ func installDaemon(out io.Writer, svc lifecycle, force bool) error {
 	} else if err := svc.Install(); err != nil {
 		return fmt.Errorf("installing daemon: %w", err)
 	}
-	_, err := fmt.Fprintln(out,
+	return emitDaemonMessage(out, format,
 		"lumberjack daemon installed; it will start at login. Run `lumberjack daemon start` to start it now.")
-	return err
 }
 
 // reinstallDaemon removes any existing registration, then installs fresh. The

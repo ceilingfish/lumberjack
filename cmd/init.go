@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
+	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -40,19 +42,30 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolving path %q: %w", path, err)
 	}
+	format, err := outputFormat(cmd)
+	if err != nil {
+		return err
+	}
 	return withClient(cmd, func(ctx context.Context, c *client.Client) error {
 		repo, adopted, err := c.InitRepository(ctx, abs)
 		if err != nil {
 			return err
 		}
 		out := cmd.OutOrStdout()
+		if format == present.JSON {
+			// InitRepositoryResponse already carries the repository and the
+			// adopted changes together — the proto type needs no view model.
+			return present.WriteJSONObject(out, &lumberjackv1.InitRepositoryResponse{
+				Repository: repo, Adopted: adopted,
+			})
+		}
 		if _, err := fmt.Fprintf(out,
 			"Tracking %s/%s at %s\nWorktrees will be created under %s\n",
 			repo.GetGithubOwner(), repo.GetGithubName(),
-			repo.GetLocalPath(), repo.GetWorktreeParentDir()); err != nil {
+			present.Path(repo.GetLocalPath(), format == present.Color), present.Path(repo.GetWorktreeParentDir(), format == present.Color)); err != nil {
 			return err
 		}
 		// A branch/PR/action table of the worktrees adopted during registration.
-		return renderWorktreeChanges(out, adopted)
+		return renderWorktreeChanges(out, adopted, format == present.Color)
 	})
 }

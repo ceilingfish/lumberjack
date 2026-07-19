@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ceilingfish/lumberjack/internal/daemon"
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
 )
 
@@ -81,7 +82,7 @@ func TestCmdDaemonStatusEndToEnd(t *testing.T) {
 func TestInstallDaemon(t *testing.T) {
 	var buf bytes.Buffer
 	f := &fakeLifecycle{}
-	if err := installDaemon(&buf, f, false); err != nil {
+	if err := installDaemon(&buf, f, false, present.Structured); err != nil {
 		t.Fatalf("installDaemon: %v", err)
 	}
 	if !f.installed {
@@ -95,7 +96,7 @@ func TestInstallDaemon(t *testing.T) {
 	}
 
 	// Install failure is wrapped and surfaced.
-	if err := installDaemon(&buf, &fakeLifecycle{installErr: errors.New("boom")}, false); err == nil {
+	if err := installDaemon(&buf, &fakeLifecycle{installErr: errors.New("boom")}, false, present.Structured); err == nil {
 		t.Error("expected install error")
 	}
 }
@@ -136,7 +137,7 @@ func TestCheckStableExecutable(t *testing.T) {
 func TestInstallDaemonForce(t *testing.T) {
 	var buf bytes.Buffer
 	f := &fakeLifecycle{status: service.StatusRunning}
-	if err := installDaemon(&buf, f, true); err != nil {
+	if err := installDaemon(&buf, f, true, present.Structured); err != nil {
 		t.Fatalf("installDaemon force: %v", err)
 	}
 	if !f.uninstalled {
@@ -148,7 +149,7 @@ func TestInstallDaemonForce(t *testing.T) {
 
 	// A not-installed starting state is not an error: force still installs.
 	f = &fakeLifecycle{uninstallErr: service.ErrNotInstalled, stopErr: service.ErrNotInstalled}
-	if err := installDaemon(&buf, f, true); err != nil {
+	if err := installDaemon(&buf, f, true, present.Structured); err != nil {
 		t.Fatalf("force over not-installed: %v", err)
 	}
 	if !f.installed {
@@ -157,7 +158,7 @@ func TestInstallDaemonForce(t *testing.T) {
 
 	// A real Uninstall failure aborts before reinstalling.
 	f = &fakeLifecycle{uninstallErr: errors.New("boom")}
-	if err := installDaemon(&buf, f, true); err == nil {
+	if err := installDaemon(&buf, f, true, present.Structured); err == nil {
 		t.Error("expected uninstall error to surface")
 	} else if f.installed {
 		t.Error("Install should not run after a failed Uninstall")
@@ -179,7 +180,7 @@ func TestStartDaemon(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := startDaemon(&buf, tt.f)
+			err := startDaemon(&buf, tt.f, present.Structured)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -208,7 +209,7 @@ func TestStopDaemon(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := stopDaemon(&buf, tt.f)
+			err := stopDaemon(&buf, tt.f, present.Structured)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -239,7 +240,7 @@ func TestReportStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := reportStatus(&buf, tt.f)
+			err := reportStatus(&buf, tt.f, present.Structured)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -266,7 +267,7 @@ func TestReportStatusWithPID(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := reportStatus(&buf, &fakeLifecycle{status: service.StatusRunning}); err != nil {
+	if err := reportStatus(&buf, &fakeLifecycle{status: service.StatusRunning}, present.Structured); err != nil {
 		t.Fatalf("reportStatus: %v", err)
 	}
 	if !strings.Contains(buf.String(), "pid "+strconv.Itoa(os.Getpid())) {

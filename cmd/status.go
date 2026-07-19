@@ -20,12 +20,16 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
 			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
 				repo, err := c.GetRepository(ctx, abs)
 				if err != nil {
 					return err
 				}
-				return renderRepositoryDetail(cmd.OutOrStdout(), repo)
+				return emitRepositoryDetail(cmd.OutOrStdout(), format, repo)
 			})
 		},
 	}

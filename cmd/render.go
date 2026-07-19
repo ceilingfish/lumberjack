@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -36,8 +37,17 @@ func (t *tabW) flush() error {
 	return t.w.Flush()
 }
 
+// emitRepositories renders repos per format: a bare JSON array, or the
+// existing table (colourised when color is true).
+func emitRepositories(w io.Writer, format present.Format, repos []*lumberjackv1.Repository) error {
+	if format == present.JSON {
+		return present.WriteJSONList(w, repos)
+	}
+	return renderRepositories(w, repos, format == present.Color)
+}
+
 // renderRepositories prints a table of repositories.
-func renderRepositories(w io.Writer, repos []*lumberjackv1.Repository) error {
+func renderRepositories(w io.Writer, repos []*lumberjackv1.Repository, color bool) error {
 	if len(repos) == 0 {
 		_, err := fmt.Fprintln(w, "No repositories tracked. Add one with `lumberjack init .`")
 		return err
@@ -46,32 +56,48 @@ func renderRepositories(w io.Writer, repos []*lumberjackv1.Repository) error {
 	t.row("NAME\tPATH\tLAST SYNCED\tSTATUS\n")
 	for _, r := range repos {
 		t.row("%s\t%s\t%s\t%s\n",
-			r.GetDirPrefix(), r.GetLocalPath(),
-			timestamp(r.GetLastSyncedAt()), syncStatus(r))
+			r.GetDirPrefix(), present.Path(r.GetLocalPath(), color),
+			timestamp(r.GetLastSyncedAt(), color), syncStatus(r, color))
 	}
 	return t.flush()
 }
 
+// emitRepositoryDetail renders one repository's detail per format.
+func emitRepositoryDetail(w io.Writer, format present.Format, r *lumberjackv1.Repository) error {
+	if format == present.JSON {
+		return present.WriteJSONObject(w, r)
+	}
+	return renderRepositoryDetail(w, r, format == present.Color)
+}
+
 // renderRepositoryDetail prints the last-sync detail for one repository.
-func renderRepositoryDetail(w io.Writer, r *lumberjackv1.Repository) error {
+func renderRepositoryDetail(w io.Writer, r *lumberjackv1.Repository, color bool) error {
 	t := newTabW(w)
 	t.row("Name:\t%s\n", r.GetDirPrefix())
-	t.row("Path:\t%s\n", r.GetLocalPath())
+	t.row("Path:\t%s\n", present.Path(r.GetLocalPath(), color))
 	t.row("GitHub:\t%s/%s (%s)\n", r.GetGithubOwner(), r.GetGithubName(), r.GetHost())
 	if r.GetLogin() != "" {
 		t.row("Login:\t%s\n", r.GetLogin())
 	}
-	t.row("Worktrees dir:\t%s\n", r.GetWorktreeParentDir())
-	t.row("Last synced:\t%s\n", timestamp(r.GetLastSyncedAt()))
-	t.row("Status:\t%s\n", syncStatus(r))
+	t.row("Worktrees dir:\t%s\n", present.Path(r.GetWorktreeParentDir(), color))
+	t.row("Last synced:\t%s\n", timestamp(r.GetLastSyncedAt(), color))
+	t.row("Status:\t%s\n", syncStatus(r, color))
 	if r.GetLastSyncError() != "" {
-		t.row("Last error:\t%s\n", r.GetLastSyncError())
+		t.row("Last error:\t%s\n", present.StatusErr(r.GetLastSyncError(), color))
 	}
 	return t.flush()
 }
 
+// emitWorktrees renders a repository's worktrees per format.
+func emitWorktrees(w io.Writer, format present.Format, wts []*lumberjackv1.Worktree) error {
+	if format == present.JSON {
+		return present.WriteJSONList(w, wts)
+	}
+	return renderWorktrees(w, wts, format == present.Color)
+}
+
 // renderWorktrees prints a table of worktrees with a reconciliation warning.
-func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree) error {
+func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree, color bool) error {
 	if len(wts) == 0 {
 		_, err := fmt.Fprintln(w, "No worktrees tracked for this repository.")
 		return err
@@ -84,22 +110,33 @@ func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree) error {
 			pr = fmt.Sprintf("#%d", wt.GetGithubPrNumber())
 		}
 		t.row("%s\t%s\t%s\t%s\t%s\n",
-			filepath.Base(wt.GetDirectoryPath()), wt.GetBranchName(), pr,
-			timestamp(wt.GetLastSyncedAt()), worktreeStatus(wt))
+			present.Path(filepath.Base(wt.GetDirectoryPath()), color), present.Branch(wt.GetBranchName(), color), pr,
+			timestamp(wt.GetLastSyncedAt(), color), worktreeStatus(wt, color))
 	}
 	return t.flush()
 }
 
+// emitWorktreeChanges renders a branch/PR/action table of the per-branch
+// changes a sync or init made. It writes nothing when there are no changes
+// and format is not JSON; under JSON it always writes a bare array (possibly
+// empty).
+func emitWorktreeChanges(w io.Writer, format present.Format, changes []*lumberjackv1.WorktreeChange) error {
+	if format == present.JSON {
+		return present.WriteJSONList(w, changes)
+	}
+	return renderWorktreeChanges(w, changes, format == present.Color)
+}
+
 // renderWorktreeChanges prints a branch/PR/action table of the per-branch
 // changes a sync or init made. It writes nothing when there are no changes.
-func renderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange) error {
+func renderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange, color bool) error {
 	if len(changes) == 0 {
 		return nil
 	}
 	t := newTabW(w)
 	t.row("BRANCH\tPR\tACTION\n")
 	for _, c := range changes {
-		t.row("%s\t%s\t%s\n", c.GetBranch(), changePR(c), changeAction(c))
+		t.row("%s\t%s\t%s\n", present.Branch(c.GetBranch(), color), changePR(c), changeAction(c, color))
 	}
 	return t.flush()
 }
@@ -114,8 +151,8 @@ func changePR(c *lumberjackv1.WorktreeChange) string {
 
 // changeAction renders the action verb, appending its detail in parentheses
 // when present (e.g. why a worktree was retained).
-func changeAction(c *lumberjackv1.WorktreeChange) string {
-	verb := actionVerb(c.GetAction())
+func changeAction(c *lumberjackv1.WorktreeChange, color bool) string {
+	verb := present.Action(actionVerb(c.GetAction()), color)
 	if d := c.GetDetail(); d != "" {
 		return verb + " (" + d + ")"
 	}
@@ -142,35 +179,35 @@ func actionVerb(a lumberjackv1.WorktreeAction) string {
 
 // worktreeStatus renders the reconciliation state, prefixing a warning marker
 // when the worktree needs attention.
-func worktreeStatus(wt *lumberjackv1.Worktree) string {
+func worktreeStatus(wt *lumberjackv1.Worktree, color bool) string {
 	note := wt.GetReconciliationNote()
 	switch {
 	case note == "":
-		return "ok"
+		return present.StatusOK("ok", color)
 	case wt.GetNeedsReconciliation():
-		return "⚠ " + note
+		return present.StatusWarn("⚠ "+note, color)
 	default:
 		return note
 	}
 }
 
 // syncStatus renders a repository's last sync status.
-func syncStatus(r *lumberjackv1.Repository) string {
+func syncStatus(r *lumberjackv1.Repository, color bool) string {
 	switch r.GetLastSyncStatus() {
 	case lumberjackv1.SyncStatus_SYNC_STATUS_OK:
-		return "ok"
+		return present.StatusOK("ok", color)
 	case lumberjackv1.SyncStatus_SYNC_STATUS_ERROR:
-		return "error"
+		return present.StatusErr("error", color)
 	default:
-		return "never synced"
+		return present.Dim("never synced", color)
 	}
 }
 
 // timestamp renders a protobuf timestamp as a local time, or "never" when the
 // timestamp is unset (a nil pointer).
-func timestamp(ts *timestamppb.Timestamp) string {
+func timestamp(ts *timestamppb.Timestamp, color bool) string {
 	if ts == nil {
-		return "never"
+		return present.Dim("never", color)
 	}
 	return ts.AsTime().Local().Format("2006-01-02 15:04")
 }

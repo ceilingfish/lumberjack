@@ -15,7 +15,11 @@ func newDoctorCmd() *cobra.Command {
 			"doctor is CLI-local: it does not require a running daemon.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ok, err := doctor.Run(cmd.Context(), cmd.OutOrStdout())
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
+			ok, err := doctor.Run(cmd.Context(), cmd.OutOrStdout(), format)
 			if err != nil {
 				return err
 			}
