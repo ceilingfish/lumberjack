@@ -631,6 +631,26 @@ func TestSyncCreatesWorktrees(t *testing.T) {
 	}
 }
 
+func TestSyncStampsWorktreeLastSyncedAt(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	wts, err := h.db.ListWorktrees(context.Background(), repo.ID)
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 worktree, got %d", len(wts))
+	}
+	if wts[0].LastSyncedAt == nil {
+		t.Error("worktree LastSyncedAt is nil after a successful sync, want it set")
+	}
+}
+
 func TestSyncIsIdempotent(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)

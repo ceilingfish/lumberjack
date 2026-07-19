@@ -229,6 +229,48 @@ func TestWorktreeStore(t *testing.T) {
 	}
 }
 
+func TestTouchWorktreesSyncedAt(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	other := newRepo("/b", "b", "B")
+	_ = c.CreateRepository(ctx, other)
+
+	wt := &schema.Worktree{
+		RepositoryID: repo.ID, BranchName: "feature/x",
+		DirectoryPath: "/parent/a-x", CreatedBy: schema.CreatedByLumberjack,
+	}
+	_ = c.CreateWorktree(ctx, wt)
+	otherWT := &schema.Worktree{
+		RepositoryID: other.ID, BranchName: "feature/y",
+		DirectoryPath: "/parent/b-y", CreatedBy: schema.CreatedByLumberjack,
+	}
+	_ = c.CreateWorktree(ctx, otherWT)
+
+	// Never synced yet: last_synced_at reads as unset.
+	list, _ := c.ListWorktrees(ctx, repo.ID)
+	if list[0].LastSyncedAt != nil {
+		t.Fatalf("expected nil LastSyncedAt before any sync, got %v", list[0].LastSyncedAt)
+	}
+
+	now := time.Now().Truncate(time.Second)
+	if err := c.TouchWorktreesSyncedAt(ctx, repo.ID, now); err != nil {
+		t.Fatalf("TouchWorktreesSyncedAt: %v", err)
+	}
+
+	list, _ = c.ListWorktrees(ctx, repo.ID)
+	if list[0].LastSyncedAt == nil || !list[0].LastSyncedAt.Equal(now) {
+		t.Errorf("LastSyncedAt = %v, want %v", list[0].LastSyncedAt, now)
+	}
+
+	// The other repository's worktree is untouched.
+	otherList, _ := c.ListWorktrees(ctx, other.ID)
+	if otherList[0].LastSyncedAt != nil {
+		t.Errorf("other repo's worktree LastSyncedAt = %v, want nil", otherList[0].LastSyncedAt)
+	}
+}
+
 func TestDeleteRepository(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
