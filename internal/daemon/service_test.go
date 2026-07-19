@@ -965,3 +965,84 @@ func TestNowInjectable(t *testing.T) {
 		t.Errorf("expected injected time, got %+v", run)
 	}
 }
+
+// TestSyncRepositoryPublishesEvents checks the ordering of events a sync
+// publishes: a SyncStarted first, one WorktreeChanged per created worktree,
+// and a SyncFinished last carrying the outcome.
+func TestSyncRepositoryPublishesEvents(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+
+	ch, unsubscribe := h.svc.Subscribe()
+	defer unsubscribe()
+
+	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil || created != 1 {
+		t.Fatalf("SyncRepository: created=%d err=%v", created, err)
+	}
+
+	first := recv(t, ch)
+	if first.Type != EventSyncStarted {
+		t.Fatalf("first event = %v, want EventSyncStarted", first.Type)
+	}
+
+	change := recv(t, ch)
+	if change.Type != EventWorktreeChanged || change.Change == nil ||
+		change.Change.Action != ActionCheckedOut || change.Change.Branch != "a" {
+		t.Errorf("worktree change event = %+v", change)
+	}
+	if change.Change.DirectoryPath == "" {
+		t.Errorf("expected a directory path on the change event")
+	}
+
+	last := recv(t, ch)
+	if last.Type != EventSyncFinished || last.SyncCreated != 1 || last.SyncErr != nil {
+		t.Errorf("final event = %+v", last)
+	}
+}
+
+// TestDeleteWorktreePublishesEvent checks that a direct DeleteWorktree call
+// (outside of Sync) also publishes a WorktreeChanged/deleted event.
+func TestDeleteWorktreePublishesEvent(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+
+	ch, unsubscribe := h.svc.Subscribe()
+	defer unsubscribe()
+
+	res, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false)
+	if err != nil || !res.Deleted {
+		t.Fatalf("DeleteWorktree: res=%+v err=%v", res, err)
+	}
+
+	ev := recv(t, ch)
+	if ev.Type != EventWorktreeChanged || ev.Change == nil || ev.Change.Action != ActionDeleted || ev.Change.Branch != "a" {
+		t.Errorf("delete event = %+v", ev)
+	}
+}
+
+// TestSubscribeMultipleConcurrentSubscribers checks that two subscribers each
+// independently receive the same events.
+func TestSubscribeMultipleConcurrentSubscribers(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+
+	ch1, unsub1 := h.svc.Subscribe()
+	defer unsub1()
+	ch2, unsub2 := h.svc.Subscribe()
+	defer unsub2()
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+
+	for _, ch := range []<-chan Event{ch1, ch2} {
+		if ev := recv(t, ch); ev.Type != EventSyncStarted {
+			t.Errorf("expected EventSyncStarted, got %v", ev.Type)
+		}
+	}
+}

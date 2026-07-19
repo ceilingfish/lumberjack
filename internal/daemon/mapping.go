@@ -54,11 +54,48 @@ func toProtoWorktree(v WorktreeView) *lumberjackv1.Worktree {
 // toProtoChange maps a domain per-branch worktree change onto its wire message.
 func toProtoChange(c WorktreeChange) *lumberjackv1.WorktreeChange {
 	return &lumberjackv1.WorktreeChange{
-		Branch:   c.Branch,
-		PrNumber: c.PRNumber,
-		Action:   toProtoAction(c.Action),
-		Detail:   c.Detail,
+		Branch:        c.Branch,
+		PrNumber:      c.PRNumber,
+		Action:        toProtoAction(c.Action),
+		Detail:        c.Detail,
+		DirectoryPath: c.DirectoryPath,
+		LastSyncedAt:  toProtoTimestamp(c.LastSyncedAt),
 	}
+}
+
+// toProtoWatchResponse maps a domain Event onto its wire message for the Watch
+// stream.
+func toProtoWatchResponse(ev Event) *lumberjackv1.WatchResponse {
+	pb := &lumberjackv1.WatchResponse{Repository: toProtoRepository(ev.Repository)}
+	switch ev.Type {
+	case EventWorktreeChanged:
+		pb.Type = lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_WORKTREE_CHANGED
+		if ev.Change != nil {
+			pb.Change = toProtoChange(*ev.Change)
+		}
+	case EventSyncStarted:
+		pb.Type = lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SYNC_STARTED
+	case EventSyncFinished:
+		pb.Type = lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SYNC_FINISHED
+		pb.Summary = toProtoSyncSummary(ev.SyncCreated, ev.SyncRemoved, ev.SyncErr)
+	}
+	return pb
+}
+
+// toProtoSyncSummary builds a SyncSummary from a sync's outcome, shared by the
+// Sync RPC's completion event and the Watch stream's SYNC_FINISHED event.
+func toProtoSyncSummary(created, removed int, syncErr error) *lumberjackv1.SyncSummary {
+	summary := &lumberjackv1.SyncSummary{
+		Status:           lumberjackv1.SyncStatus_SYNC_STATUS_OK,
+		WorktreesCreated: int64(created),
+		WorktreesRemoved: int64(removed),
+	}
+	if syncErr != nil {
+		summary.Status = lumberjackv1.SyncStatus_SYNC_STATUS_ERROR
+		msg := syncErr.Error()
+		summary.Error = &msg
+	}
+	return summary
 }
 
 // toProtoAction maps a domain WorktreeAction onto the wire enum.

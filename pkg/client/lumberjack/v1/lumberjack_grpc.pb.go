@@ -38,6 +38,7 @@ const (
 	LumberjackService_DeleteWorktree_FullMethodName   = "/lumberjack.v1.LumberjackService/DeleteWorktree"
 	LumberjackService_DeleteRepository_FullMethodName = "/lumberjack.v1.LumberjackService/DeleteRepository"
 	LumberjackService_Sync_FullMethodName             = "/lumberjack.v1.LumberjackService/Sync"
+	LumberjackService_Watch_FullMethodName            = "/lumberjack.v1.LumberjackService/Watch"
 )
 
 // LumberjackServiceClient is the client API for LumberjackService service.
@@ -82,6 +83,14 @@ type LumberjackServiceClient interface {
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
 	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncResponse], error)
+	// Watch opens a long-lived stream of worktree/repository change events. On
+	// subscribe it first emits one SNAPSHOT event per tracked repository (each
+	// carrying that repository's current worktrees), then streams live deltas —
+	// worktree created/adopted/updated/deleted and repository sync
+	// started/finished — as they happen. Multiple concurrent Watch calls are
+	// supported; each gets its own independent feed. A subscriber that falls too
+	// far behind is disconnected rather than allowed to stall the daemon.
+	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
 }
 
 type lumberjackServiceClient struct {
@@ -201,6 +210,25 @@ func (c *lumberjackServiceClient) Sync(ctx context.Context, in *SyncRequest, opt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LumberjackService_SyncClient = grpc.ServerStreamingClient[SyncResponse]
 
+func (c *lumberjackServiceClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &LumberjackService_ServiceDesc.Streams[1], LumberjackService_Watch_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchRequest, WatchResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type LumberjackService_WatchClient = grpc.ServerStreamingClient[WatchResponse]
+
 // LumberjackServiceServer is the server API for LumberjackService service.
 // All implementations must embed UnimplementedLumberjackServiceServer
 // for forward compatibility.
@@ -243,6 +271,14 @@ type LumberjackServiceServer interface {
 	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
 	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
 	Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error
+	// Watch opens a long-lived stream of worktree/repository change events. On
+	// subscribe it first emits one SNAPSHOT event per tracked repository (each
+	// carrying that repository's current worktrees), then streams live deltas —
+	// worktree created/adopted/updated/deleted and repository sync
+	// started/finished — as they happen. Multiple concurrent Watch calls are
+	// supported; each gets its own independent feed. A subscriber that falls too
+	// far behind is disconnected rather than allowed to stall the daemon.
+	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
 	mustEmbedUnimplementedLumberjackServiceServer()
 }
 
@@ -282,6 +318,9 @@ func (UnimplementedLumberjackServiceServer) DeleteRepository(context.Context, *D
 }
 func (UnimplementedLumberjackServiceServer) Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedLumberjackServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method Watch not implemented")
 }
 func (UnimplementedLumberjackServiceServer) mustEmbedUnimplementedLumberjackServiceServer() {}
 func (UnimplementedLumberjackServiceServer) testEmbeddedByValue()                           {}
@@ -477,6 +516,17 @@ func _LumberjackService_Sync_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LumberjackService_SyncServer = grpc.ServerStreamingServer[SyncResponse]
 
+func _LumberjackService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(LumberjackServiceServer).Watch(m, &grpc.GenericServerStream[WatchRequest, WatchResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type LumberjackService_WatchServer = grpc.ServerStreamingServer[WatchResponse]
+
 // LumberjackService_ServiceDesc is the grpc.ServiceDesc for LumberjackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -525,6 +575,11 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Sync",
 			Handler:       _LumberjackService_Sync_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Watch",
+			Handler:       _LumberjackService_Watch_Handler,
 			ServerStreams: true,
 		},
 	},

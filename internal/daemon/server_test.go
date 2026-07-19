@@ -34,6 +34,37 @@ func (f *fakeSyncStream) Send(r *lumberjackv1.SyncResponse) error {
 }
 func (f *fakeSyncStream) Context() context.Context { return f.ctx }
 
+// fakeWatchStream captures streamed WatchResponses on a channel so a test can
+// consume them as they arrive (Watch itself blocks until ctx is cancelled).
+type fakeWatchStream struct {
+	grpc.ServerStream
+	ctx  context.Context
+	sent chan *lumberjackv1.WatchResponse
+}
+
+func (f *fakeWatchStream) Send(r *lumberjackv1.WatchResponse) error {
+	select {
+	case f.sent <- r:
+		return nil
+	case <-f.ctx.Done():
+		return f.ctx.Err()
+	}
+}
+func (f *fakeWatchStream) Context() context.Context { return f.ctx }
+
+// recvWatch waits briefly for the next streamed WatchResponse, failing the
+// test if none arrives.
+func recvWatch(t *testing.T, ch <-chan *lumberjackv1.WatchResponse) *lumberjackv1.WatchResponse {
+	t.Helper()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for a WatchResponse")
+		return nil
+	}
+}
+
 func TestServerHealth(t *testing.T) {
 	srv := newServer(newHarness(t))
 	resp, err := srv.Health(context.Background(), &lumberjackv1.HealthRequest{})
@@ -238,6 +269,100 @@ func TestServerSyncUnknownRepo(t *testing.T) {
 	err := srv.Sync(&lumberjackv1.SyncRequest{Repository: "ghost"}, stream)
 	if status.Code(err) != codes.NotFound {
 		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
+// TestServerWatchSnapshotThenDelta checks that a Watch call first emits a
+// SNAPSHOT event per tracked repository (with its current worktrees), then
+// forwards a live delta once one happens.
+func TestServerWatchSnapshotThenDelta(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream := &fakeWatchStream{ctx: ctx, sent: make(chan *lumberjackv1.WatchResponse, 10)}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.Watch(&lumberjackv1.WatchRequest{}, stream) }()
+
+	snap := recvWatch(t, stream.sent)
+	if snap.GetType() != lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SNAPSHOT {
+		t.Fatalf("first event type = %v, want SNAPSHOT", snap.GetType())
+	}
+	if snap.GetRepository().GetDirPrefix() != "n" || len(snap.GetWorktrees()) != 1 {
+		t.Errorf("snapshot = %+v", snap)
+	}
+
+	// Now that the snapshot has been observed, the subscription is definitely
+	// established: trigger a delta and confirm it streams next.
+	if _, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false); err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+
+	delta := recvWatch(t, stream.sent)
+	if delta.GetType() != lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_WORKTREE_CHANGED {
+		t.Fatalf("delta event type = %v, want WORKTREE_CHANGED", delta.GetType())
+	}
+	if delta.GetChange().GetAction() != lumberjackv1.WorktreeAction_WORKTREE_ACTION_DELETED ||
+		delta.GetChange().GetBranch() != "a" {
+		t.Errorf("delta change = %+v", delta.GetChange())
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Errorf("Watch returned %v after context cancellation, want nil", err)
+	}
+}
+
+// TestServerWatchMultipleSubscribers checks that two concurrent Watch calls
+// each receive their own independent snapshot and delta feed.
+func TestServerWatchMultipleSubscribers(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	streams := make([]*fakeWatchStream, 2)
+	errCh := make(chan error, 2)
+	for i := range streams {
+		streams[i] = &fakeWatchStream{ctx: ctx, sent: make(chan *lumberjackv1.WatchResponse, 10)}
+		go func(s *fakeWatchStream) { errCh <- srv.Watch(&lumberjackv1.WatchRequest{}, s) }(streams[i])
+	}
+
+	for _, s := range streams {
+		if snap := recvWatch(t, s.sent); snap.GetType() != lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SNAPSHOT {
+			t.Fatalf("snapshot type = %v", snap.GetType())
+		}
+	}
+
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+
+	for _, s := range streams {
+		if ev := recvWatch(t, s.sent); ev.GetType() != lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SYNC_STARTED {
+			t.Errorf("expected SYNC_STARTED for each subscriber, got %v", ev.GetType())
+		}
+		// Drain the rest of this sync's events (a worktree change, then
+		// SYNC_FINISHED) so no Send is in flight when the context is cancelled.
+		recvWatch(t, s.sent)
+		if ev := recvWatch(t, s.sent); ev.GetType() != lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SYNC_FINISHED {
+			t.Errorf("expected SYNC_FINISHED for each subscriber, got %v", ev.GetType())
+		}
+	}
+
+	cancel()
+	for range streams {
+		if err := <-errCh; err != nil {
+			t.Errorf("Watch returned %v after context cancellation, want nil", err)
+		}
 	}
 }
 
