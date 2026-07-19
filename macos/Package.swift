@@ -17,6 +17,10 @@ let package = Package(
                 .product(name: "GRPC", package: "grpc-swift"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf"),
             ]
-        )
+        ),
+        .testTarget(
+            name: "LumberjackMenuBarTests",
+            dependencies: ["LumberjackMenuBar"]
+        ),
     ]
 )

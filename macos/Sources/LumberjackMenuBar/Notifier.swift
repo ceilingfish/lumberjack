@@ -5,6 +5,12 @@ import UserNotifications
 /// wrapper so the rest of the app depends on an intent ("a worktree appeared")
 /// rather than the UserNotifications API directly.
 struct Notifier {
+    /// Test seam: when set, notifications are handed to this closure as
+    /// (title, body) instead of going through UserNotifications, so logic
+    /// that triggers notifications can be unit tested without a real
+    /// notification center.
+    static var postOverride: ((String, String) -> Void)?
+
     static func requestAuthorization() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
@@ -24,6 +30,10 @@ struct Notifier {
     }
 
     private static func post(title: String, body: String) {
+        if let postOverride {
+            postOverride(title, body)
+            return
+        }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

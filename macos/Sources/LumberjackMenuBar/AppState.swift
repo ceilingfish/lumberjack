@@ -35,9 +35,11 @@ final class AppState: ObservableObject {
 
     private let pollInterval: UInt64
     private var client: DaemonClient?
-    /// Last-seen worktree directory paths per repository, used to detect
-    /// clone/delete since the previous refresh.
-    private var knownWorktrees: [String: Set<String>] = [:]
+    /// Last-seen worktrees per repository, keyed by directory path, used to
+    /// detect clone/delete since the previous refresh. Storing the branch
+    /// name (not just the path) means a deleted worktree's branch is still
+    /// known once it disappears from the current listing.
+    private var knownWorktrees: [String: [String: String]] = [:]
     private var loopTask: Task<Void, Never>?
 
     init(pollIntervalSeconds: UInt64 = 2) {
@@ -107,23 +109,24 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func diffAndNotify(repository: String, worktrees current: [Lumberjack_V1_Worktree], key: String) {
-        let currentPaths = Set(current.map(\.directoryPath))
-        defer { knownWorktrees[key] = currentPaths }
+    func diffAndNotify(repository: String, worktrees current: [Lumberjack_V1_Worktree], key: String) {
+        let currentByPath = Dictionary(uniqueKeysWithValues: current.map { ($0.directoryPath, $0.branchName) })
+        defer { knownWorktrees[key] = currentByPath }
 
-        guard let previousPaths = knownWorktrees[key] else {
+        guard let previousByPath = knownWorktrees[key] else {
             // First observation of this repository: nothing to diff against,
             // so establish the baseline without notifying for pre-existing
             // worktrees.
             return
         }
 
-        let byPath = Dictionary(uniqueKeysWithValues: current.map { ($0.directoryPath, $0) })
+        let currentPaths = Set(currentByPath.keys)
+        let previousPaths = Set(previousByPath.keys)
         for created in currentPaths.subtracting(previousPaths) {
-            Notifier.worktreeCreated(repository: repository, branch: byPath[created]?.branchName ?? created)
+            Notifier.worktreeCreated(repository: repository, branch: currentByPath[created] ?? created)
         }
         for deleted in previousPaths.subtracting(currentPaths) {
-            Notifier.worktreeDeleted(repository: repository, branch: deleted)
+            Notifier.worktreeDeleted(repository: repository, branch: previousByPath[deleted] ?? deleted)
         }
     }
 }
