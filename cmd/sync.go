@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/color"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
@@ -57,7 +58,7 @@ func runSync(ctx context.Context, cmd *cobra.Command, c *client.Client, ref stri
 		delete(changes, repo)
 		s := e.GetSummary()
 		_, err := fmt.Fprintf(out, "%s: %s (+%d worktree(s), -%d)%s\n",
-			repo, summaryStatus(s),
+			repo, paintSummaryStatus(s),
 			s.GetWorktreesCreated(), s.GetWorktreesRemoved(), summaryError(s))
 		return err
 	})
@@ -68,6 +69,16 @@ func summaryStatus(s *lumberjackv1.SyncSummary) string {
 		return "error"
 	}
 	return "synced"
+}
+
+// paintSummaryStatus colourises summaryStatus: error red, everything else
+// (currently just "synced") ok green. This is a standalone Fprintf line, not
+// a tabwriter cell, so it can be coloured directly with no alignment concern.
+func paintSummaryStatus(s *lumberjackv1.SyncSummary) string {
+	if s.GetStatus() == lumberjackv1.SyncStatus_SYNC_STATUS_ERROR {
+		return color.Error(summaryStatus(s))
+	}
+	return color.OK(summaryStatus(s))
 }
 
 func summaryError(s *lumberjackv1.SyncSummary) string {

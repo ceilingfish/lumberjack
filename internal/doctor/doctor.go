@@ -10,8 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"text/tabwriter"
 
+	"github.com/ceilingfish/lumberjack/internal/color"
 	"github.com/ceilingfish/lumberjack/internal/github"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
@@ -71,19 +71,19 @@ func checkGHAuth(ctx context.Context) Check {
 
 // report renders checks as an aligned table and returns whether all passed.
 func report(w io.Writer, checks []Check) (bool, error) {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	t := color.NewTable(w)
 	allOK := true
 	for _, c := range checks {
 		mark := "ok"
+		paint := color.OK
 		if !c.OK {
 			mark = "FAIL"
+			paint = color.Error
 			allOK = false
 		}
-		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\n", mark, c.Name, c.Detail); err != nil {
-			return false, err
-		}
+		t.Row("%s\t%s\t%s\n", t.Paint(paint, mark), c.Name, c.Detail)
 	}
-	if err := tw.Flush(); err != nil {
+	if err := t.Flush(); err != nil {
 		return false, err
 	}
 	return allOK, nil
