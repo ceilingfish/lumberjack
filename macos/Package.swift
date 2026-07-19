@@ -4,7 +4,11 @@ import PackageDescription
 let package = Package(
     name: "LumberjackMenuBar",
     platforms: [
-        .macOS(.v13)
+        // v14+ because swift-testing's Testing.framework (used by the test
+        // target) requires a macOS 14 minimum; a v13 deployment target
+        // still builds but the test bundle fails to dlopen
+        // Testing.framework at run time ("built for newer version 14.0").
+        .macOS(.v14)
     ],
     dependencies: [
         .package(url: "https://github.com/grpc/grpc-swift.git", from: "1.21.0"),

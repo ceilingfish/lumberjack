@@ -66,4 +66,27 @@ struct AppStateDiffTests {
         #expect(posted.first?.0 == "Worktree deleted")
         #expect(posted.first?.1 == "repo: feature-x")
     }
+
+    /// Regression test: knownWorktrees must not retain state for a
+    /// repository that has been untracked, or it grows unboundedly across
+    /// repeated add/remove cycles.
+    @Test
+    func pruneKnownWorktreesDropsUntrackedRepositories() {
+        let state = AppState()
+        state.diffAndNotify(
+            repository: "repo-a",
+            worktrees: [worktree(branch: "main", path: "/tmp/repo-a/main")],
+            key: "/tmp/repo-a"
+        )
+        state.diffAndNotify(
+            repository: "repo-b",
+            worktrees: [worktree(branch: "main", path: "/tmp/repo-b/main")],
+            key: "/tmp/repo-b"
+        )
+        #expect(state.knownWorktreeKeys == ["/tmp/repo-a", "/tmp/repo-b"])
+
+        state.pruneKnownWorktrees(tracking: ["/tmp/repo-b"])
+
+        #expect(state.knownWorktreeKeys == ["/tmp/repo-b"])
+    }
 }

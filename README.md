@@ -246,3 +246,9 @@ notification when a worktree is cloned or deleted. It's a separate, opt-in
 install — it doesn't affect the CLI/daemon install above — built with Xcode
 from a Swift package that talks to the same daemon over its Unix socket. See
 `macos/README.md` for building, installing, and running it.
+
+**Partial/interim delivery:** the app updates by polling the daemon every
+few seconds rather than consuming a real-time push stream, because the
+daemon-side `Watch` RPC it's meant to consume (issue #13) has not landed
+yet. Once #13 ships, the app's refresh loop should be switched over to
+subscribe to that stream instead — see `macos/README.md` for detail.

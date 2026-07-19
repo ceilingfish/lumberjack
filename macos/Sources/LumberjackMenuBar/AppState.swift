@@ -96,6 +96,8 @@ final class AppState: ObservableObject {
                 selectedRepository = repos.first?.localPath
             }
 
+            pruneKnownWorktrees(tracking: repos.map(\.localPath))
+
             for repo in repos {
                 let current = try await client.listWorktrees(repository: repo.localPath)
                 diffAndNotify(repository: repo.githubName, worktrees: current, key: repo.localPath)
@@ -108,6 +110,17 @@ final class AppState: ObservableObject {
             // leave the last-known-good data on screen and retry next tick.
         }
     }
+
+    /// Drops cached diff state (`knownWorktrees`) for any repository no
+    /// longer in `paths`, so the dictionary doesn't grow unboundedly as
+    /// repositories are added and removed over the app's lifetime.
+    func pruneKnownWorktrees(tracking paths: [String]) {
+        let trackedPaths = Set(paths)
+        knownWorktrees = knownWorktrees.filter { trackedPaths.contains($0.key) }
+    }
+
+    /// Test-only accessor for `knownWorktrees`'s keys.
+    var knownWorktreeKeys: Set<String> { Set(knownWorktrees.keys) }
 
     func diffAndNotify(repository: String, worktrees current: [Lumberjack_V1_Worktree], key: String) {
         let currentByPath = Dictionary(uniqueKeysWithValues: current.map { ($0.directoryPath, $0.branchName) })

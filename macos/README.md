@@ -37,10 +37,13 @@ issue #9. Installing the Go binary never installs this app, and vice versa.
 ## Building
 
 Requires Xcode (or the Xcode Command Line Tools with a full Xcode install for
-`codesign`/app bundling) and Swift 6.0+, targeting macOS 13+. Swift 6.0 is
+`codesign`/app bundling) and Swift 6.0+, targeting macOS 14+. Swift 6.0 is
 required so SPM auto-links the `Testing` framework used by
 `Tests/LumberjackMenuBarTests` (Swift Testing requires swift-tools-version
-6.0+; under 5.9 `swift test` fails with "no such module 'Testing'").
+6.0+; under 5.9 `swift test` fails with "no such module 'Testing'"). The
+deployment target is macOS 14+ (not 13) because swift-testing's
+`Testing.framework` itself requires a macOS 14 minimum — a `.v13` target
+built fine but `swift test` failed to dlopen `Testing.framework` at run time.
 
 ```sh
 cd macos

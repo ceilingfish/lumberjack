@@ -51,3 +51,11 @@ stubs generated from `proto/lumberjack/v1/lumberjack.proto` via
 `buf generate --template buf.gen.swift.yaml` (parallel to, and never mixed
 with, the Go codegen in `buf.gen.yaml`). Regenerate those stubs — and only
 those stubs, never hand-edit them — whenever the proto changes.
+
+This is a partial/interim delivery of issue #9: it polls
+`ListRepositories`/`ListWorktrees` on a timer instead of consuming the
+`Watch` RPC (issue #13), which had not landed when this app was built and
+which #9 depends on for its real-time-update acceptance criterion. Do not
+treat the polling loop as the intended final design — when #13 lands,
+`AppState`'s refresh loop must be replaced with a subscription to that
+stream (see `macos/README.md` and comments in `AppState.swift`).
