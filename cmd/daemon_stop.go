@@ -16,7 +16,7 @@ func newDaemonStopCmd() *cobra.Command {
 		Short: "Stop the daemon if it is running",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			svc, err := newService("")
+			svc, err := newService("", "")
 			if err != nil {
 				return err
 			}

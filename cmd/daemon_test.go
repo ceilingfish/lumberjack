@@ -40,7 +40,7 @@ func (f *fakeLifecycle) Stop() error                     { f.stopped = true; ret
 // explicit socket path, and reports a platform (proving kardianos wired up).
 func TestNewService(t *testing.T) {
 	for _, socket := range []string{"", "/tmp/lj.sock"} {
-		svc, err := newService(socket)
+		svc, err := newService(socket, "")
 		if err != nil {
 			t.Fatalf("newService(%q): %v", socket, err)
 		}
@@ -54,16 +54,20 @@ func TestNewService(t *testing.T) {
 }
 
 // TestCmdDaemonHelp: the bare `daemon` command prints help listing every
-// lifecycle subcommand, and does not error.
+// lifecycle subcommand, and does not error. `install` moved to the top level,
+// so it is no longer expected here.
 func TestCmdDaemonHelp(t *testing.T) {
 	out, err := run(t, "", "daemon")
 	if err != nil {
 		t.Fatalf("daemon: %v", err)
 	}
-	for _, sub := range []string{"run", "install", "start", "stop", "status"} {
+	for _, sub := range []string{"run", "start", "stop", "status"} {
 		if !strings.Contains(out, sub) {
 			t.Errorf("daemon help missing subcommand %q; out=%q", sub, out)
 		}
+	}
+	if strings.Contains(out, "\n  install ") {
+		t.Errorf("daemon help should not list install as a subcommand; out=%q", out)
 	}
 }
 
@@ -75,92 +79,6 @@ func TestCmdDaemonStatusEndToEnd(t *testing.T) {
 	out, _ := run(t, "", "daemon", "status")
 	if !strings.Contains(out, "lumberjack daemon:") {
 		t.Errorf("expected a status line, got %q", out)
-	}
-}
-
-func TestInstallDaemon(t *testing.T) {
-	var buf bytes.Buffer
-	f := &fakeLifecycle{}
-	if err := installDaemon(&buf, f, false); err != nil {
-		t.Fatalf("installDaemon: %v", err)
-	}
-	if !f.installed {
-		t.Error("Install was not called")
-	}
-	if f.uninstalled {
-		t.Error("Uninstall should not be called without --force")
-	}
-	if !strings.Contains(buf.String(), "installed") {
-		t.Errorf("out = %q", buf.String())
-	}
-
-	// Install failure is wrapped and surfaced.
-	if err := installDaemon(&buf, &fakeLifecycle{installErr: errors.New("boom")}, false); err == nil {
-		t.Error("expected install error")
-	}
-}
-
-// TestCheckStableExecutable: installs from a `go run` temp build are refused
-// with actionable guidance; durable paths pass.
-func TestCheckStableExecutable(t *testing.T) {
-	ephemeral := []string{
-		"/var/folders/xb/T/go-build2170204171/b001/exe/lumberjack",    // temp work dir
-		"/tmp/go-build123/b001/exe/lumberjack",                        // temp work dir
-		"/Users/tom/Library/Caches/go-build/42/42dd568…-d/lumberjack", // persistent build cache
-	}
-	for _, p := range ephemeral {
-		err := checkStableExecutable(p)
-		if err == nil {
-			t.Errorf("checkStableExecutable(%q) = nil, want error", p)
-			continue
-		}
-		if !strings.Contains(err.Error(), "./bin/lumberjack") {
-			t.Errorf("error for %q lacks durable-install guidance: %v", p, err)
-		}
-	}
-
-	durable := []string{
-		"/Users/tom.parrish/Code/ceilingfish/Lumberjack/bin/lumberjack",
-		"/usr/local/bin/lumberjack",
-		"/opt/homebrew/bin/lumberjack",
-	}
-	for _, p := range durable {
-		if err := checkStableExecutable(p); err != nil {
-			t.Errorf("checkStableExecutable(%q) = %v, want nil", p, err)
-		}
-	}
-}
-
-// TestInstallDaemonForce: --force removes any existing registration (Stop +
-// Uninstall) before installing, so an "already exists" error can never occur.
-func TestInstallDaemonForce(t *testing.T) {
-	var buf bytes.Buffer
-	f := &fakeLifecycle{status: service.StatusRunning}
-	if err := installDaemon(&buf, f, true); err != nil {
-		t.Fatalf("installDaemon force: %v", err)
-	}
-	if !f.uninstalled {
-		t.Error("Uninstall was not called under --force")
-	}
-	if !f.installed {
-		t.Error("Install was not called under --force")
-	}
-
-	// A not-installed starting state is not an error: force still installs.
-	f = &fakeLifecycle{uninstallErr: service.ErrNotInstalled, stopErr: service.ErrNotInstalled}
-	if err := installDaemon(&buf, f, true); err != nil {
-		t.Fatalf("force over not-installed: %v", err)
-	}
-	if !f.installed {
-		t.Error("Install was not called when nothing was previously installed")
-	}
-
-	// A real Uninstall failure aborts before reinstalling.
-	f = &fakeLifecycle{uninstallErr: errors.New("boom")}
-	if err := installDaemon(&buf, f, true); err == nil {
-		t.Error("expected uninstall error to surface")
-	} else if f.installed {
-		t.Error("Install should not run after a failed Uninstall")
 	}
 }
 

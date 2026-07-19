@@ -14,7 +14,7 @@ func newDaemonRunCmd() *cobra.Command {
 		Short: "Run the daemon in the foreground",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			svc, err := newService(socketPath)
+			svc, err := newService(socketPath, "")
 			if err != nil {
 				return err
 			}

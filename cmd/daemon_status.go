@@ -17,7 +17,7 @@ func newDaemonStatusCmd() *cobra.Command {
 		Short: "Report whether the daemon is installed and running",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			svc, err := newService("")
+			svc, err := newService("", "")
 			if err != nil {
 				return err
 			}
