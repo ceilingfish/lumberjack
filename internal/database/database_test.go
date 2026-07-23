@@ -158,7 +158,6 @@ func TestForeignKeysEnforced(t *testing.T) {
 		RepositoryID:  999,
 		BranchName:    "feature/x",
 		DirectoryPath: "/path/to/my_repo-x",
-		CreatedBy:     schema.CreatedByLumberjack,
 	}
 	if _, err := client.NewInsert().Model(wt).Exec(ctx); err == nil {
 		t.Fatal("expected foreign-key violation, got nil error")

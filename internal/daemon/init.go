@@ -100,7 +100,6 @@ func (s *Service) adoptExistingWorktrees(ctx context.Context, repo *schema.Repos
 			RepositoryID:  repo.ID,
 			BranchName:    r.Branch,
 			DirectoryPath: r.Dir,
-			CreatedBy:     schema.CreatedByPreexisting,
 		}
 		if err := s.db.CreateWorktree(ctx, row); err != nil {
 			return adopted, fmt.Errorf("recording adopted worktree %s: %w", r.Dir, err)

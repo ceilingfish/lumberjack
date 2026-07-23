@@ -72,14 +72,6 @@ enum SyncStatus {
   SYNC_STATUS_ERROR = 2;
 }
 
-// CreatedBy mirrors schema.CreatedBy* — the safety rail that stops the daemon
-// deleting a worktree a human made by hand.
-enum CreatedBy {
-  CREATED_BY_UNSPECIFIED = 0;
-  CREATED_BY_LUMBERJACK = 1;
-  CREATED_BY_PREEXISTING = 2;
-}
-
 // WorktreeAction is what a sync (or init) did to a single branch's worktree,
 // reported per branch so the CLI can render a branch/PR/action table.
 enum WorktreeAction {
@@ -131,11 +123,15 @@ message Repository {
 // mapping plus reconciliation status computed fresh from git at request time
 // (never cached — see docs/schema.md "Derived live, not stored").
 message Worktree {
+  // Field 4 was `CreatedBy created_by`, the lumberjack-vs-human safety rail;
+  // removed now that the daemon manages every worktree uniformly.
+  reserved 4;
+  reserved "created_by";
+
   string branch_name = 1;
   string directory_path = 2;
   // Absent for an orphaned worktree that has outlived its PR.
   optional int64 github_pr_number = 3;
-  CreatedBy created_by = 4;
   optional google.protobuf.Timestamp last_synced_at = 5;
 
   // --- derived live from git, not persisted ---

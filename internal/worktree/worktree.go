@@ -15,14 +15,18 @@ import (
 type PRState int
 
 const (
-	// PRGone means the worktree has no PR, or the PR was closed without being
-	// merged — any local-only commits are genuinely at risk.
+	// PRGone means the PR was closed without being merged — any local-only
+	// commits are genuinely at risk.
 	PRGone PRState = iota
 	// PROpen means the PR is still open — a healthy tracked worktree.
 	PROpen
 	// PRMerged means the PR was merged into the base branch, so the branch's
 	// commits are preserved there regardless of what LocalOnlyCommits reports.
 	PRMerged
+	// PRNone means the worktree has no associated PR (a tracked branch that has
+	// not opened one, or one not yet linked). It is never a removal candidate:
+	// without a finished PR there is nothing to say the work is safe to discard.
+	PRNone
 )
 
 // Status is the live reconciliation view of a worktree, computed fresh from
@@ -104,7 +108,7 @@ func Reconcile(ctx context.Context, p Prober, dir string, pr PRState) (Status, e
 // note renders a human-readable one-liner for a Status.
 func note(st Status, pr PRState) string {
 	switch {
-	case !st.NeedsReconciliation && pr == PROpen:
+	case !st.NeedsReconciliation && (pr == PROpen || pr == PRNone):
 		return ""
 	case !st.NeedsReconciliation && pr == PRMerged:
 		return "PR merged; safe to remove"

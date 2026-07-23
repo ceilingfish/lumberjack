@@ -55,7 +55,6 @@ The local side, and the crucial branch ↔ directory mapping. Holds only what gi
 | `github_pr_number` | integer   | The PR this worktree came from; immutable, so it's safe to persist. Nullable — an orphaned worktree may outlive its PR |
 | `branch_name`      | text      | Exact, unslugged                                                                                                       |
 | `directory_path`   | text      | The actual resolved path — stored, never recomputed                                                                    |
-| `created_by`       | text      | `lumberjack` vs. `preexisting` — a safety rail so the daemon never deletes a human-made worktree                       |
 | `last_synced_at`   | timestamp | When Lumberjack last reconciled this worktree                                                                          |
 | `created_at`       | timestamp |                                                                                                                        |
 
@@ -85,7 +84,8 @@ Optional but recommended — audit log for `lumberjack repositories NAME` detail
 - **`etag_pulls`** — the "hourly, cheap, incremental" polling story depends on conditional requests to stay under rate limits.
 - **`github_pr_number`** — immutable link back to the source PR; lets a worktree be re-associated even after slug rules change, without caching mutable PR state.
 - **`directory_path` stored, not computed** — makes the reverse (directory → branch) lookup reliable and immune to slug-rule changes.
-- **`created_by`** — ensures the daemon never deletes a worktree a human created by hand.
+
+The daemon manages every tracked worktree uniformly, regardless of whether it created the worktree or adopted one already on disk. A worktree whose PR has merged or closed is removed only when it is provably safe to do so — a clean tree with no local-only commits; anything dirty or holding un-pushed work is retained (see "Derived live, not stored").
 
 ## Derived live, not stored
 

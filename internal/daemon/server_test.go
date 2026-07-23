@@ -119,9 +119,6 @@ func TestServerListWorktrees(t *testing.T) {
 	if wt.GetBranchName() != "feature/a" || wt.GetGithubPrNumber() != 1 {
 		t.Errorf("worktree = %+v", wt)
 	}
-	if wt.GetCreatedBy() != lumberjackv1.CreatedBy_CREATED_BY_LUMBERJACK {
-		t.Errorf("created_by = %v", wt.GetCreatedBy())
-	}
 }
 
 func TestServerDeleteWorktree(t *testing.T) {

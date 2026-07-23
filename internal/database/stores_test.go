@@ -199,7 +199,6 @@ func TestWorktreeStore(t *testing.T) {
 	wt := &schema.Worktree{
 		RepositoryID: repo.ID, GithubPRNumber: &num,
 		BranchName: "feature/x", DirectoryPath: "/parent/a-x",
-		CreatedBy: schema.CreatedByLumberjack,
 	}
 	if err := c.CreateWorktree(ctx, wt); err != nil {
 		t.Fatalf("CreateWorktree: %v", err)
@@ -241,7 +240,7 @@ func TestDeleteRepository(t *testing.T) {
 	for _, dir := range []string{"/parent/a-x", "/parent/a-y"} {
 		wt := &schema.Worktree{
 			RepositoryID: repo.ID, BranchName: "feature/" + dir,
-			DirectoryPath: dir, CreatedBy: schema.CreatedByLumberjack,
+			DirectoryPath: dir,
 		}
 		if err := c.CreateWorktree(ctx, wt); err != nil {
 			t.Fatalf("CreateWorktree: %v", err)
@@ -249,7 +248,7 @@ func TestDeleteRepository(t *testing.T) {
 	}
 	otherWT := &schema.Worktree{
 		RepositoryID: other.ID, BranchName: "feature/b",
-		DirectoryPath: "/parent/b-x", CreatedBy: schema.CreatedByLumberjack,
+		DirectoryPath: "/parent/b-x",
 	}
 	_ = c.CreateWorktree(ctx, otherWT)
 

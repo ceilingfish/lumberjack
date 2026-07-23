@@ -253,9 +253,6 @@ func TestInitRepositoryAdoptsExistingWorktrees(t *testing.T) {
 	if wts[0].DirectoryPath != existing || wts[0].BranchName != "feature/x" {
 		t.Errorf("adopted wrong worktree: %+v", wts[0])
 	}
-	if wts[0].CreatedBy != schema.CreatedByPreexisting {
-		t.Errorf("created_by=%q, want %q", wts[0].CreatedBy, schema.CreatedByPreexisting)
-	}
 	if wts[0].GithubPRNumber != nil {
 		t.Errorf("adopted worktree should have no PR number yet, got %v", *wts[0].GithubPRNumber)
 	}
@@ -299,9 +296,6 @@ func TestSyncLinksAdoptedWorktreeToPR(t *testing.T) {
 	}
 	if wts[0].GithubPRNumber == nil || *wts[0].GithubPRNumber != 7 {
 		t.Errorf("worktree not linked to PR #7: %+v", wts[0])
-	}
-	if wts[0].CreatedBy != schema.CreatedByPreexisting {
-		t.Errorf("created_by=%q, want preexisting (adoption preserved)", wts[0].CreatedBy)
 	}
 }
 
@@ -714,6 +708,36 @@ func TestSyncRetainsDirtyClosedWorktree(t *testing.T) {
 	}
 }
 
+// TestSyncKeepsWorktreeWithNoPR checks a clean worktree that has no associated
+// PR is never auto-removed — without a finished PR there is nothing to say its
+// work is safe to discard.
+func TestSyncKeepsWorktreeWithNoPR(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.parent, "n")
+	existing := filepath.Join(h.parent, "n-feature")
+	h.git.worktrees = []worktree.Ref{
+		{Dir: dir, Branch: "main"},
+		{Dir: existing, Branch: "feature/x"},
+	}
+	// Init adopts the hand-created worktree with no PR number.
+	repo, adopted, err := h.svc.InitRepository(context.Background(), dir)
+	if err != nil || len(adopted) != 1 {
+		t.Fatalf("init: adopted=%v err=%v", adopted, err)
+	}
+
+	// A sync with no open PR on that branch must keep it (clean, but no PR).
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed=%d, want 0 (no PR is not a cleanup candidate)", removed)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 1 {
+		t.Errorf("expected worktree kept, got %d", len(got))
+	}
+}
+
 // TestSyncRemovesMergedWorktreeWithLocalCommits covers the squash-merge case:
 // a worktree carrying commits that sit on no remote-tracking ref is still
 // removed when its PR merged, because those commits are on the base branch.
@@ -876,9 +900,6 @@ func TestSyncAdoptsExistingWorktree(t *testing.T) {
 	if wts[0].DirectoryPath != existing {
 		t.Errorf("adopted dir=%q, want %q", wts[0].DirectoryPath, existing)
 	}
-	if wts[0].CreatedBy != schema.CreatedByPreexisting {
-		t.Errorf("created_by=%q, want %q", wts[0].CreatedBy, schema.CreatedByPreexisting)
-	}
 }
 
 func TestSyncDoesNotAdoptTrackedWorktree(t *testing.T) {
@@ -893,7 +914,7 @@ func TestSyncDoesNotAdoptTrackedWorktree(t *testing.T) {
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 
 	// git now reports that worktree; a second sync must not re-adopt it as a
-	// second row nor flip its created_by.
+	// second row.
 	h.git.worktrees = []worktree.Ref{{Dir: wts[0].DirectoryPath, Branch: "a"}}
 	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
 	if err != nil {
@@ -905,9 +926,6 @@ func TestSyncDoesNotAdoptTrackedWorktree(t *testing.T) {
 	got, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 worktree, got %d", len(got))
-	}
-	if got[0].CreatedBy != schema.CreatedByLumberjack {
-		t.Errorf("created_by=%q, want %q", got[0].CreatedBy, schema.CreatedByLumberjack)
 	}
 }
 

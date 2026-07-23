@@ -386,7 +386,6 @@ func (s *Service) adoptWorktree(
 	row := &schema.Worktree{
 		RepositoryID: repo.ID, GithubPRNumber: &n,
 		BranchName: pr.HeadBranch, DirectoryPath: dir,
-		CreatedBy: schema.CreatedByPreexisting,
 	}
 	if cerr := s.db.CreateWorktree(ctx, row); cerr != nil {
 		*errs = append(*errs, fmt.Errorf("recording adopted worktree for PR #%d: %w", num, cerr))
@@ -411,7 +410,6 @@ func (s *Service) createWorktree(
 	row := &schema.Worktree{
 		RepositoryID: repo.ID, GithubPRNumber: &n,
 		BranchName: pr.HeadBranch, DirectoryPath: dir,
-		CreatedBy: schema.CreatedByLumberjack,
 	}
 	if cerr := s.db.CreateWorktree(ctx, row); cerr != nil {
 		*errs = append(*errs, fmt.Errorf("recording worktree for PR #%d: %w", num, cerr))
@@ -479,9 +477,9 @@ func (s *Service) resolveDir(repo *schema.Repository, pr github.PR, usedDirs map
 }
 
 // removeClosed removes worktrees whose PR is no longer open, retaining any
-// that still need reconciliation (dirty or holding local-only commits) and
-// never touching human-made (preexisting) worktrees. It returns the number
-// removed.
+// that still need reconciliation (dirty or holding local-only commits). Every
+// tracked worktree is a candidate regardless of who created it — removeOne only
+// removes the provably-safe ones. It returns the number removed.
 func (s *Service) removeClosed(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
 	stored []schema.Worktree, progress progressFn, errs *[]error,
@@ -491,13 +489,13 @@ func (s *Service) removeClosed(
 		if s.prStillOpen(wt, openByNum) {
 			continue // PR still open — keep the worktree
 		}
-		if wt.CreatedBy != schema.CreatedByLumberjack {
-			continue // safety rail: never remove a human-made worktree
-		}
 		state, serr := s.prState(ctx, repo, wt, openByNum)
 		if serr != nil {
 			*errs = append(*errs, fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, serr))
 			continue
+		}
+		if state == worktree.PRNone {
+			continue // no associated PR — not a merged/closed cleanup candidate
 		}
 		if s.removeOne(ctx, repo, wt, state, progress, errs) {
 			removed++
@@ -515,17 +513,17 @@ func (s *Service) prStillOpen(wt schema.Worktree, openByNum map[int64]github.PR)
 	return ok
 }
 
-// prState resolves the reconciliation state of a worktree's source PR: open if
-// it is in the freshly-fetched open set, merged if gh reports it merged, and
-// otherwise gone (closed without merge, or no PR at all). The merged case is
-// what stops a squash-merged worktree — whose branch commits are on the base
-// branch but on no remote-tracking ref — from being reported as holding
-// local-only commits at risk.
+// prState resolves the reconciliation state of a worktree's source PR: none if
+// the worktree has no PR recorded, open if the PR is in the freshly-fetched open
+// set, merged if gh reports it merged, and otherwise gone (closed without
+// merge). The merged case is what stops a squash-merged worktree — whose branch
+// commits are on the base branch but on no remote-tracking ref — from being
+// reported as holding local-only commits at risk.
 func (s *Service) prState(
 	ctx context.Context, repo *schema.Repository, wt schema.Worktree, openByNum map[int64]github.PR,
 ) (worktree.PRState, error) {
 	if wt.GithubPRNumber == nil {
-		return worktree.PRGone, nil
+		return worktree.PRNone, nil
 	}
 	if _, ok := openByNum[*wt.GithubPRNumber]; ok {
 		return worktree.PROpen, nil

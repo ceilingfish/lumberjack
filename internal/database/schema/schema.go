@@ -57,7 +57,6 @@ type Worktree struct {
 	GithubPRNumber *int64     `bun:"github_pr_number"`
 	BranchName     string     `bun:"branch_name,notnull"`
 	DirectoryPath  string     `bun:"directory_path,notnull"`
-	CreatedBy      string     `bun:"created_by,notnull"`
 	LastSyncedAt   *time.Time `bun:"last_synced_at"`
 	CreatedAt      time.Time  `bun:"created_at,notnull,default:current_timestamp"`
 }
@@ -75,13 +74,6 @@ type SyncRun struct {
 	WorktreesRemoved int        `bun:"worktrees_removed,notnull"`
 	Error            *string    `bun:"error"`
 }
-
-// CreatedBy values for Worktree.CreatedBy, the safety rail that stops the
-// daemon deleting a worktree a human made by hand.
-const (
-	CreatedByLumberjack  = "lumberjack"
-	CreatedByPreexisting = "preexisting"
-)
 
 // Sync status values for Repository.LastSyncStatus and SyncRun.Status.
 const (
