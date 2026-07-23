@@ -25,6 +25,8 @@ type fakeGit struct {
 	localOnly map[string]int64
 	addErr    map[string]error // keyed by branch
 	fetchErr  error
+	pullErr   error    // forces Pull to fail
+	pulled    []string // repo paths Pull was called on, for assertions
 	remotes   string
 	remoteErr error
 	remoteURL string
@@ -57,6 +59,11 @@ func (f *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
 }
 func (f *fakeGit) Fetch(context.Context, string, string) error { return f.fetchErr }
 
+func (f *fakeGit) Pull(_ context.Context, repoPath string) error {
+	f.pulled = append(f.pulled, repoPath)
+	return f.pullErr
+}
+
 func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error {
 	if err := f.addErr[branch]; err != nil {
 		return err
@@ -86,8 +93,12 @@ type fakeGH struct {
 	infoErr error
 	prs     []github.PR
 	prsErr  error
-	user    string
-	userErr error
+	// merged reports, per PR number, whether PRMerged answers true; mergedErr
+	// forces the lookup to fail.
+	merged    map[int64]bool
+	mergedErr error
+	user      string
+	userErr   error
 	// active is the account gh reports as currently signed in; switchErr forces
 	// SwitchAccount to fail. switches records each (host, login) switch made.
 	active    string
@@ -111,6 +122,13 @@ func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {
 
 func (f *fakeGH) ListOpenPRs(context.Context, github.RepoInfo) ([]github.PR, error) {
 	return f.prs, f.prsErr
+}
+
+func (f *fakeGH) PRMerged(_ context.Context, _ github.RepoInfo, number int64) (bool, error) {
+	if f.mergedErr != nil {
+		return false, f.mergedErr
+	}
+	return f.merged[number], nil
 }
 
 func (f *fakeGH) AuthenticatedUser(context.Context) (string, error) {
@@ -696,6 +714,58 @@ func TestSyncRetainsDirtyClosedWorktree(t *testing.T) {
 	}
 }
 
+// TestSyncRemovesMergedWorktreeWithLocalCommits covers the squash-merge case:
+// a worktree carrying commits that sit on no remote-tracking ref is still
+// removed when its PR merged, because those commits are on the base branch.
+func TestSyncRemovesMergedWorktreeWithLocalCommits(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	// Commits present on no remote ref (as after a squash merge), but the PR
+	// was merged — so they are not at risk and the worktree may be removed.
+	h.git.localOnly[wts[0].DirectoryPath] = 4
+	h.gh.prs = nil
+	h.gh.merged = map[int64]bool{1: true}
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed=%d, want 1 (merged worktree is safe to remove)", removed)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 0 {
+		t.Errorf("expected merged worktree removed, got %d", len(got))
+	}
+}
+
+// TestSyncPullsCleanRepo checks sync fast-forwards the main checkout when clean
+// and leaves it alone when it has uncommitted changes.
+func TestSyncPullsCleanRepo(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(h.git.pulled) != 1 || h.git.pulled[0] != repo.LocalPath {
+		t.Errorf("expected a pull of %s, got %v", repo.LocalPath, h.git.pulled)
+	}
+
+	// A dirty main checkout must not be pulled.
+	h.git.pulled = nil
+	h.git.dirty[repo.LocalPath] = true
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(h.git.pulled) != 0 {
+		t.Errorf("dirty checkout should not be pulled, got %v", h.git.pulled)
+	}
+}
+
 // TestSyncProgressChangesPerBranch checks the per-branch action vocabulary:
 // a new PR reports "checked out"; once its PR closes it reports "deleted".
 func TestSyncProgressChangesPerBranch(t *testing.T) {
@@ -923,6 +993,27 @@ func TestDeleteWorktreeNeedsConfirmation(t *testing.T) {
 	}
 	if !res.Deleted {
 		t.Errorf("forced delete should succeed: %+v", res)
+	}
+}
+
+// TestDeleteMergedWorktreeNoConfirmation checks a merged PR's worktree deletes
+// without warning even when it holds commits on no remote ref — they are on the
+// base branch, so nothing is at risk.
+func TestDeleteMergedWorktreeNoConfirmation(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	h.git.localOnly[wts[0].DirectoryPath] = 4
+	h.gh.merged = map[int64]bool{1: true}
+
+	res, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false)
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if !res.Deleted || res.RequiresConfirmation || res.CommitsAtRisk != 0 {
+		t.Errorf("merged worktree should delete cleanly: %+v", res)
 	}
 }
 

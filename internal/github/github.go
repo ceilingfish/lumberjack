@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -267,6 +268,28 @@ func (c *Client) ListOpenPRs(ctx context.Context, repo RepoInfo) ([]PR, error) {
 		prs[i] = PR{Number: r.Number, HeadBranch: r.HeadRefName}
 	}
 	return prs, nil
+}
+
+// PRMerged reports whether pull request number in repo was merged (as opposed
+// to still open, or closed without merging). Reconciliation uses it to tell a
+// merged worktree — whose branch commits are safely on the base branch, even
+// after a squash merge deletes the head ref — from one abandoned with un-pushed
+// local work.
+func (c *Client) PRMerged(ctx context.Context, repo RepoInfo, number int64) (bool, error) {
+	out, err := c.run(ctx, "", "pr", "view", strconv.FormatInt(number, 10),
+		"--repo", fmt.Sprintf("%s/%s/%s", repo.Host, repo.Owner, repo.Name),
+		"--json", "state")
+	if err != nil {
+		return false, err
+	}
+	var v struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return false, fmt.Errorf("parsing gh pr view: %w", err)
+	}
+	// gh reports state as OPEN, CLOSED, or MERGED.
+	return v.State == "MERGED", nil
 }
 
 // resolveBinary returns the path from envVar if set (verified to exist),

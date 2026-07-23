@@ -49,7 +49,19 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 	if err := s.git.Fetch(ctx, repo.LocalPath, repo.DefaultRemote); err != nil {
 		return DeleteResult{}, fmt.Errorf("fetching %s: %w", repo.DefaultRemote, err)
 	}
-	st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, false)
+	// A merged PR's commits are on the base branch, so they must not be counted
+	// as commits-at-risk when warning before deletion.
+	state := worktree.PRGone
+	if wt.GithubPRNumber != nil {
+		merged, merr := s.gh.PRMerged(ctx, repoInfo(repo), *wt.GithubPRNumber)
+		if merr != nil {
+			return DeleteResult{}, fmt.Errorf("checking PR #%d state: %w", *wt.GithubPRNumber, merr)
+		}
+		if merged {
+			state = worktree.PRMerged
+		}
+	}
+	st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, state)
 	if err != nil {
 		return DeleteResult{}, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, err)
 	}

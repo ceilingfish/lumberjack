@@ -95,6 +95,16 @@ func (g *Git) Fetch(ctx context.Context, repoPath, remote string) error {
 	return err
 }
 
+// Pull fast-forwards the checkout at dir to its upstream (`git pull --ff-only`).
+// It never creates a merge commit: a branch that has diverged from or has no
+// upstream makes git fail, which the caller treats as "nothing to pull" rather
+// than an error. Callers must confirm the tree is clean first, since a
+// fast-forward still touches the working files.
+func (g *Git) Pull(ctx context.Context, dir string) error {
+	_, err := g.run(ctx, dir, "pull", "--ff-only")
+	return err
+}
+
 // AddWorktree creates a worktree at dir checked out to branch, tracking
 // remote/branch. It fetches nothing itself — the caller fetches first. The
 // created worktree is left on a local branch tracking the remote head.

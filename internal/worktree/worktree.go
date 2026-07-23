@@ -6,14 +6,39 @@ import (
 	"os"
 )
 
+// PRState is the state of a worktree's source pull request as far as
+// reconciliation cares. A merged PR is treated very differently from a closed
+// one: its branch commits are already on the base branch, so they are not local
+// work at risk (this is what fixes the squash-merge false positive — a
+// squash-merged branch's original commits are reachable from no remote ref, so
+// LocalOnlyCommits alone would miscount them as unpushed work).
+type PRState int
+
+const (
+	// PRGone means the worktree has no PR, or the PR was closed without being
+	// merged — any local-only commits are genuinely at risk.
+	PRGone PRState = iota
+	// PROpen means the PR is still open — a healthy tracked worktree.
+	PROpen
+	// PRMerged means the PR was merged into the base branch, so the branch's
+	// commits are preserved there regardless of what LocalOnlyCommits reports.
+	PRMerged
+)
+
 // Status is the live reconciliation view of a worktree, computed fresh from
 // git (never persisted — see docs/schema.md, "Derived live, not stored"). It
 // maps directly onto the derived fields of the lumberjack.v1.Worktree message.
 type Status struct {
 	// Dirty is true when the working tree has uncommitted changes.
 	Dirty bool
-	// LocalOnlyCommits counts commits present locally but on no remote.
+	// LocalOnlyCommits counts commits present locally but on no remote — work
+	// that would be lost if the worktree were removed. It is forced to zero for
+	// a merged PR, whose commits are safely on the base branch.
 	LocalOnlyCommits int64
+	// Merged is true when the source PR was merged; its commits are on the base
+	// branch, so the worktree is a safe-remove candidate even though its branch
+	// tip sits on no remote-tracking ref.
+	Merged bool
 	// NeedsReconciliation is true when the worktree cannot be safely
 	// auto-removed: it is dirty or holds local-only commits.
 	NeedsReconciliation bool
@@ -34,13 +59,14 @@ type Prober interface {
 	LocalOnlyCommits(ctx context.Context, dir string) (int64, error)
 }
 
-// Reconcile computes the live status of the worktree at dir. prOpen reports
-// whether the worktree's source PR is still open (the daemon supplies this
-// from a live gh query); it distinguishes a healthy tracked worktree from an
-// orphaned one that outlived its PR.
+// Reconcile computes the live status of the worktree at dir. pr is the state of
+// the worktree's source PR (the daemon supplies this from a live gh query); it
+// distinguishes a healthy tracked worktree, an orphaned one that outlived a
+// closed PR, and one whose PR merged (whose commits are safe on the base
+// branch).
 //
 // p must have fetched the repo first so remote-tracking refs are current.
-func Reconcile(ctx context.Context, p Prober, dir string, prOpen bool) (Status, error) {
+func Reconcile(ctx context.Context, p Prober, dir string, pr PRState) (Status, error) {
 	info, err := os.Stat(dir)
 	switch {
 	case os.IsNotExist(err):
@@ -63,26 +89,33 @@ func Reconcile(ctx context.Context, p Prober, dir string, prOpen bool) (Status, 
 		return Status{}, fmt.Errorf("counting local-only commits: %w", err)
 	}
 
-	st := Status{
-		Dirty:               dirty,
-		LocalOnlyCommits:    localOnly,
-		NeedsReconciliation: dirty || localOnly > 0,
+	st := Status{Dirty: dirty, LocalOnlyCommits: localOnly, Merged: pr == PRMerged}
+	if st.Merged {
+		// A merged PR's commits live on the base branch, so they are not local
+		// work at risk — only uncommitted changes still warrant keeping the tree.
+		st.LocalOnlyCommits = 0
 	}
-	st.Orphaned = !prOpen && st.NeedsReconciliation
-	st.Note = note(st, prOpen)
+	st.NeedsReconciliation = st.Dirty || st.LocalOnlyCommits > 0
+	st.Orphaned = pr == PRGone && st.NeedsReconciliation
+	st.Note = note(st, pr)
 	return st, nil
 }
 
 // note renders a human-readable one-liner for a Status.
-func note(st Status, prOpen bool) string {
+func note(st Status, pr PRState) string {
 	switch {
-	case !st.NeedsReconciliation && prOpen:
+	case !st.NeedsReconciliation && pr == PROpen:
 		return ""
-	case !st.NeedsReconciliation && !prOpen:
+	case !st.NeedsReconciliation && pr == PRMerged:
+		return "PR merged; safe to remove"
+	case !st.NeedsReconciliation:
 		// PR gone and nothing to preserve — a clean removal candidate.
 		return "PR closed; safe to remove"
+	case st.Merged:
+		// Merged but the working tree still has uncommitted changes to resolve.
+		return "PR merged but " + reason(st)
 	case st.Orphaned:
-		return fmt.Sprintf("orphaned: PR closed but %s", reason(st))
+		return "orphaned: PR closed but " + reason(st)
 	default:
 		return "needs reconciliation: " + reason(st)
 	}

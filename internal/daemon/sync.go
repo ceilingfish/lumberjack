@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -20,6 +21,9 @@ type GitOps interface {
 	DefaultRemote(ctx context.Context, repoPath string) (string, error)
 	RemoteURL(ctx context.Context, repoPath, remote string) (string, error)
 	Fetch(ctx context.Context, repoPath, remote string) error
+	// Pull fast-forwards the repo's main checkout to its upstream during sync,
+	// so a clean checkout tracks the latest default branch.
+	Pull(ctx context.Context, repoPath string) error
 	AddWorktree(ctx context.Context, repoPath, dir, remote, branch string) error
 	RemoveWorktree(ctx context.Context, repoPath, dir string, force bool) error
 	// ListWorktrees enumerates the worktrees already registered on the repo,
@@ -43,6 +47,10 @@ type GHOps interface {
 	// ListLogins reports every gh account authenticated for a host — the logins
 	// set-login accepts and the picker offers.
 	ListLogins(ctx context.Context, host string) ([]string, error)
+	// PRMerged reports whether a pull request was merged, so reconciliation can
+	// treat a merged worktree's branch commits as safely on the base branch
+	// rather than as un-pushed work at risk.
+	PRMerged(ctx context.Context, repo github.RepoInfo, number int64) (bool, error)
 	// CheckRepoAccess verifies gh's active account can reach a repository, so
 	// set-login can reject a login that authenticates but cannot operate the repo.
 	CheckRepoAccess(ctx context.Context, repo github.RepoInfo) error
@@ -191,15 +199,15 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 		views = make([]WorktreeView, 0, len(stored))
 		for i := range stored {
 			wt := stored[i]
-			open := wt.GithubPRNumber != nil
-			if open {
-				_, open = openByNum[*wt.GithubPRNumber]
+			prState, perr := s.prState(ctx, repo, wt, openByNum)
+			if perr != nil {
+				return fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, perr)
 			}
-			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, open)
+			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prState)
 			if rerr != nil {
 				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
 			}
-			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: open})
+			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: prState == worktree.PROpen})
 		}
 		return nil
 	})
@@ -250,6 +258,9 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		err = ferr
 		return created, removed, err
 	}
+
+	// Keep the main checkout current with the default branch (best-effort).
+	s.pullDefaultBranch(ctx, repo)
 
 	tracked := make([]database.TrackedPR, 0, len(openByNum))
 	for _, pr := range openByNum {
@@ -483,7 +494,12 @@ func (s *Service) removeClosed(
 		if wt.CreatedBy != schema.CreatedByLumberjack {
 			continue // safety rail: never remove a human-made worktree
 		}
-		if s.removeOne(ctx, repo, wt, progress, errs) {
+		state, serr := s.prState(ctx, repo, wt, openByNum)
+		if serr != nil {
+			*errs = append(*errs, fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, serr))
+			continue
+		}
+		if s.removeOne(ctx, repo, wt, state, progress, errs) {
 			removed++
 		}
 	}
@@ -499,14 +515,60 @@ func (s *Service) prStillOpen(wt schema.Worktree, openByNum map[int64]github.PR)
 	return ok
 }
 
-// removeOne handles a single closed-PR worktree: prune it if its directory is
-// gone, retain it if it still needs reconciliation, otherwise remove it. It
+// prState resolves the reconciliation state of a worktree's source PR: open if
+// it is in the freshly-fetched open set, merged if gh reports it merged, and
+// otherwise gone (closed without merge, or no PR at all). The merged case is
+// what stops a squash-merged worktree — whose branch commits are on the base
+// branch but on no remote-tracking ref — from being reported as holding
+// local-only commits at risk.
+func (s *Service) prState(
+	ctx context.Context, repo *schema.Repository, wt schema.Worktree, openByNum map[int64]github.PR,
+) (worktree.PRState, error) {
+	if wt.GithubPRNumber == nil {
+		return worktree.PRGone, nil
+	}
+	if _, ok := openByNum[*wt.GithubPRNumber]; ok {
+		return worktree.PROpen, nil
+	}
+	merged, err := s.gh.PRMerged(ctx, repoInfo(repo), *wt.GithubPRNumber)
+	if err != nil {
+		return worktree.PRGone, err
+	}
+	if merged {
+		return worktree.PRMerged, nil
+	}
+	return worktree.PRGone, nil
+}
+
+// pullDefaultBranch fast-forwards the repository's main checkout to its upstream
+// when the tree is clean, so tracked repos keep pace with the default branch on
+// each sync. A checkout with uncommitted changes is left untouched, and a pull
+// that cannot fast-forward (diverged or no upstream) is logged but never fails
+// the sync — it is a convenience, not a reconciliation guarantee.
+func (s *Service) pullDefaultBranch(ctx context.Context, repo *schema.Repository) {
+	dirty, err := s.git.IsDirty(ctx, repo.LocalPath)
+	if err != nil {
+		log.Printf("sync: %s: checking for local changes before pull: %v", displayName(repo), err)
+		return
+	}
+	if dirty {
+		return // uncommitted changes — leave the user's checkout alone
+	}
+	if err := s.git.Pull(ctx, repo.LocalPath); err != nil {
+		log.Printf("sync: %s: git pull skipped: %v", displayName(repo), err)
+	}
+}
+
+// removeOne handles a single non-open-PR worktree: prune it if its directory is
+// gone, retain it if it still needs reconciliation, otherwise remove it. state
+// is the worktree's PR state (merged vs closed), which decides both whether
+// local-only commits count as at-risk and how the deletion is described. It
 // returns true when the worktree was removed from tracking.
 func (s *Service) removeOne(
-	ctx context.Context, repo *schema.Repository, wt schema.Worktree,
+	ctx context.Context, repo *schema.Repository, wt schema.Worktree, state worktree.PRState,
 	progress progressFn, errs *[]error,
 ) bool {
-	st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, false)
+	st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, state)
 	if rerr != nil {
 		*errs = append(*errs, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr))
 		return false
@@ -528,9 +590,13 @@ func (s *Service) removeOne(
 		*errs = append(*errs, derr)
 		return false
 	}
+	detail := "PR closed"
+	if state == worktree.PRMerged {
+		detail = "PR merged"
+	}
 	progress.send(WorktreeChange{
 		Branch: wt.BranchName, PRNumber: wt.GithubPRNumber,
-		Action: ActionDeleted, Detail: "PR closed",
+		Action: ActionDeleted, Detail: detail,
 	})
 	return true
 }
