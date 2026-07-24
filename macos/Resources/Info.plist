@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>LumberjackMenuBar</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.ceilingfish.lumberjack.menubar</string>
+    <key>CFBundleName</key>
+    <string>Lumberjack</string>
+    <key>CFBundleDisplayName</key>
+    <string>Lumberjack</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <!-- Must match Package.swift's platforms (.macOS(.v14)): the app is
+         actually built with a macOS 14 minimum deployment target (see
+         macos/README.md, "Building"), so declaring 13.0 here would let
+         Launch Services attempt to launch it on macOS 13 and fail with an
+         unfriendly dyld error instead of a clear "requires macOS 14" one. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <!-- Menu-bar-only app: no Dock icon, no app switcher entry. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Lumberjack</string>
+</dict>
+</plist>
