@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/ceilingfish/lumberjack/internal/color"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
 )
@@ -51,7 +52,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if _, err := fmt.Fprintf(out,
 			"Tracking %s/%s at %s\nWorktrees will be created under %s\n",
 			repo.GetGithubOwner(), repo.GetGithubName(),
-			repo.GetLocalPath(), repo.GetWorktreeParentDir()); err != nil {
+			color.Path(repo.GetLocalPath()), color.Path(repo.GetWorktreeParentDir())); err != nil {
 			return err
 		}
 		// A branch/PR/action table of the worktrees adopted during registration.

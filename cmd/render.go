@@ -4,37 +4,12 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"text/tabwriter"
+	"strings"
 
+	"github.com/ceilingfish/lumberjack/internal/color"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
-
-// tabW wraps a tabwriter and records the first write error, so render helpers
-// can stream rows without checking every Fprintf and still report failure.
-type tabW struct {
-	w   *tabwriter.Writer
-	err error
-}
-
-func newTabW(w io.Writer) *tabW {
-	return &tabW{w: tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)}
-}
-
-func (t *tabW) row(format string, args ...any) {
-	if t.err != nil {
-		return
-	}
-	_, t.err = fmt.Fprintf(t.w, format, args...)
-}
-
-// flush writes the buffered table and returns the first error seen.
-func (t *tabW) flush() error {
-	if t.err != nil {
-		return t.err
-	}
-	return t.w.Flush()
-}
 
 // renderRepositories prints a table of repositories.
 func renderRepositories(w io.Writer, repos []*lumberjackv1.Repository) error {
@@ -42,35 +17,35 @@ func renderRepositories(w io.Writer, repos []*lumberjackv1.Repository) error {
 		_, err := fmt.Fprintln(w, "No repositories tracked. Add one with `lumberjack init .`")
 		return err
 	}
-	t := newTabW(w)
-	t.row("NAME\tPATH\tLAST SYNCED\tSTATUS\n")
+	t := color.NewTable(w)
+	t.Row("NAME\tPATH\tLAST SYNCED\tSTATUS\n")
 	for _, r := range repos {
-		t.row("%s\t%s\t%s\t%s\n",
-			r.GetDirPrefix(), r.GetLocalPath(),
-			timestamp(r.GetLastSyncedAt()), syncStatus(r))
+		t.Row("%s\t%s\t%s\t%s\n",
+			r.GetDirPrefix(), t.Paint(color.Path, r.GetLocalPath()),
+			paintTimestamp(t, r.GetLastSyncedAt()), paintSyncStatus(t, r))
 	}
-	return t.flush()
+	return t.Flush()
 }
 
 // renderRepositoryDetail prints the last-sync detail for one repository.
 func renderRepositoryDetail(w io.Writer, r *lumberjackv1.Repository) error {
-	t := newTabW(w)
-	t.row("Name:\t%s\n", r.GetDirPrefix())
-	t.row("Path:\t%s\n", r.GetLocalPath())
-	t.row("GitHub:\t%s/%s (%s)\n", r.GetGithubOwner(), r.GetGithubName(), r.GetHost())
+	t := color.NewTable(w)
+	t.Row("Name:\t%s\n", r.GetDirPrefix())
+	t.Row("Path:\t%s\n", t.Paint(color.Path, r.GetLocalPath()))
+	t.Row("GitHub:\t%s/%s (%s)\n", r.GetGithubOwner(), r.GetGithubName(), r.GetHost())
 	if r.GetLogin() != "" {
-		t.row("Login:\t%s\n", r.GetLogin())
+		t.Row("Login:\t%s\n", r.GetLogin())
 	}
-	t.row("Worktrees dir:\t%s\n", r.GetWorktreeParentDir())
-	t.row("Last synced:\t%s\n", timestamp(r.GetLastSyncedAt()))
-	t.row("Status:\t%s\n", syncStatus(r))
+	t.Row("Worktrees dir:\t%s\n", t.Paint(color.Path, r.GetWorktreeParentDir()))
+	t.Row("Last synced:\t%s\n", paintTimestamp(t, r.GetLastSyncedAt()))
+	t.Row("Status:\t%s\n", paintSyncStatus(t, r))
 	if r.GetLastSyncError() != "" {
-		t.row("Last error:\t%s\n", r.GetLastSyncError())
+		t.Row("Last error:\t%s\n", r.GetLastSyncError())
 	}
 	if r.GetSetupConsentPending() {
-		t.row("Setup steps:\t⚠ run-command consent pending\n")
+		t.Row("Setup steps:\t⚠ run-command consent pending\n")
 	}
-	return t.flush()
+	return t.Flush()
 }
 
 // renderWorktrees prints a table of worktrees with a reconciliation warning.
@@ -79,18 +54,20 @@ func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree) error {
 		_, err := fmt.Fprintln(w, "No worktrees tracked for this repository.")
 		return err
 	}
-	t := newTabW(w)
-	t.row("DIRECTORY\tBRANCH\tPR\tLAST SYNCED\tSTATUS\n")
+	t := color.NewTable(w)
+	t.Row("DIRECTORY\tBRANCH\tPR\tLAST SYNCED\tSTATUS\n")
 	for _, wt := range wts {
 		pr := "-"
 		if wt.GithubPrNumber != nil {
 			pr = fmt.Sprintf("#%d", wt.GetGithubPrNumber())
 		}
-		t.row("%s\t%s\t%s\t%s\t%s\n",
-			filepath.Base(wt.GetDirectoryPath()), wt.GetBranchName(), pr,
-			timestamp(wt.GetLastSyncedAt()), worktreeStatus(wt))
+		t.Row("%s\t%s\t%s\t%s\t%s\n",
+			t.Paint(color.Path, filepath.Base(wt.GetDirectoryPath())),
+			t.Paint(color.Branch, wt.GetBranchName()),
+			paintDash(t, pr),
+			paintTimestamp(t, wt.GetLastSyncedAt()), paintWorktreeStatus(t, wt))
 	}
-	return t.flush()
+	return t.Flush()
 }
 
 // renderWorktreeChanges prints a branch/PR/action table of the per-branch
@@ -99,12 +76,24 @@ func renderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange) 
 	if len(changes) == 0 {
 		return nil
 	}
-	t := newTabW(w)
-	t.row("BRANCH\tPR\tACTION\n")
+	t := color.NewTable(w)
+	t.Row("BRANCH\tPR\tACTION\n")
 	for _, c := range changes {
-		t.row("%s\t%s\t%s\n", c.GetBranch(), changePR(c), changeAction(c))
+		t.Row("%s\t%s\t%s\n",
+			t.Paint(color.Branch, c.GetBranch()),
+			paintDash(t, changePR(c)),
+			t.Paint(color.Action, changeAction(c)))
 	}
-	return t.flush()
+	return t.Flush()
+}
+
+// paintDash dims s when it is the "-" placeholder, leaving any other value
+// (e.g. a PR reference) unstyled.
+func paintDash(t *color.Table, s string) string {
+	if s != "-" {
+		return s
+	}
+	return t.Paint(color.Dim, s)
 }
 
 // changePR renders a change's PR reference, "-" when it has none.
@@ -157,6 +146,21 @@ func worktreeStatus(wt *lumberjackv1.Worktree) string {
 	}
 }
 
+// paintWorktreeStatus colourises worktreeStatus's definite states (ok green,
+// ⚠ warning yellow); an informational note with neither marker is left
+// unstyled since it's neither clearly ok nor clearly a problem.
+func paintWorktreeStatus(t *color.Table, wt *lumberjackv1.Worktree) string {
+	s := worktreeStatus(wt)
+	switch {
+	case s == "ok":
+		return t.Paint(color.OK, s)
+	case strings.HasPrefix(s, "⚠"):
+		return t.Paint(color.Warning, s)
+	default:
+		return s
+	}
+}
+
 // syncStatus renders a repository's last sync status.
 func syncStatus(r *lumberjackv1.Repository) string {
 	switch r.GetLastSyncStatus() {
@@ -169,6 +173,20 @@ func syncStatus(r *lumberjackv1.Repository) string {
 	}
 }
 
+// paintSyncStatus colourises syncStatus: ok green, error red, and the
+// de-emphasised "never synced" dim.
+func paintSyncStatus(t *color.Table, r *lumberjackv1.Repository) string {
+	s := syncStatus(r)
+	switch s {
+	case "ok":
+		return t.Paint(color.OK, s)
+	case "error":
+		return t.Paint(color.Error, s)
+	default:
+		return t.Paint(color.Dim, s)
+	}
+}
+
 // timestamp renders a protobuf timestamp as a local time, or "never" when the
 // timestamp is unset (a nil pointer).
 func timestamp(ts *timestamppb.Timestamp) string {
@@ -176,4 +194,14 @@ func timestamp(ts *timestamppb.Timestamp) string {
 		return "never"
 	}
 	return ts.AsTime().Local().Format("2006-01-02 15:04")
+}
+
+// paintTimestamp colourises timestamp's "never" placeholder as de-emphasised;
+// an actual timestamp is left unstyled (ordinary text).
+func paintTimestamp(t *color.Table, ts *timestamppb.Timestamp) string {
+	s := timestamp(ts)
+	if ts == nil {
+		return t.Paint(color.Dim, s)
+	}
+	return s
 }
