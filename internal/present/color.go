@@ -11,13 +11,13 @@ package present
 // — required for text/tabwriter to keep columns aligned, since it counts
 // escape bytes toward cell width (see #2's "tabwriter alignment" constraint).
 const (
-	ansiAction  = "36" // cyan — action verbs
-	ansiPath    = "34" // blue — file-system paths
-	ansiBranch  = "32" // green — git branch names
-	ansiOK      = "32" // green — status: ok
-	ansiWarn    = "33" // yellow — status: warning
-	ansiErr     = "31" // red — status: error
-	ansiDim     = "02" // dim — de-emphasis (e.g. "-" / "never"); the leading
+	ansiAction = "36" // cyan — action verbs
+	ansiPath   = "34" // blue — file-system paths
+	ansiBranch = "32" // green — git branch names
+	ansiOK     = "32" // green — status: ok
+	ansiWarn   = "33" // yellow — status: warning
+	ansiErr    = "31" // red — status: error
+	ansiDim    = "02" // dim — de-emphasis (e.g. "-" / "never"); the leading
 	// zero keeps every SGR code in this package exactly 2 digits (terminals
 	// parse SGR parameters as plain decimal numbers, so "02" behaves
 	// identically to "2") — see the invariant documented above.
