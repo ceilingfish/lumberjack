@@ -251,6 +251,14 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		if uErr := s.db.UpdateSyncResult(ctx, repo.ID, finish, err); uErr != nil && err == nil {
 			err = uErr
 		}
+		// Stamp every worktree still tracked for this repository with the sync
+		// time, the same way UpdateSyncResult stamps the repository row. Only on
+		// a successful sync — a failed one leaves worktrees' last_synced_at as-is.
+		if err == nil {
+			if tErr := s.db.TouchWorktreesSyncedAt(ctx, repo.ID, finish); tErr != nil {
+				err = tErr
+			}
+		}
 	}()
 
 	openByNum, ferr := s.fetchOpenPRs(ctx, repo)

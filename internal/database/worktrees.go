@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 )
@@ -51,6 +52,20 @@ func (c *Client) SetWorktreePR(ctx context.Context, id int64, prNumber *int64) e
 		Set("github_pr_number = ?", prNumber).
 		Where("id = ?", id).Exec(ctx); err != nil {
 		return fmt.Errorf("updating worktree PR: %w", err)
+	}
+	return nil
+}
+
+// TouchWorktreesSyncedAt stamps last_synced_at to at on every worktree row
+// belonging to a repository. It is called once per successful sync, after
+// worktrees are created/adopted/linked/removed, so every worktree still
+// tracked for the repository reflects the sync time — mirroring how
+// UpdateSyncResult stamps the repository row itself.
+func (c *Client) TouchWorktreesSyncedAt(ctx context.Context, repoID int64, at time.Time) error {
+	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
+		Set("last_synced_at = ?", at).
+		Where("repository_id = ?", repoID).Exec(ctx); err != nil {
+		return fmt.Errorf("touching worktree sync time: %w", err)
 	}
 	return nil
 }
