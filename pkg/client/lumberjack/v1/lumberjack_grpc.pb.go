@@ -56,14 +56,13 @@ type LumberjackServiceClient interface {
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
 	// InitRepository registers a repo — `lumberjack init .`.
 	InitRepository(ctx context.Context, in *InitRepositoryRequest, opts ...grpc.CallOption) (*InitRepositoryResponse, error)
-	// ListRepositories lists tracked repos — `lumberjack repositories`.
+	// ListRepositories lists tracked repos — `lumberjack list`.
 	ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error)
 	// GetRepository returns one repo's last-sync detail —
-	// `lumberjack repositories NAME`.
+	// `lumberjack status [--repository NAME]`.
 	GetRepository(ctx context.Context, in *GetRepositoryRequest, opts ...grpc.CallOption) (*GetRepositoryResponse, error)
 	// SetLogin sets the gh account a repository operates under —
-	// `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
-	// checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
+	// `lumberjack set-login LOGIN [--repository NAME]`. The daemon rejects a login that gh
 	// is not authenticated as for the repository's host, or one that authenticates
 	// but cannot reach the repository on GitHub.
 	SetLogin(ctx context.Context, in *SetLoginRequest, opts ...grpc.CallOption) (*SetLoginResponse, error)
@@ -72,18 +71,18 @@ type LumberjackServiceClient interface {
 	// picker when `set-login` is run without a login.
 	ListLogins(ctx context.Context, in *ListLoginsRequest, opts ...grpc.CallOption) (*ListLoginsResponse, error)
 	// ListWorktrees lists a repo's worktrees with live reconciliation status —
-	// `lumberjack repositories NAME worktrees`.
+	// `lumberjack worktrees [--repository NAME]`.
 	ListWorktrees(ctx context.Context, in *ListWorktreesRequest, opts ...grpc.CallOption) (*ListWorktreesResponse, error)
 	// DeleteWorktree removes a worktree —
-	// `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+	// `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`.
 	DeleteWorktree(ctx context.Context, in *DeleteWorktreeRequest, opts ...grpc.CallOption) (*DeleteWorktreeResponse, error)
 	// DeleteRepository stops tracking a repository — `lumberjack delete NAME`.
 	// It removes the repository and all its worktree rows from the database only;
 	// nothing is touched on disk or on GitHub.
 	DeleteRepository(ctx context.Context, in *DeleteRepositoryRequest, opts ...grpc.CallOption) (*DeleteRepositoryResponse, error)
 	// Sync reconciles worktrees against open PRs. With an empty repository it
-	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
-	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
+	// syncs everything (`lumberjack sync-all`); with one set it syncs
+	// just that repo (`lumberjack sync [--repository NAME]`). Progress is streamed back as it runs.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncResponse], error)
 	// Watch opens a long-lived stream of worktree/repository change events. On
 	// subscribe it first emits one SNAPSHOT event per tracked repository (each
@@ -274,14 +273,13 @@ type LumberjackServiceServer interface {
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
 	// InitRepository registers a repo — `lumberjack init .`.
 	InitRepository(context.Context, *InitRepositoryRequest) (*InitRepositoryResponse, error)
-	// ListRepositories lists tracked repos — `lumberjack repositories`.
+	// ListRepositories lists tracked repos — `lumberjack list`.
 	ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error)
 	// GetRepository returns one repo's last-sync detail —
-	// `lumberjack repositories NAME`.
+	// `lumberjack status [--repository NAME]`.
 	GetRepository(context.Context, *GetRepositoryRequest) (*GetRepositoryResponse, error)
 	// SetLogin sets the gh account a repository operates under —
-	// `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
-	// checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
+	// `lumberjack set-login LOGIN [--repository NAME]`. The daemon rejects a login that gh
 	// is not authenticated as for the repository's host, or one that authenticates
 	// but cannot reach the repository on GitHub.
 	SetLogin(context.Context, *SetLoginRequest) (*SetLoginResponse, error)
@@ -290,18 +288,18 @@ type LumberjackServiceServer interface {
 	// picker when `set-login` is run without a login.
 	ListLogins(context.Context, *ListLoginsRequest) (*ListLoginsResponse, error)
 	// ListWorktrees lists a repo's worktrees with live reconciliation status —
-	// `lumberjack repositories NAME worktrees`.
+	// `lumberjack worktrees [--repository NAME]`.
 	ListWorktrees(context.Context, *ListWorktreesRequest) (*ListWorktreesResponse, error)
 	// DeleteWorktree removes a worktree —
-	// `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+	// `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`.
 	DeleteWorktree(context.Context, *DeleteWorktreeRequest) (*DeleteWorktreeResponse, error)
 	// DeleteRepository stops tracking a repository — `lumberjack delete NAME`.
 	// It removes the repository and all its worktree rows from the database only;
 	// nothing is touched on disk or on GitHub.
 	DeleteRepository(context.Context, *DeleteRepositoryRequest) (*DeleteRepositoryResponse, error)
 	// Sync reconciles worktrees against open PRs. With an empty repository it
-	// syncs everything (`lumberjack repositories --sync`); with one set it syncs
-	// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
+	// syncs everything (`lumberjack sync-all`); with one set it syncs
+	// just that repo (`lumberjack sync [--repository NAME]`). Progress is streamed back as it runs.
 	Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error
 	// Watch opens a long-lived stream of worktree/repository change events. On
 	// subscribe it first emits one SNAPSHOT event per tracked repository (each

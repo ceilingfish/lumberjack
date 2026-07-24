@@ -12,7 +12,7 @@ import (
 // rather than silently falling back to a default.
 func TestCmdFormatUnknownRejected(t *testing.T) {
 	serveStub(t, &stubService{})
-	_, err := run(t, "", "--format", "yaml", "repositories")
+	_, err := run(t, "", "--format", "yaml", "list")
 	if err == nil || !strings.Contains(err.Error(), "yaml") {
 		t.Errorf("expected an error naming the bad format, got %v", err)
 	}
@@ -25,7 +25,7 @@ func TestCmdFormatDefaultIsUncoloured(t *testing.T) {
 	serveStub(t, &stubService{repos: []*lumberjackv1.Repository{
 		{DirPrefix: "a", LocalPath: "/p/a"},
 	}})
-	out, err := run(t, "", "repositories")
+	out, err := run(t, "", "list")
 	if err != nil {
 		t.Fatalf("repositories: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestCmdFormatColorExplicitGatedNonTTY(t *testing.T) {
 	serveStub(t, &stubService{repos: []*lumberjackv1.Repository{
 		{DirPrefix: "a", LocalPath: "/p/a"},
 	}})
-	out, err := run(t, "", "--format", "color", "repositories")
+	out, err := run(t, "", "--format", "color", "list")
 	if err != nil {
 		t.Fatalf("repositories: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestCmdFormatJSONRepositoriesList(t *testing.T) {
 		{DirPrefix: "a", LocalPath: "/p/a", LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK},
 		{DirPrefix: "b", LocalPath: "/p/b"},
 	}})
-	out, err := run(t, "", "--format", "json", "repositories")
+	out, err := run(t, "", "--format", "json", "list")
 	if err != nil {
 		t.Fatalf("repositories: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestCmdFormatJSONRepositoriesList(t *testing.T) {
 
 func TestCmdFormatJSONRepositoriesListEmpty(t *testing.T) {
 	serveStub(t, &stubService{})
-	out, err := run(t, "", "--format", "json", "repositories")
+	out, err := run(t, "", "--format", "json", "list")
 	if err != nil {
 		t.Fatalf("repositories: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestCmdFormatJSONRepositoriesListEmpty(t *testing.T) {
 
 func TestCmdFormatJSONRepositoryDetail(t *testing.T) {
 	serveStub(t, &stubService{})
-	out, err := run(t, "", "--format", "json", "repositories", "n")
+	out, err := run(t, "", "--format", "json", "status", "--repository", "n")
 	if err != nil {
 		t.Fatalf("repositories n: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestCmdFormatJSONWorktrees(t *testing.T) {
 	serveStub(t, &stubService{worktrees: []*lumberjackv1.Worktree{
 		{DirectoryPath: "/p/n-x", BranchName: "feature/x", GithubPrNumber: &num},
 	}})
-	out, err := run(t, "", "--format", "json", "repositories", "n", "worktrees")
+	out, err := run(t, "", "--format", "json", "worktrees", "--repository", "n")
 	if err != nil {
 		t.Fatalf("worktrees: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestCmdFormatJSONWorktrees(t *testing.T) {
 func TestCmdFormatJSONDeleteWorktreeRequiresConfirmationSkipsPrompt(t *testing.T) {
 	stub := &stubService{deleteConfirm: true}
 	serveStub(t, stub)
-	out, err := run(t, "", "--format", "json", "repositories", "n", "worktree", "feature/x", "delete")
+	out, err := run(t, "", "--format", "json", "worktree", "delete", "feature/x", "--repository", "n")
 	if err != nil {
 		t.Fatalf("delete: %v", err)
 	}

@@ -18,30 +18,31 @@ type setLoginResult struct {
 }
 
 func newSetLoginCmd() *cobra.Command {
-	return &cobra.Command{
+	var repository string
+
+	c := &cobra.Command{
 		Use:   "set-login [LOGIN]",
-		Short: "Set the gh account for the repository in the current directory",
+		Short: "Set the gh account for a repository",
 		Long: "Sets the gh account (`gh auth switch --user LOGIN`) the daemon " +
-			"operates the current directory's tracked repository under. Run it " +
-			"from the repo's main checkout. LOGIN must be an account gh is signed " +
-			"in as; omit it to pick from the authenticated accounts interactively. " +
-			"To target a repository by name from anywhere, use " +
-			"`lumberjack repositories NAME set-login [LOGIN]`.",
+			"operates the repository under: the tracked repository at the " +
+			"current working directory, or the repository named by " +
+			"--repository. LOGIN must be an account gh is signed in as; omit it " +
+			"to pick from the authenticated accounts interactively.",
 		Args: cobra.MaximumNArgs(1),
 		// The optional LOGIN completes to the gh accounts authenticated for the
-		// current directory's repository.
+		// resolved repository.
 		ValidArgsFunction: func(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
-			ref, err := cwdAbs()
+			ref, err := resolveRepositoryRef(repository)
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
 			return completeLogins(cmd, ref), cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			abs, err := cwdAbs()
+			ref, err := resolveRepositoryRef(repository)
 			if err != nil {
 				return err
 			}
@@ -54,15 +55,18 @@ func newSetLoginCmd() *cobra.Command {
 				login = args[0]
 			}
 			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
-				return setLogin(ctx, cmd, c, abs, login, format)
+				return setLogin(ctx, cmd, c, ref, login, format)
 			})
 		},
 	}
+
+	addRepositoryFlag(c, &repository)
+	return c
 }
 
 // setLogin sets the gh login for the repository resolved by ref and reports the
-// result. Shared by the top-level `set-login` command (ref = current directory)
-// and `repositories NAME set-login [LOGIN]` (ref = NAME).
+// result. ref is either the current working directory (no --repository) or the
+// value of --repository, per resolveRepositoryRef.
 //
 // An empty login means the user did not name one: the daemon reports the
 // accounts gh is authenticated as for the repo's host and the user picks one

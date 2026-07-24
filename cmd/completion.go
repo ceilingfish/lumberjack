@@ -30,7 +30,7 @@ func completionClient(cmd *cobra.Command, fn func(context.Context, *client.Clien
 }
 
 // completeRepositoryNames suggests the names of every tracked repository,
-// matching what `repositories NAME ...` resolves against.
+// matching what --repository resolves against.
 func completeRepositoryNames(cmd *cobra.Command) []string {
 	return completionClient(cmd, func(ctx context.Context, cl *client.Client) []string {
 		repos, err := cl.ListRepositories(ctx)

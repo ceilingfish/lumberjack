@@ -28,11 +28,14 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newInstallCmd())
-	root.AddCommand(newRepositoriesCmd())
+	root.AddCommand(newListCmd())
 	root.AddCommand(newSetLoginCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSyncCmd())
+	root.AddCommand(newSyncAllCmd())
 	root.AddCommand(newUninstallCmd())
+	root.AddCommand(newWorktreeCmd())
+	root.AddCommand(newWorktreesCmd())
 	root.PersistentFlags().String("format", "",
 		"output format: color, structured, or json (default: color on an interactive "+
 			"terminal with NO_COLOR unset, structured otherwise)")

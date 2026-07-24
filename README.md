@@ -180,21 +180,18 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack doctor` | Check `git`/`gh` prerequisites (no daemon needed). |
 | `lumberjack init [path]` | Start tracking the repository at `path` (default: current dir). |
 | `lumberjack delete NAME` | Stop tracking a repository — removes it and its worktrees from the database only (nothing on disk or GitHub). |
-| `lumberjack status` | Last-sync detail for the repo in the current dir. |
-| `lumberjack sync` | Reconcile worktrees for the repo in the current dir now. |
-| `lumberjack repositories` | List every tracked repository. |
-| `lumberjack repositories --sync` | Sync **all** tracked repositories. |
-| `lumberjack repositories NAME` | Show one repository's detail. |
-| `lumberjack repositories NAME worktrees` | List that repo's worktrees. |
-| `lumberjack repositories NAME sync` | Sync just that repository. |
-| `lumberjack repositories NAME worktree BRANCH_OR_DIR delete` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
-| `lumberjack set-login [LOGIN]` | Set the `gh` account for the repo in the current dir. |
-| `lumberjack repositories NAME set-login [LOGIN]` | Same, targeting a repo by name. |
+| `lumberjack list` | List every tracked repository. |
+| `lumberjack status [--repository NAME]` | Last-sync detail for the repo in the current dir, or the named one. |
+| `lumberjack sync [--repository NAME]` | Reconcile worktrees for the repo in the current dir, or the named one, now. |
+| `lumberjack sync-all` | Sync **all** tracked repositories. |
+| `lumberjack worktrees [--repository NAME]` | List worktrees for the repo in the current dir, or the named one. |
+| `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
+| `lumberjack set-login [LOGIN] [--repository NAME]` | Set the `gh` account for the repo in the current dir, or the named one. |
 | `lumberjack install [--cli-only\|--daemon-only] [--force]` | Install the CLI and/or daemon (see [Installation](#installation)). |
 | `lumberjack uninstall [--cli-only\|--daemon-only]` | Reverse `install`. |
 | `lumberjack daemon start/stop/status` | Manage the daemon's lifecycle once installed. |
 
-`NAME` resolves against a repository's name or its local path.
+`--repository NAME` resolves against a repository's name or its local path; omit it to target the tracked repository at the current working directory.
 
 ### Using a specific GitHub account
 

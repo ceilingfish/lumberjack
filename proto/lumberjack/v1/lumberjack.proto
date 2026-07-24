@@ -27,16 +27,15 @@ service LumberjackService {
   // InitRepository registers a repo — `lumberjack init .`.
   rpc InitRepository(InitRepositoryRequest) returns (InitRepositoryResponse);
 
-  // ListRepositories lists tracked repos — `lumberjack repositories`.
+  // ListRepositories lists tracked repos — `lumberjack list`.
   rpc ListRepositories(ListRepositoriesRequest) returns (ListRepositoriesResponse);
 
   // GetRepository returns one repo's last-sync detail —
-  // `lumberjack repositories NAME`.
+  // `lumberjack status [--repository NAME]`.
   rpc GetRepository(GetRepositoryRequest) returns (GetRepositoryResponse);
 
   // SetLogin sets the gh account a repository operates under —
-  // `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
-  // checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
+  // `lumberjack set-login LOGIN [--repository NAME]`. The daemon rejects a login that gh
   // is not authenticated as for the repository's host, or one that authenticates
   // but cannot reach the repository on GitHub.
   rpc SetLogin(SetLoginRequest) returns (SetLoginResponse);
@@ -47,11 +46,11 @@ service LumberjackService {
   rpc ListLogins(ListLoginsRequest) returns (ListLoginsResponse);
 
   // ListWorktrees lists a repo's worktrees with live reconciliation status —
-  // `lumberjack repositories NAME worktrees`.
+  // `lumberjack worktrees [--repository NAME]`.
   rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
 
   // DeleteWorktree removes a worktree —
-  // `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+  // `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`.
   rpc DeleteWorktree(DeleteWorktreeRequest) returns (DeleteWorktreeResponse);
 
   // DeleteRepository stops tracking a repository — `lumberjack delete NAME`.
@@ -60,8 +59,8 @@ service LumberjackService {
   rpc DeleteRepository(DeleteRepositoryRequest) returns (DeleteRepositoryResponse);
 
   // Sync reconciles worktrees against open PRs. With an empty repository it
-  // syncs everything (`lumberjack repositories --sync`); with one set it syncs
-  // just that repo (`lumberjack sync`). Progress is streamed back as it runs.
+  // syncs everything (`lumberjack sync-all`); with one set it syncs
+  // just that repo (`lumberjack sync [--repository NAME]`). Progress is streamed back as it runs.
   rpc Sync(SyncRequest) returns (stream SyncResponse);
 
   // Watch opens a long-lived stream of worktree/repository change events. On
