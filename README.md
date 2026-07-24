@@ -69,9 +69,13 @@ your `PATH`.
 git clone https://github.com/ceilingfish/lumberjack.git
 cd lumberjack
 mise run build          # produces ./bin/lumberjack
+./bin/lumberjack install # installs the CLI to ~/.local/bin and the daemon
 ```
 
-Copy `bin/lumberjack` somewhere on your `PATH` (e.g. `~/.local/bin`).
+`install` copies `./bin/lumberjack` to `~/.local/bin` (override with
+`--bin-dir`) and registers the daemon against that installed copy — see
+[Running from source](#running-from-source) for the full `install` reference,
+including why it must be run from a built binary rather than `go run`.
 
 ---
 
@@ -90,33 +94,39 @@ Running the daemon this way (`daemon run`) ties it to your terminal with logs on
 stdout and registers nothing with launchd — handy for iterating. To register it
 as a login service, that is a separate step, and it matters how you do it.
 
-**Installed service:** to register the daemon so it starts at login, install
-from a **built binary**, never from `go run`. The `install-daemon` task builds
-one and installs it in a single step:
+**Installed CLI + daemon:** `install` copies the CLI to `~/.local/bin` and
+registers the daemon pointing at that installed copy, in one step — but it
+must be run from a **built binary**, never from `go run`. The `install` task
+builds one and installs it:
 
 ```sh
-mise run install-daemon   # go build -o bin/lumberjack . && daemon install
-./bin/lumberjack daemon start
+mise run install   # go build -o bin/lumberjack . && install --force
+lumberjack daemon start
 ```
 
-> **Why not `go run . daemon install`?** `go run` links the program to a
+> **Why not `go run . install`?** `go run` links the program to a
 > **transient, content-addressed path** under a `go-build` directory — the hash
 > changes every time you rebuild, and Go prunes the build cache over time. So the
 > path is not a stable install target: register the service against it and the
 > next build leaves launchd pointing at a binary that has moved or been pruned.
 > The daemon then fails to launch and, under `KeepAlive`, crash-loops; a later
-> `daemon start` fails with `launchctl … Load failed: 5`. `daemon install`
+> `daemon start` fails with `launchctl … Load failed: 5`. `install`
 > refuses to run from a `go run` build for exactly this reason and points you
 > back here.
 
-After rebuilding, upgrade the installed service in place with `--force`, which
-stops and removes the old registration then reinstalls with the new binary path
-and environment:
+After rebuilding, upgrade the install in place with `--force`, which
+stops and removes the old daemon registration then reinstalls with the new
+binary path and environment (and overwrites the installed CLI copy):
 
 ```sh
-mise run install-daemon -- --force
-./bin/lumberjack daemon start
+mise run install -- --force
+lumberjack daemon start
 ```
+
+`install --cli-only` installs just the CLI binary; `install --daemon-only`
+registers just the daemon (against the installed CLI copy if present,
+otherwise the current durable binary). `uninstall` reverses `install`,
+scoped by the same `--cli-only` / `--daemon-only` flags.
 
 ---
 
@@ -125,13 +135,14 @@ mise run install-daemon -- --force
 ### 1. Install and start the daemon
 
 ```sh
-lumberjack daemon install   # register it to start automatically at login
+lumberjack install          # install the CLI (~/.local/bin) and register the daemon
 lumberjack daemon start     # start it now
 lumberjack daemon status    # confirm it's running
 ```
 
 `install` writes a per-user LaunchAgent (`~/Library/LaunchAgents` on macOS) that
-starts at login and restarts if it exits. You only do this once.
+starts at login and restarts if it exits. You only do this once. (Run from a
+built binary, not `go run` — see [Running from source](#running-from-source).)
 
 ### 2. Track a repository
 
@@ -179,7 +190,9 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack repositories NAME worktree BRANCH_OR_DIR delete` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
 | `lumberjack set-login [LOGIN]` | Set the `gh` account for the repo in the current dir. |
 | `lumberjack repositories NAME set-login [LOGIN]` | Same, targeting a repo by name. |
-| `lumberjack daemon install/start/stop/status` | Manage the daemon's lifecycle. |
+| `lumberjack install [--cli-only\|--daemon-only] [--force]` | Install the CLI and/or daemon (see [Installation](#installation)). |
+| `lumberjack uninstall [--cli-only\|--daemon-only]` | Reverse `install`. |
+| `lumberjack daemon start/stop/status` | Manage the daemon's lifecycle once installed. |
 
 `NAME` resolves against a repository's name or its local path.
 

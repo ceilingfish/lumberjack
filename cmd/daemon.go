@@ -28,7 +28,8 @@ type lifecycle interface {
 }
 
 // newDaemonCmd is the `daemon` parent. It owns no behaviour itself; its
-// subcommands manage the daemon's lifecycle (run/install/start/stop/status).
+// subcommands manage the daemon's lifecycle (run/start/stop/status). Use the
+// top-level `install`/`uninstall` commands to register or remove the daemon.
 // Running `lumberjack daemon` with no subcommand prints help.
 func newDaemonCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -36,14 +37,14 @@ func newDaemonCmd() *cobra.Command {
 		Short: "Manage the Lumberjack daemon (gRPC server + background sync)",
 		Long: "The daemon is the long-running server that owns the database, drives " +
 			"the hourly sync loop, and performs all worktree operations. These " +
-			"subcommands run it, install it to start at login, and inspect or stop it.",
+			"subcommands run it and inspect or stop it. Use `lumberjack install` / " +
+			"`lumberjack uninstall` to register or remove it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
 	c.AddCommand(newDaemonRunCmd())
-	c.AddCommand(newDaemonInstallCmd())
 	c.AddCommand(newDaemonStartCmd())
 	c.AddCommand(newDaemonStopCmd())
 	c.AddCommand(newDaemonStatusCmd())
@@ -93,7 +94,11 @@ func (p *program) Stop(service.Service) error {
 // runs as the invoking user — keeping ~/.lumberjack paths and the user's `gh`
 // credentials valid — and starts at login. socketPath, when set, is threaded
 // into both the running program and the arguments the manager launches with.
-func newService(socketPath string) (service.Service, error) {
+// executable, when set, overrides the binary path the service manager
+// registers (service.Config.Executable defaults to os.Executable() when
+// empty) — used by `install` to point the registered daemon at the durable,
+// installed CLI copy rather than whatever binary is currently running.
+func newService(socketPath, executable string) (service.Service, error) {
 	args := []string{"daemon", "run"}
 	if socketPath != "" {
 		args = append(args, "--socket", socketPath)
@@ -103,6 +108,7 @@ func newService(socketPath string) (service.Service, error) {
 		DisplayName: "Lumberjack Daemon",
 		Description: "Tracks a GitHub repository's open PRs and reconciles git worktrees.",
 		Arguments:   args,
+		Executable:  executable,
 		// launchd starts agents with a bare PATH (/usr/bin:/bin:/usr/sbin:/sbin),
 		// which omits Homebrew and other user tool directories — so the daemon
 		// can't find `gh` and crash-loops. Bake the install-time PATH (the user's

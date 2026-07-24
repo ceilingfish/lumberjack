@@ -18,12 +18,13 @@ node = "24.10.0"
 description = "Build the lumberjack binary"
 run = "go build -o bin/lumberjack ."
 
-# Installs the daemon as a login service from a freshly built, durable binary.
-# `daemon install` refuses a `go run` build, so installing must go through a
-# real binary — extra args are forwarded (e.g. `mise run install -- --force`).
-[tasks.install-daemon]
-description = "Build a durable binary and install the daemon as a login service"
-run = "go build -o bin/lumberjack . && ./bin/lumberjack daemon install --force"
+# Installs the CLI (to ~/.local/bin) and the daemon (as a login service) from a
+# freshly built, durable binary. `install` refuses a `go run` build, so
+# installing must go through a real binary — extra args are forwarded (e.g.
+# `mise run install -- --cli-only`).
+[tasks.install]
+description = "Build a durable binary and install the CLI and daemon"
+run = "go build -o bin/lumberjack . && ./bin/lumberjack install --force"
 
 [tasks.dev]
 description = "Run the CLI from source"

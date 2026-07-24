@@ -10,9 +10,9 @@ import (
 )
 
 // errNotInstalled is the actionable message shown when a lifecycle command is
-// run before `daemon install`. kardianos returns service.ErrNotInstalled from
+// run before `install`. kardianos returns service.ErrNotInstalled from
 // Status/Start/Stop in that case.
-var errNotInstalled = errors.New("daemon is not installed — run `lumberjack daemon install` first")
+var errNotInstalled = errors.New("daemon is not installed — run `lumberjack install` first")
 
 // newDaemonStartCmd starts the installed daemon if it is not already running.
 func newDaemonStartCmd() *cobra.Command {
@@ -21,7 +21,7 @@ func newDaemonStartCmd() *cobra.Command {
 		Short: "Start the daemon if it is not already running",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			svc, err := newService("")
+			svc, err := newService("", "")
 			if err != nil {
 				return err
 			}

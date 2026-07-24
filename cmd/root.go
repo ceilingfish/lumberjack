@@ -25,10 +25,12 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newDeleteCmd())
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newInitCmd())
+	root.AddCommand(newInstallCmd())
 	root.AddCommand(newRepositoriesCmd())
 	root.AddCommand(newSetLoginCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSyncCmd())
+	root.AddCommand(newUninstallCmd())
 	return root
 }
 
