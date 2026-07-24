@@ -22,12 +22,18 @@ func withColorEnabled(t *testing.T, v bool) {
 
 func sampleRepos() []*lumberjackv1.Repository {
 	return []*lumberjackv1.Repository{
-		{DirPrefix: "lumberjack", LocalPath: "/Users/x/code/lumberjack",
-			LastSyncedAt: timestamppb.New(timestamppb.Now().AsTime()), LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK},
-		{DirPrefix: "a-much-longer-repo-name", LocalPath: "/x",
-			LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_ERROR},
-		{DirPrefix: "n", LocalPath: "/y/z",
-			LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_UNSPECIFIED},
+		{
+			DirPrefix: "lumberjack", LocalPath: "/Users/x/code/lumberjack",
+			LastSyncedAt: timestamppb.New(timestamppb.Now().AsTime()), LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK,
+		},
+		{
+			DirPrefix: "a-much-longer-repo-name", LocalPath: "/x",
+			LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_ERROR,
+		},
+		{
+			DirPrefix: "n", LocalPath: "/y/z",
+			LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_UNSPECIFIED,
+		},
 	}
 }
 
