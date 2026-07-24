@@ -5,9 +5,17 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
 )
+
+// setLoginResult is the json Format view model for `set-login`: SetLogin's
+// response is just the updated Repository, which doesn't carry the
+// human-readable confirmation message this command prints.
+type setLoginResult struct {
+	Message string `json:"message"`
+}
 
 func newSetLoginCmd() *cobra.Command {
 	return &cobra.Command{
@@ -37,12 +45,16 @@ func newSetLoginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
 			login := ""
 			if len(args) == 1 {
 				login = args[0]
 			}
 			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
-				return setLogin(ctx, cmd, c, abs, login)
+				return setLogin(ctx, cmd, c, abs, login, format)
 			})
 		},
 	}
@@ -54,8 +66,9 @@ func newSetLoginCmd() *cobra.Command {
 //
 // An empty login means the user did not name one: the daemon reports the
 // accounts gh is authenticated as for the repo's host and the user picks one
-// interactively.
-func setLogin(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref, login string) error {
+// interactively. The picker itself is unaffected by format — it writes to
+// stderr, not stdout — so it runs the same way under every format.
+func setLogin(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref, login string, format present.Format) error {
 	if login == "" {
 		logins, current, err := cl.ListLogins(ctx, ref)
 		if err != nil {
@@ -72,6 +85,10 @@ func setLogin(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref, l
 	repo, err := cl.SetLogin(ctx, ref, login)
 	if err != nil {
 		return err
+	}
+	if format == present.JSON {
+		return present.WriteJSONObject(cmd.OutOrStdout(),
+			setLoginResult{Message: fmt.Sprintf("Set login for %s to %s", repo.GetDirPrefix(), repo.GetLogin())})
 	}
 	_, err = fmt.Fprintf(cmd.OutOrStdout(),
 		"Set login for %s to %s\n", repo.GetDirPrefix(), repo.GetLogin())

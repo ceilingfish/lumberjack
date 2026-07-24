@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
 )
@@ -34,19 +35,23 @@ func newRepositoriesCmd() *cobra.Command {
 			"that would lose local commits asks for confirmation unless --force " +
 			"is given.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
 			return withClient(cmd, func(ctx context.Context, cl *client.Client) error {
 				if len(args) == 0 {
 					if sync {
 						// Empty ref syncs every tracked repository.
-						return runSync(ctx, cmd, cl, "")
+						return runSync(ctx, cmd, cl, "", format)
 					}
 					repos, err := cl.ListRepositories(ctx)
 					if err != nil {
 						return err
 					}
-					return renderRepositories(cmd.OutOrStdout(), repos)
+					return emitRepositories(cmd.OutOrStdout(), format, repos)
 				}
-				return dispatchRepository(ctx, cmd, cl, args, force)
+				return dispatchRepository(ctx, cmd, cl, args, force, format)
 			})
 		},
 	}
@@ -78,7 +83,7 @@ func completeRepositories(cmd *cobra.Command, args []string, _ string) ([]string
 
 // dispatchRepository routes `repositories NAME ...` to detail, worktree listing,
 // or worktree deletion based on the positional arguments.
-func dispatchRepository(ctx context.Context, cmd *cobra.Command, cl *client.Client, args []string, force bool) error {
+func dispatchRepository(ctx context.Context, cmd *cobra.Command, cl *client.Client, args []string, force bool, format present.Format) error {
 	name := args[0]
 	rest := args[1:]
 
@@ -88,7 +93,7 @@ func dispatchRepository(ctx context.Context, cmd *cobra.Command, cl *client.Clie
 		if err != nil {
 			return err
 		}
-		if err := renderRepositoryDetail(cmd.OutOrStdout(), repo); err != nil {
+		if err := emitRepositoryDetail(cmd.OutOrStdout(), format, repo); err != nil {
 			return err
 		}
 		if repo.GetSetupConsentPending() {
@@ -97,24 +102,24 @@ func dispatchRepository(ctx context.Context, cmd *cobra.Command, cl *client.Clie
 		return nil
 
 	case len(rest) == 1 && rest[0] == "sync":
-		return runSync(ctx, cmd, cl, name)
+		return runSync(ctx, cmd, cl, name, format)
 
 	case len(rest) == 1 && rest[0] == "worktrees":
 		wts, err := cl.ListWorktrees(ctx, name)
 		if err != nil {
 			return err
 		}
-		return renderWorktrees(cmd.OutOrStdout(), wts)
+		return emitWorktrees(cmd.OutOrStdout(), format, wts)
 
 	case len(rest) == 3 && rest[0] == "worktree" && rest[2] == "delete":
-		return deleteWorktree(ctx, cmd, cl, name, rest[1], force)
+		return deleteWorktree(ctx, cmd, cl, name, rest[1], force, format)
 
 	case len(rest) == 1 && rest[0] == verbSetLogin:
 		// No LOGIN given — setLogin offers an interactive picker.
-		return setLogin(ctx, cmd, cl, name, "")
+		return setLogin(ctx, cmd, cl, name, "", format)
 
 	case len(rest) == 2 && rest[0] == verbSetLogin:
-		return setLogin(ctx, cmd, cl, name, rest[1])
+		return setLogin(ctx, cmd, cl, name, rest[1], format)
 
 	default:
 		return fmt.Errorf("unrecognised repositories command: %q\nsee `lumberjack repositories --help`", strings.Join(args, " "))
@@ -123,12 +128,17 @@ func dispatchRepository(ctx context.Context, cmd *cobra.Command, cl *client.Clie
 
 // deleteWorktree performs the delete, handling the confirmation flow: an
 // unforced delete that would lose work returns a warning, which the CLI shows
-// before prompting and retrying with force.
-func deleteWorktree(ctx context.Context, cmd *cobra.Command, cl *client.Client, name, worktree string, force bool) error {
+// before prompting and retrying with force. Under --format json the flow is
+// non-interactive: the outcome (including an unforced confirmation
+// requirement) is reported as-is rather than prompting on stdout.
+func deleteWorktree(ctx context.Context, cmd *cobra.Command, cl *client.Client, name, worktree string, force bool, format present.Format) error {
 	out := cmd.OutOrStdout()
 	resp, err := cl.DeleteWorktree(ctx, name, worktree, force)
 	if err != nil {
 		return err
+	}
+	if format == present.JSON {
+		return present.WriteJSONObject(out, resp)
 	}
 	if resp.GetDeleted() {
 		_, err := fmt.Fprintln(out, resp.GetMessage())

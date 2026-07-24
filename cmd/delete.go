@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
 )
@@ -24,10 +25,17 @@ func newDeleteCmd() *cobra.Command {
 			return completeRepositoryNames(cmd), cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
 			return withClient(cmd, func(ctx context.Context, cl *client.Client) error {
 				resp, err := cl.DeleteRepository(ctx, args[0])
 				if err != nil {
 					return err
+				}
+				if format == present.JSON {
+					return present.WriteJSONObject(cmd.OutOrStdout(), resp)
 				}
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), resp.GetMessage())
 				return err

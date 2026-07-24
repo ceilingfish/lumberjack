@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/ceilingfish/lumberjack/internal/daemon"
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
 )
 
@@ -97,7 +98,7 @@ func TestStartDaemon(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := startDaemon(&buf, tt.f)
+			err := startDaemon(&buf, tt.f, present.Structured)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -126,7 +127,7 @@ func TestStopDaemon(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := stopDaemon(&buf, tt.f)
+			err := stopDaemon(&buf, tt.f, present.Structured)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -157,7 +158,7 @@ func TestReportStatus(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			err := reportStatus(&buf, tt.f)
+			err := reportStatus(&buf, tt.f, present.Structured)
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("err = %v, want %v", err, tt.wantErr)
 			}
@@ -184,7 +185,7 @@ func TestReportStatusWithPID(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := reportStatus(&buf, &fakeLifecycle{status: service.StatusRunning}); err != nil {
+	if err := reportStatus(&buf, &fakeLifecycle{status: service.StatusRunning}, present.Structured); err != nil {
 		t.Fatalf("reportStatus: %v", err)
 	}
 	if !strings.Contains(buf.String(), "pid "+strconv.Itoa(os.Getpid())) {

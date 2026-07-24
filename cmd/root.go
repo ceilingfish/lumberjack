@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // version is the build version reported by `lumberjack daemon` over Health.
@@ -31,7 +33,31 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newUninstallCmd())
+	root.PersistentFlags().String("format", "",
+		"output format: color, structured, or json (default: color on an interactive "+
+			"terminal with NO_COLOR unset, structured otherwise)")
 	return root
+}
+
+// outputFormat resolves the effective output format for cmd from the global
+// --format flag, gated by whether the real stdout (not the abstract
+// io.Writer cmd.OutOrStdout() may wrap in tests) is an interactive terminal,
+// and by NO_COLOR.
+func outputFormat(cmd *cobra.Command) (present.Format, error) {
+	raw, err := cmd.Flags().GetString("format")
+	if err != nil {
+		return "", err
+	}
+	var explicit present.Format
+	if raw != "" {
+		explicit, err = present.Parse(raw)
+		if err != nil {
+			return "", err
+		}
+	}
+	_, noColorSet := os.LookupEnv("NO_COLOR")
+	isTerminal := term.IsTerminal(int(os.Stdout.Fd()))
+	return present.Resolve(explicit, present.ColorGate(isTerminal, noColorSet)), nil
 }
 
 // Execute runs the root command. main.go calls nothing else.

@@ -10,24 +10,26 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"text/tabwriter"
 
-	"github.com/ceilingfish/lumberjack/internal/color"
 	"github.com/ceilingfish/lumberjack/internal/github"
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
 
 // Check is the result of one prerequisite probe.
 type Check struct {
-	Name   string
-	OK     bool
-	Detail string // "<path> (<version>)" on success, or the failure reason
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"` // "<path> (<version>)" on success, or the failure reason
 }
 
-// Run gathers every prerequisite check, writes a table to w, and returns
-// ok=false if any check failed so the caller can exit non-zero.
-func Run(ctx context.Context, w io.Writer) (bool, error) {
+// Run gathers every prerequisite check, writes a report to w in the given
+// format, and returns ok=false if any check failed so the caller can exit
+// non-zero.
+func Run(ctx context.Context, w io.Writer, format present.Format) (bool, error) {
 	checks := []Check{checkGit(ctx), checkGH(ctx), checkGHAuth(ctx)}
-	return report(w, checks)
+	return report(w, checks, format)
 }
 
 // checkGit verifies git is resolvable and reports its path and version.
@@ -69,21 +71,30 @@ func checkGHAuth(ctx context.Context) Check {
 	return Check{Name: "gh auth", OK: true, Detail: "authenticated"}
 }
 
-// report renders checks as an aligned table and returns whether all passed.
-func report(w io.Writer, checks []Check) (bool, error) {
-	t := color.NewTable(w)
+// report renders checks per format and returns whether all passed.
+func report(w io.Writer, checks []Check, format present.Format) (bool, error) {
 	allOK := true
 	for _, c := range checks {
-		mark := "ok"
-		paint := color.OK
 		if !c.OK {
-			mark = "FAIL"
-			paint = color.Error
 			allOK = false
 		}
-		t.Row("%s\t%s\t%s\n", t.Paint(paint, mark), c.Name, c.Detail)
 	}
-	if err := t.Flush(); err != nil {
+	if format == present.JSON {
+		return allOK, present.WriteJSONArray(w, checks)
+	}
+
+	color := format == present.Color
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	for _, c := range checks {
+		mark := present.StatusOK("ok", color)
+		if !c.OK {
+			mark = present.StatusErr("FAIL", color)
+		}
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\n", mark, c.Name, c.Detail); err != nil {
+			return false, err
+		}
+	}
+	if err := tw.Flush(); err != nil {
 		return false, err
 	}
 	return allOK, nil

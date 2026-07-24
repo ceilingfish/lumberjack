@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/ceilingfish/lumberjack/internal/daemon"
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
@@ -17,11 +18,15 @@ func newDaemonStatusCmd() *cobra.Command {
 		Short: "Report whether the daemon is installed and running",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			format, err := outputFormat(cmd)
+			if err != nil {
+				return err
+			}
 			svc, err := newService("", "")
 			if err != nil {
 				return err
 			}
-			return reportStatus(cmd.OutOrStdout(), svc)
+			return reportStatus(cmd.OutOrStdout(), svc, format)
 		},
 	}
 }
@@ -30,11 +35,11 @@ func newDaemonStatusCmd() *cobra.Command {
 // truth for state; the pid file adds the concrete live process id when up. A
 // not-installed daemon is reported as such and returns errNotInstalled so the
 // command exits non-zero for scripts.
-func reportStatus(out io.Writer, svc lifecycle) error {
+func reportStatus(out io.Writer, svc lifecycle, format present.Format) error {
 	status, err := svc.Status()
 	if err != nil {
 		if errors.Is(err, service.ErrNotInstalled) {
-			if _, werr := fmt.Fprintln(out, "lumberjack daemon: not installed"); werr != nil {
+			if werr := emitDaemonMessage(out, format, "lumberjack daemon: not installed"); werr != nil {
 				return werr
 			}
 			return errNotInstalled
@@ -55,6 +60,5 @@ func reportStatus(out io.Writer, svc lifecycle) error {
 	default:
 		msg = "lumberjack daemon: installed, status unknown"
 	}
-	_, err = fmt.Fprintln(out, msg)
-	return err
+	return emitDaemonMessage(out, format, msg)
 }
