@@ -102,8 +102,10 @@ func runInstall(out io.Writer, opts installOptions) error {
 		}
 		daemonExe = installed
 		if !binDirOnPath(binDir) {
-			fmt.Fprintf(out,
-				"warning: %s is not on your PATH; add it to run `lumberjack` directly.\n", binDir)
+			if _, err := fmt.Fprintf(out,
+				"warning: %s is not on your PATH; add it to run `lumberjack` directly.\n", binDir); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -187,21 +189,21 @@ func copyExecutable(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	tmp, err := os.CreateTemp(filepath.Dir(dest), ".lumberjack-*")
 	if err != nil {
 		return err
 	}
 	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath) // no-op once the rename below succeeds
+	defer func() { _ = os.Remove(tmpPath) }() // no-op once the rename below succeeds
 
 	if _, err := io.Copy(tmp, in); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Chmod(0o755); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
