@@ -55,7 +55,9 @@ final class AppState: ObservableObject {
     func stop() {
         loopTask?.cancel()
         loopTask = nil
-        client?.close()
+        if let client {
+            Task { await client.close() }
+        }
         client = nil
     }
 
@@ -82,7 +84,7 @@ final class AppState: ObservableObject {
             // Drop the connection so the next tick dials fresh once the
             // daemon comes back, rather than reusing a channel wedged
             // against a process that no longer exists.
-            client.close()
+            await client.close()
             self.client = nil
             return
         }

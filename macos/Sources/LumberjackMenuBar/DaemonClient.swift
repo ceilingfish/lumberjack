@@ -27,9 +27,9 @@ final class DaemonClient: @unchecked Sendable {
         self.service = Lumberjack_V1_LumberjackServiceAsyncClient(channel: channel)
     }
 
-    func close() {
-        try? channel.close().wait()
-        try? group.syncShutdownGracefully()
+    func close() async {
+        try? await channel.close().get()
+        try? await group.shutdownGracefully()
     }
 
     /// Health mirrors what the CLI does before any other call: a cheap probe
