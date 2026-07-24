@@ -82,6 +82,13 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 	if err := s.db.DeleteWorktree(ctx, wt.ID); err != nil {
 		return DeleteResult{}, err
 	}
+	s.events.Publish(Event{
+		Type: EventWorktreeChanged, Repository: repo,
+		Change: &WorktreeChange{
+			Branch: wt.BranchName, PRNumber: wt.GithubPRNumber,
+			Action: ActionDeleted, Detail: "deleted by request",
+		},
+	})
 	return DeleteResult{Deleted: true, Message: fmt.Sprintf("deleted %s", filepath.Base(wt.DirectoryPath))}, nil
 }
 

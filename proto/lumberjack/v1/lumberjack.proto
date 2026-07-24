@@ -63,6 +63,15 @@ service LumberjackService {
   // syncs everything (`lumberjack repositories --sync`); with one set it syncs
   // just that repo (`lumberjack sync`). Progress is streamed back as it runs.
   rpc Sync(SyncRequest) returns (stream SyncResponse);
+
+  // Watch opens a long-lived stream of worktree/repository change events. On
+  // subscribe it first emits one SNAPSHOT event per tracked repository (each
+  // carrying that repository's current worktrees), then streams live deltas —
+  // worktree created/adopted/updated/deleted and repository sync
+  // started/finished — as they happen. Multiple concurrent Watch calls are
+  // supported; each gets its own independent feed. A subscriber that falls too
+  // far behind is disconnected rather than allowed to stall the daemon.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
 }
 
 // SyncStatus mirrors schema.SyncStatus* (see internal/database/schema).
@@ -97,6 +106,9 @@ message WorktreeChange {
   optional int64 pr_number = 2;
   WorktreeAction action = 3;
   string detail = 4;
+  // Absent for a DELETED change, whose directory no longer applies.
+  string directory_path = 5;
+  optional google.protobuf.Timestamp last_synced_at = 6;
 }
 
 // Repository is one tracked repo. Fields mirror the `repositories` table
@@ -286,4 +298,33 @@ message SyncSummary {
   int64 worktrees_created = 2;
   int64 worktrees_removed = 3;
   optional string error = 4;
+}
+
+message WatchRequest {}
+
+// WatchResponseType identifies what a WatchResponse carries.
+enum WatchResponseType {
+  WATCH_RESPONSE_TYPE_UNSPECIFIED = 0;
+  // Part of the initial snapshot sent once per tracked repository right after
+  // a Watch stream opens, so a client can render immediately.
+  WATCH_RESPONSE_TYPE_SNAPSHOT = 1;
+  // A worktree was created, adopted, updated, or deleted; see change.action.
+  WATCH_RESPONSE_TYPE_WORKTREE_CHANGED = 2;
+  // A repository sync started.
+  WATCH_RESPONSE_TYPE_SYNC_STARTED = 3;
+  // A repository sync finished; see summary.
+  WATCH_RESPONSE_TYPE_SYNC_FINISHED = 4;
+}
+
+// WatchResponse is one item in a Watch stream. Every event carries the affected
+// repository; which other field is populated depends on type.
+message WatchResponse {
+  WatchResponseType type = 1;
+  Repository repository = 2;
+  // Populated for SNAPSHOT: the repository's current worktrees.
+  repeated Worktree worktrees = 3;
+  // Populated for WORKTREE_CHANGED.
+  WorktreeChange change = 4;
+  // Populated for SYNC_FINISHED.
+  SyncSummary summary = 5;
 }

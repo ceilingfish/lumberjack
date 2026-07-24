@@ -104,7 +104,9 @@ func (s *Service) adoptExistingWorktrees(ctx context.Context, repo *schema.Repos
 		if err := s.db.CreateWorktree(ctx, row); err != nil {
 			return adopted, fmt.Errorf("recording adopted worktree %s: %w", r.Dir, err)
 		}
-		adopted = append(adopted, WorktreeChange{Branch: r.Branch, Action: ActionAdopted})
+		change := WorktreeChange{Branch: r.Branch, Action: ActionAdopted, DirectoryPath: r.Dir}
+		s.events.Publish(Event{Type: EventWorktreeChanged, Repository: repo, Change: &change})
+		adopted = append(adopted, change)
 	}
 	return adopted, nil
 }

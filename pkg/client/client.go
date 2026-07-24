@@ -195,6 +195,37 @@ func (c *Client) Sync(ctx context.Context, ref string, onEvent func(*lumberjackv
 	}
 }
 
+// Watch opens a long-lived stream of worktree/repository change events,
+// invoking onEvent for each one until the stream ends. The daemon sends one
+// SNAPSHOT event per tracked repository right away, then live deltas
+// (worktree created/adopted/updated/deleted, repository sync
+// started/finished) as they happen. Watch blocks until ctx is cancelled, the
+// daemon disconnects the subscriber (it fell too far behind), or onEvent
+// returns an error.
+func (c *Client) Watch(ctx context.Context, onEvent func(*lumberjackv1.WatchResponse) error) error {
+	// Cancel on any early return so an abandoned stream (callback error, or a
+	// caller that stops reading) releases the underlying gRPC stream instead of
+	// leaking it until the parent context is done.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := c.svc.Watch(ctx, &lumberjackv1.WatchRequest{})
+	if err != nil {
+		return mapError(err)
+	}
+	for {
+		resp, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return mapError(err)
+		}
+		if cbErr := onEvent(resp); cbErr != nil {
+			return cbErr
+		}
+	}
+}
+
 // mapError turns a gRPC status into a wrapped sentinel error so the CLI can
 // branch with errors.Is while keeping the daemon's message.
 func mapError(err error) error {

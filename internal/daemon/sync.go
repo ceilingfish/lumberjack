@@ -68,12 +68,28 @@ type Service struct {
 	// Sync/Delete RPC can never operate on the trees at the same time. The
 	// daemon is the single writer; this keeps that guarantee within it too.
 	mu sync.Mutex
+	// events fans out worktree/sync changes to Watch subscribers. Publishing
+	// is a side effect of a mutation that already happened under mu — it never
+	// creates new state of its own, so the daemon remains the single writer.
+	events *Broadcaster
 }
 
 // NewService constructs the daemon domain Service. fx supplies the concrete
 // dependencies.
 func NewService(db *database.Client, git GitOps, gh GHOps) *Service {
-	return &Service{db: db, git: git, gh: gh, now: time.Now}
+	return &Service{db: db, git: git, gh: gh, now: time.Now, events: NewBroadcaster()}
+}
+
+// Subscribe registers a new Watch subscriber; see Broadcaster.Subscribe.
+func (s *Service) Subscribe() (<-chan Event, func()) {
+	return s.events.Subscribe()
+}
+
+// emitChange reports a per-branch worktree change to both the in-flight
+// progress callback (if any, e.g. during Sync) and Watch subscribers.
+func (s *Service) emitChange(repo *schema.Repository, progress progressFn, c WorktreeChange) {
+	progress.send(c)
+	s.events.Publish(Event{Type: EventWorktreeChanged, Repository: repo, Change: &c})
 }
 
 // WorktreeAction is what a sync did to one branch's worktree — the domain
@@ -98,6 +114,10 @@ type WorktreeChange struct {
 	PRNumber *int64
 	Action   WorktreeAction
 	Detail   string
+	// DirectoryPath is empty for an ActionDeleted change, whose directory no
+	// longer applies.
+	DirectoryPath string
+	LastSyncedAt  *time.Time
 }
 
 // progressFn receives per-branch worktree changes during a sync. It may be nil.
@@ -242,6 +262,7 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 	if runErr != nil {
 		return 0, 0, runErr
 	}
+	s.events.Publish(Event{Type: EventSyncStarted, Repository: repo})
 	// Always close out the audit entry and repo status, even on early return.
 	defer func() {
 		finish := s.now()
@@ -259,6 +280,10 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 				err = tErr
 			}
 		}
+		s.events.Publish(Event{
+			Type: EventSyncFinished, Repository: repo,
+			SyncCreated: created, SyncRemoved: removed, SyncErr: err,
+		})
 	}()
 
 	openByNum, ferr := s.fetchOpenPRs(ctx, repo)
@@ -349,7 +374,7 @@ func (s *Service) reconcilePR(
 	st *reconcileState, progress progressFn, errs *[]error,
 ) int {
 	if wt, ok := st.unlinked[pr.HeadBranch]; ok {
-		s.linkWorktree(ctx, num, pr, wt, progress, errs)
+		s.linkWorktree(ctx, repo, num, pr, wt, progress, errs)
 		delete(st.unlinked, pr.HeadBranch)
 		return 0
 	}
@@ -372,7 +397,7 @@ func (s *Service) reconcilePR(
 // only the stored row — the directory is already on disk. Linking is
 // reconciliation, not creation, so it is not counted toward created.
 func (s *Service) linkWorktree(
-	ctx context.Context, num int64, pr github.PR, wt schema.Worktree,
+	ctx context.Context, repo *schema.Repository, num int64, pr github.PR, wt schema.Worktree,
 	progress progressFn, errs *[]error,
 ) {
 	n := num
@@ -380,7 +405,10 @@ func (s *Service) linkWorktree(
 		*errs = append(*errs, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err))
 		return
 	}
-	progress.send(WorktreeChange{Branch: pr.HeadBranch, PRNumber: &n, Action: ActionUpdated})
+	s.emitChange(repo, progress, WorktreeChange{
+		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionUpdated,
+		DirectoryPath: wt.DirectoryPath, LastSyncedAt: wt.LastSyncedAt,
+	})
 }
 
 // adoptWorktree records an already-checked-out directory as a preexisting
@@ -399,7 +427,9 @@ func (s *Service) adoptWorktree(
 		*errs = append(*errs, fmt.Errorf("recording adopted worktree for PR #%d: %w", num, cerr))
 		return false
 	}
-	progress.send(WorktreeChange{Branch: pr.HeadBranch, PRNumber: &n, Action: ActionAdopted})
+	s.emitChange(repo, progress, WorktreeChange{
+		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionAdopted, DirectoryPath: dir,
+	})
 	return true
 }
 
@@ -425,7 +455,9 @@ func (s *Service) createWorktree(
 		_ = s.git.RemoveWorktree(ctx, repo.LocalPath, dir, true)
 		return "", false
 	}
-	progress.send(WorktreeChange{Branch: pr.HeadBranch, PRNumber: &n, Action: ActionCheckedOut})
+	s.emitChange(repo, progress, WorktreeChange{
+		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionCheckedOut, DirectoryPath: dir,
+	})
 	return dir, true
 }
 
@@ -600,7 +632,7 @@ func (s *Service) removeOne(
 	if state == worktree.PRMerged {
 		detail = "PR merged"
 	}
-	progress.send(WorktreeChange{
+	s.emitChange(repo, progress, WorktreeChange{
 		Branch: wt.BranchName, PRNumber: wt.GithubPRNumber,
 		Action: ActionDeleted, Detail: detail,
 	})

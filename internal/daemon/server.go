@@ -219,21 +219,63 @@ func (s *Server) syncOne(stream grpc.ServerStreamingServer[lumberjackv1.SyncResp
 
 	created, removed, syncErr := s.svc.SyncRepository(stream.Context(), repo, progress)
 
-	summary := &lumberjackv1.SyncSummary{
-		Status:           lumberjackv1.SyncStatus_SYNC_STATUS_OK,
-		WorktreesCreated: int64(created),
-		WorktreesRemoved: int64(removed),
-	}
-	if syncErr != nil {
-		summary.Status = lumberjackv1.SyncStatus_SYNC_STATUS_ERROR
-		msg := syncErr.Error()
-		summary.Error = &msg
-	}
 	return stream.Send(&lumberjackv1.SyncResponse{
 		Repository: name,
 		Completed:  true,
-		Summary:    summary,
+		Summary:    toProtoSyncSummary(created, removed, syncErr),
 	})
+}
+
+// Watch opens a long-lived stream of worktree/repository change events. It
+// first sends one SNAPSHOT event per tracked repository (current state, so a
+// client can render immediately), then forwards live deltas from the
+// Service's Broadcaster until the client disconnects or the subscriber falls
+// too far behind and is dropped.
+func (s *Server) Watch(_ *lumberjackv1.WatchRequest, stream grpc.ServerStreamingServer[lumberjackv1.WatchResponse]) error {
+	ctx := stream.Context()
+
+	// Subscribe before reading the snapshot so no event published in between is
+	// missed — worst case a delta is sent twice (once implicitly via the
+	// snapshot, once as a delta), never dropped.
+	events, unsubscribe := s.svc.Subscribe()
+	defer unsubscribe()
+
+	repos, err := s.db.ListRepositories(ctx)
+	if err != nil {
+		return toStatus(err)
+	}
+	for i := range repos {
+		repo := &repos[i]
+		views, err := s.svc.WorktreeViews(ctx, repo)
+		if err != nil {
+			return toStatus(err)
+		}
+		worktrees := make([]*lumberjackv1.Worktree, len(views))
+		for j, v := range views {
+			worktrees[j] = toProtoWorktree(v)
+		}
+		if err := stream.Send(&lumberjackv1.WatchResponse{
+			Type:       lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SNAPSHOT,
+			Repository: toProtoRepository(repo),
+			Worktrees:  worktrees,
+		}); err != nil {
+			return err
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ev, ok := <-events:
+			if !ok {
+				return status.Error(codes.ResourceExhausted, "watch subscriber fell behind and was disconnected")
+			}
+			if err := stream.Send(toProtoWatchResponse(ev)); err != nil {
+				return err
+			}
+		}
+	}
 }
 
 // toStatus maps domain errors onto gRPC status codes. Sentinel errors from the
