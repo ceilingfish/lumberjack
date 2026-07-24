@@ -132,3 +132,16 @@ func (c *Client) UpdateLogin(ctx context.Context, repoID int64, login string) er
 	}
 	return nil
 }
+
+// UpdateSetupConsent records the fingerprint of the `.lumberjack.yml`
+// run-command steps the local user has consented to run for a repository. An
+// empty fingerprint clears consent (e.g. the trusted config no longer
+// declares any run-commands).
+func (c *Client) UpdateSetupConsent(ctx context.Context, repoID int64, fingerprint string) error {
+	if _, err := c.NewUpdate().Model((*schema.Repository)(nil)).
+		Set("setup_consent_fingerprint = ?", fingerprint).
+		Where("id = ?", repoID).Exec(ctx); err != nil {
+		return fmt.Errorf("updating repository setup consent: %w", err)
+	}
+	return nil
+}

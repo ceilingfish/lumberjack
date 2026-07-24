@@ -70,6 +70,18 @@ func (c *Client) TouchWorktreesSyncedAt(ctx context.Context, repoID int64, at ti
 	return nil
 }
 
+// SetWorktreeSetupError records (or clears, with nil) the setup step that
+// failed when this worktree was cloned, surfaced alongside its live
+// reconciliation status.
+func (c *Client) SetWorktreeSetupError(ctx context.Context, id int64, msg *string) error {
+	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
+		Set("setup_error = ?", msg).
+		Where("id = ?", id).Exec(ctx); err != nil {
+		return fmt.Errorf("updating worktree setup error: %w", err)
+	}
+	return nil
+}
+
 // DeleteWorktree removes a worktree row by primary key.
 func (c *Client) DeleteWorktree(ctx context.Context, id int64) error {
 	if _, err := c.NewDelete().Model((*schema.Worktree)(nil)).

@@ -30,7 +30,9 @@ func newInitCmd() *cobra.Command {
 }
 
 // runInit resolves the target path and registers it, reporting the tracking
-// defaults and any worktrees adopted during registration.
+// defaults and any worktrees adopted during registration, then prompts for
+// setup-steps consent if the repository's trusted `.lumberjack.yml` declares
+// run-command steps not yet consented to.
 func runInit(cmd *cobra.Command, args []string) error {
 	path := "."
 	if len(args) == 1 {
@@ -53,6 +55,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		// A branch/PR/action table of the worktrees adopted during registration.
-		return renderWorktreeChanges(out, adopted)
+		if err := renderWorktreeChanges(out, adopted); err != nil {
+			return err
+		}
+		return promptSetupConsent(ctx, cmd, c, repo.GetDirPrefix())
 	})
 }

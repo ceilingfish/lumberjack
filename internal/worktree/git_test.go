@@ -165,6 +165,74 @@ func TestAddListRemoveWorktree(t *testing.T) {
 	}
 }
 
+func TestDefaultBranch(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	branch, err := g.DefaultBranch(ctx, main, "origin")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	if branch != "main" {
+		t.Errorf("DefaultBranch = %q, want %q", branch, "main")
+	}
+}
+
+func TestDefaultBranchFallsBackToRemote(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	// setupRepos clones the remote while it is still empty, so git never sets
+	// the local origin/HEAD symbolic ref — every call here already exercises
+	// the "ask the remote" fallback path.
+	if _, err := g.run(ctx, main, "symbolic-ref", "refs/remotes/origin/HEAD"); err == nil {
+		t.Fatal("expected refs/remotes/origin/HEAD to be unset before the fallback runs")
+	}
+
+	branch, err := g.DefaultBranch(ctx, main, "origin")
+	if err != nil {
+		t.Fatalf("DefaultBranch: %v", err)
+	}
+	if branch != "main" {
+		t.Errorf("DefaultBranch = %q, want %q", branch, "main")
+	}
+}
+
+func TestShowFile(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	if err := g.Fetch(ctx, main, "origin"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	data, found, err := g.ShowFile(ctx, main, "origin/main", "README.md")
+	if err != nil {
+		t.Fatalf("ShowFile: %v", err)
+	}
+	if !found {
+		t.Fatal("ShowFile: found = false, want true")
+	}
+	if string(data) != "hi\n" {
+		t.Errorf("ShowFile content = %q, want %q", data, "hi\n")
+	}
+}
+
+func TestShowFileMissing(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	if err := g.Fetch(ctx, main, "origin"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	_, found, err := g.ShowFile(ctx, main, "origin/main", "does-not-exist.yml")
+	if err != nil {
+		t.Fatalf("ShowFile: %v", err)
+	}
+	if found {
+		t.Fatal("ShowFile: found = true, want false")
+	}
+}
+
 func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
 	g, main := setupRepos(t)
 	ctx := context.Background()

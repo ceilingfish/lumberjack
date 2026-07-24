@@ -37,6 +37,11 @@ type stubService struct {
 	loginCurrent string
 	loginErr     error
 	lastSetLogin string
+	// setupConsentPending/setupConsentCommands drive GetSetupConsent;
+	// setupConsentGiven records whether SetSetupConsent was called.
+	setupConsentPending  bool
+	setupConsentCommands []string
+	setupConsentGiven    bool
 }
 
 func (s *stubService) SetLogin(_ context.Context, req *lumberjackv1.SetLoginRequest) (*lumberjackv1.SetLoginResponse, error) {
@@ -64,6 +69,21 @@ func (s *stubService) InitRepository(_ context.Context, req *lumberjackv1.InitRe
 	}, nil
 }
 
+// GetSetupConsent reports no pending consent unless a test sets
+// setupConsentPending, in which case it also returns setupConsentCommands.
+func (s *stubService) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
+	return &lumberjackv1.GetSetupConsentResponse{
+		Pending:     s.setupConsentPending,
+		RunCommands: s.setupConsentCommands,
+	}, nil
+}
+
+// SetSetupConsent records that consent was given, for tests to assert on.
+func (s *stubService) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
+	s.setupConsentGiven = true
+	return &lumberjackv1.SetSetupConsentResponse{Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()}}, nil
+}
+
 func (s *stubService) ListRepositories(context.Context, *lumberjackv1.ListRepositoriesRequest) (*lumberjackv1.ListRepositoriesResponse, error) {
 	return &lumberjackv1.ListRepositoriesResponse{Repositories: s.repos}, nil
 }
@@ -75,7 +95,8 @@ func (s *stubService) GetRepository(_ context.Context, req *lumberjackv1.GetRepo
 	}
 	return &lumberjackv1.GetRepositoryResponse{Repository: &lumberjackv1.Repository{
 		DirPrefix: req.GetRepository(), LocalPath: "/p/n", GithubOwner: "o", GithubName: "n", Host: "github.com",
-		LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK,
+		LastSyncStatus:      lumberjackv1.SyncStatus_SYNC_STATUS_OK,
+		SetupConsentPending: s.setupConsentPending,
 	}}, nil
 }
 
@@ -184,6 +205,76 @@ func TestCmdInitReportsAdoptedWorktrees(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output %q missing %q", out, want)
 		}
+	}
+}
+
+func TestCmdInitPromptsForSetupConsentAndRecordsYes(t *testing.T) {
+	stub := &stubService{
+		setupConsentPending:  true,
+		setupConsentCommands: []string{"go mod download"},
+	}
+	serveStub(t, stub)
+
+	out, err := run(t, "y\n", "init", ".")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if !strings.Contains(out, "go mod download") {
+		t.Errorf("expected the run-command to be shown, got %q", out)
+	}
+	if !strings.Contains(out, "Consent recorded") {
+		t.Errorf("expected consent-recorded confirmation, got %q", out)
+	}
+	if !stub.setupConsentGiven {
+		t.Error("expected SetSetupConsent to have been called")
+	}
+}
+
+func TestCmdInitPromptsForSetupConsentAndRespectsNo(t *testing.T) {
+	stub := &stubService{
+		setupConsentPending:  true,
+		setupConsentCommands: []string{"rm -rf /"},
+	}
+	serveStub(t, stub)
+
+	out, err := run(t, "n\n", "init", ".")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if !strings.Contains(out, "Not consented") {
+		t.Errorf("expected a not-consented message, got %q", out)
+	}
+	if stub.setupConsentGiven {
+		t.Error("SetSetupConsent should not have been called after declining")
+	}
+}
+
+func TestCmdInitNoPromptWhenConsentNotPending(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+
+	out, err := run(t, "", "init", ".")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if strings.Contains(out, "run on every new worktree") {
+		t.Errorf("did not expect a consent prompt, got %q", out)
+	}
+}
+
+func TestCmdRepositoriesDetailSurfacesPendingConsent(t *testing.T) {
+	stub := &stubService{setupConsentPending: true, setupConsentCommands: []string{"echo hi"}}
+	serveStub(t, stub)
+
+	out, err := run(t, "n\n", "repositories", "n")
+	if err != nil {
+		t.Fatalf("repositories n: %v", err)
+	}
+	if !strings.Contains(out, "consent pending") {
+		t.Errorf("expected detail to flag pending consent, got %q", out)
+	}
+	if !strings.Contains(out, "echo hi") {
+		t.Errorf("expected the consent prompt to run, got %q", out)
 	}
 }
 

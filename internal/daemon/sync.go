@@ -30,6 +30,13 @@ type GitOps interface {
 	// so sync can adopt directories checked out by hand instead of failing to
 	// recreate them.
 	ListWorktrees(ctx context.Context, repoPath string) ([]worktree.Ref, error)
+	// DefaultBranch names remote's default branch, so setup steps are always
+	// read from the trusted base branch rather than the branch being cloned.
+	DefaultBranch(ctx context.Context, repoPath, remote string) (string, error)
+	// ShowFile reads path as it exists at ref, for loading the trusted
+	// `.lumberjack.yml` without checking it out. found is false (with a nil
+	// error) when ref exists but path does not.
+	ShowFile(ctx context.Context, repoPath, ref, path string) (data []byte, found bool, err error)
 }
 
 // GHOps is the gh surface the sync engine and init need.
@@ -227,6 +234,7 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 			if rerr != nil {
 				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
 			}
+			applySetupError(&st, wt.SetupError)
 			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: prState == worktree.PROpen})
 		}
 		return nil
@@ -455,6 +463,11 @@ func (s *Service) createWorktree(
 		_ = s.git.RemoveWorktree(ctx, repo.LocalPath, dir, true)
 		return "", false
 	}
+	// Run the repository's `.lumberjack.yml` setup steps against the freshly
+	// created worktree. Failures are recorded on the worktree row and surfaced
+	// via its reconciliation status; they do not fail the sync (the worktree is
+	// kept, per the feature's fail-fast-but-keep design).
+	s.runSetupSteps(ctx, repo, dir, row.ID)
 	s.emitChange(repo, progress, WorktreeChange{
 		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionCheckedOut, DirectoryPath: dir,
 	})
