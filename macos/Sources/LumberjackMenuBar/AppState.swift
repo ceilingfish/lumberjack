@@ -26,10 +26,15 @@ final class AppState: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .connecting
     @Published private(set) var repositories: [Lumberjack_V1_Repository] = []
     @Published private(set) var worktrees: [Lumberjack_V1_Worktree] = []
+    /// False from the moment a repository is selected until its worktrees have
+    /// been fetched at least once, so the UI can show a spinner instead of
+    /// prematurely claiming "No worktrees" during the first poll.
+    @Published private(set) var worktreesLoaded: Bool = false
     @Published var selectedRepository: String? {
         didSet {
             guard selectedRepository != oldValue else { return }
             worktrees = []
+            worktreesLoaded = false
         }
     }
 
@@ -105,6 +110,7 @@ final class AppState: ObservableObject {
                 diffAndNotify(repository: repo.githubName, worktrees: current, key: repo.localPath)
                 if repo.localPath == selectedRepository {
                     worktrees = current.sorted { $0.branchName < $1.branchName }
+                    worktreesLoaded = true
                 }
             }
         } catch {

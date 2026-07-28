@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Lumberjack}/macos",
+            "name": "Debug LumberjackMenuBar (macos)",
+            "target": "LumberjackMenuBar",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug LumberjackMenuBar (macos)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:Lumberjack}/macos",
+            "name": "Release LumberjackMenuBar (macos)",
+            "target": "LumberjackMenuBar",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release LumberjackMenuBar (macos)"
+        }
+    ]
+}
