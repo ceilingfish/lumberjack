@@ -1,0 +1,108 @@
+package setup
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestAddCommand(t *testing.T) {
+	cfg := &Config{}
+	if !cfg.AddCommand("go mod download") {
+		t.Fatal("AddCommand: want true adding a new command")
+	}
+	if cfg.AddCommand("go mod download") {
+		t.Fatal("AddCommand: want false adding a duplicate")
+	}
+	if got := cfg.RunCommands(); len(got) != 1 || got[0] != "go mod download" {
+		t.Fatalf("RunCommands() = %v, want one entry", got)
+	}
+}
+
+func TestRemoveCommand(t *testing.T) {
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: ".env"}},
+		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "go mod download"}},
+		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "npm install"}},
+	}}
+	if cfg.RemoveCommand("absent") {
+		t.Fatal("RemoveCommand: want false for a command not present")
+	}
+	if !cfg.RemoveCommand("go mod download") {
+		t.Fatal("RemoveCommand: want true removing a present command")
+	}
+	if got := cfg.RunCommands(); len(got) != 1 || got[0] != "npm install" {
+		t.Fatalf("RunCommands() = %v, want only npm install", got)
+	}
+	// The copy-file step must survive removal of a run-command.
+	if len(cfg.Steps) != 2 {
+		t.Fatalf("got %d steps, want the copy-file and remaining run-command", len(cfg.Steps))
+	}
+}
+
+func TestLoadMissingFileIsEmpty(t *testing.T) {
+	cfg, err := Load(t.TempDir())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Steps) != 0 {
+		t.Fatalf("got %d steps, want an empty config for a missing file", len(cfg.Steps))
+	}
+}
+
+func TestSaveLoadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: ".env"}},
+	}}
+	cfg.AddCommand("go mod download")
+	if err := Save(dir, cfg); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(got.Steps) != 2 {
+		t.Fatalf("got %d steps after round trip, want 2", len(got.Steps))
+	}
+	if cmds := got.RunCommands(); len(cmds) != 1 || cmds[0] != "go mod download" {
+		t.Fatalf("RunCommands() = %v after round trip", cmds)
+	}
+	// The written file must be parseable on its own terms.
+	data, err := os.ReadFile(filepath.Join(dir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if _, err := Parse(data); err != nil {
+		t.Fatalf("Parse of saved file: %v", err)
+	}
+}
+
+func TestRepoRootFindsGitDir(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatalf("Mkdir .git: %v", err)
+	}
+	sub := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	got, err := RepoRoot(sub)
+	if err != nil {
+		t.Fatalf("RepoRoot: %v", err)
+	}
+	// Compare resolved paths — t.TempDir may sit under a symlinked /var on macOS.
+	wantResolved, _ := filepath.EvalSymlinks(root)
+	gotResolved, _ := filepath.EvalSymlinks(got)
+	if gotResolved != wantResolved {
+		t.Fatalf("RepoRoot(%q) = %q, want %q", sub, got, root)
+	}
+}
+
+func TestRepoRootErrorsOutsideRepo(t *testing.T) {
+	if _, err := RepoRoot(t.TempDir()); err == nil {
+		t.Fatal("RepoRoot: want an error outside a git repository")
+	}
+}

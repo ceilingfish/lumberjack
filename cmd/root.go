@@ -30,6 +30,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newInstallCmd())
 	root.AddCommand(newListCmd())
 	root.AddCommand(newSetLoginCmd())
+	root.AddCommand(newSetupCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newSyncAllCmd())
