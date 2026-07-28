@@ -70,6 +70,11 @@ service LumberjackService {
   // just that repo (`lumberjack sync [--repository NAME]`). Progress is streamed back as it runs.
   rpc Sync(SyncRequest) returns (stream SyncResponse);
 
+  // Tidy moves tracked worktrees that sit outside their idiomatic location
+  // (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
+  // `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+  rpc Tidy(TidyRequest) returns (TidyResponse);
+
   // Watch opens a long-lived stream of worktree/repository change events. On
   // subscribe it first emits one SNAPSHOT event per tracked repository (each
   // carrying that repository's current worktrees), then streams live deltas —
@@ -367,6 +372,47 @@ message SyncSummary {
   int64 worktrees_created = 2;
   int64 worktrees_removed = 3;
   optional string error = 4;
+}
+
+message TidyRequest {
+  // Empty tidies every tracked repository; set tidies just that one.
+  string repository = 1;
+  // Report what would move without touching anything on disk or in the
+  // database.
+  bool dry_run = 2;
+  // Restrict the tidy to one worktree, named by its branch or its directory
+  // (full path or base name) — the same reference DeleteWorktree accepts.
+  // Empty considers every worktree in scope. The daemon reports NOT_FOUND
+  // when nothing matches. Whether the named worktree can move still depends
+  // on every other worktree in its repository, since none may be moved onto a
+  // path another already holds.
+  string worktree = 3;
+}
+
+// TidyMove is one tracked worktree found outside its idiomatic location. Every
+// misplaced worktree yields exactly one of these, whether it was moved, only
+// reported (dry run), or could not be moved (error set).
+message TidyMove {
+  // The repository the worktree belongs to, so `tidy-all` output can be
+  // attributed.
+  string repository = 1;
+  string branch = 2;
+  // Where the worktree is now.
+  string from = 3;
+  // Where the naming convention says it belongs.
+  string to = 4;
+  // True when the worktree was actually moved; false for a dry run and for a
+  // move that failed.
+  bool moved = 5;
+  // Why the move was not made (e.g. the destination is occupied, or git
+  // refused to move a locked worktree). Empty when moved, or on a dry run.
+  string error = 6;
+}
+
+message TidyResponse {
+  // One entry per misplaced worktree; empty when everything is already in
+  // its idiomatic location.
+  repeated TidyMove moves = 1;
 }
 
 message WatchRequest {}

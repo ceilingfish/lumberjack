@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
@@ -36,8 +35,7 @@ func (c *Client) FindWorktree(ctx context.Context, repoID int64, ref string) (*s
 		return nil, err
 	}
 	for i := range wts {
-		wt := &wts[i]
-		if wt.BranchName == ref || wt.DirectoryPath == ref || filepath.Base(wt.DirectoryPath) == ref {
+		if wt := &wts[i]; wt.Matches(ref) {
 			return wt, nil
 		}
 	}
@@ -70,6 +68,18 @@ func (c *Client) TouchWorktreesSyncedAt(ctx context.Context, repoID int64, at ti
 		Set("last_synced_at = ?", at).
 		Where("repository_id = ?", repoID).Exec(ctx); err != nil {
 		return fmt.Errorf("touching worktree sync time: %w", err)
+	}
+	return nil
+}
+
+// SetWorktreeDirectory repoints a worktree row at a new directory, after tidy
+// has moved it on disk. The mapping is stored rather than recomputed
+// (docs/schema.md), so relocating a worktree means updating this row.
+func (c *Client) SetWorktreeDirectory(ctx context.Context, id int64, dir string) error {
+	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
+		Set("directory_path = ?", dir).
+		Where("id = ?", id).Exec(ctx); err != nil {
+		return fmt.Errorf("updating worktree directory: %w", err)
 	}
 	return nil
 }

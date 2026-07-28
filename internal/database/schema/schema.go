@@ -7,6 +7,7 @@
 package schema
 
 import (
+	"path/filepath"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -69,6 +70,14 @@ type Worktree struct {
 	// cloned (empty/nil when setup succeeded or the repository has no setup
 	// steps configured). Surfaced alongside the live reconciliation status.
 	SetupError *string `bun:"setup_error"`
+}
+
+// Matches reports whether ref identifies this worktree. It is the one place
+// the user-facing worktree reference is defined — a branch name, a full
+// directory path, or the directory's base name — so every command that takes
+// one (`worktree delete`, `tidy --worktree`) resolves it identically.
+func (w *Worktree) Matches(ref string) bool {
+	return w.BranchName == ref || w.DirectoryPath == ref || filepath.Base(w.DirectoryPath) == ref
 }
 
 // SyncRun is an audit-log entry for a single reconciliation of a repository.

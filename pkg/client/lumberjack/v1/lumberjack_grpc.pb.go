@@ -39,6 +39,7 @@ const (
 	LumberjackService_DeleteWorktree_FullMethodName   = "/lumberjack.v1.LumberjackService/DeleteWorktree"
 	LumberjackService_DeleteRepository_FullMethodName = "/lumberjack.v1.LumberjackService/DeleteRepository"
 	LumberjackService_Sync_FullMethodName             = "/lumberjack.v1.LumberjackService/Sync"
+	LumberjackService_Tidy_FullMethodName             = "/lumberjack.v1.LumberjackService/Tidy"
 	LumberjackService_Watch_FullMethodName            = "/lumberjack.v1.LumberjackService/Watch"
 	LumberjackService_GetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/GetSetupConsent"
 	LumberjackService_SetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/SetSetupConsent"
@@ -91,6 +92,10 @@ type LumberjackServiceClient interface {
 	// syncs everything (`lumberjack sync-all`); with one set it syncs
 	// just that repo (`lumberjack sync [--repository NAME]`). Progress is streamed back as it runs.
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncResponse], error)
+	// Tidy moves tracked worktrees that sit outside their idiomatic location
+	// (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
+	// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+	Tidy(ctx context.Context, in *TidyRequest, opts ...grpc.CallOption) (*TidyResponse, error)
 	// Watch opens a long-lived stream of worktree/repository change events. On
 	// subscribe it first emits one SNAPSHOT event per tracked repository (each
 	// carrying that repository's current worktrees), then streams live deltas —
@@ -238,6 +243,16 @@ func (c *lumberjackServiceClient) Sync(ctx context.Context, in *SyncRequest, opt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LumberjackService_SyncClient = grpc.ServerStreamingClient[SyncResponse]
 
+func (c *lumberjackServiceClient) Tidy(ctx context.Context, in *TidyRequest, opts ...grpc.CallOption) (*TidyResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TidyResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_Tidy_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *lumberjackServiceClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &LumberjackService_ServiceDesc.Streams[1], LumberjackService_Watch_FullMethodName, cOpts...)
@@ -324,6 +339,10 @@ type LumberjackServiceServer interface {
 	// syncs everything (`lumberjack sync-all`); with one set it syncs
 	// just that repo (`lumberjack sync [--repository NAME]`). Progress is streamed back as it runs.
 	Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error
+	// Tidy moves tracked worktrees that sit outside their idiomatic location
+	// (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
+	// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+	Tidy(context.Context, *TidyRequest) (*TidyResponse, error)
 	// Watch opens a long-lived stream of worktree/repository change events. On
 	// subscribe it first emits one SNAPSHOT event per tracked repository (each
 	// carrying that repository's current worktrees), then streams live deltas —
@@ -384,6 +403,9 @@ func (UnimplementedLumberjackServiceServer) DeleteRepository(context.Context, *D
 }
 func (UnimplementedLumberjackServiceServer) Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Sync not implemented")
+}
+func (UnimplementedLumberjackServiceServer) Tidy(context.Context, *TidyRequest) (*TidyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Tidy not implemented")
 }
 func (UnimplementedLumberjackServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Watch not implemented")
@@ -606,6 +628,24 @@ func _LumberjackService_Sync_Handler(srv interface{}, stream grpc.ServerStream) 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LumberjackService_SyncServer = grpc.ServerStreamingServer[SyncResponse]
 
+func _LumberjackService_Tidy_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TidyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).Tidy(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_Tidy_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).Tidy(ctx, req.(*TidyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _LumberjackService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(WatchRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -699,6 +739,10 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeleteRepository",
 			Handler:    _LumberjackService_DeleteRepository_Handler,
+		},
+		{
+			MethodName: "Tidy",
+			Handler:    _LumberjackService_Tidy_Handler,
 		},
 		{
 			MethodName: "GetSetupConsent",

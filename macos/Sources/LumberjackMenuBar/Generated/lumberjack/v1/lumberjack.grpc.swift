@@ -76,6 +76,11 @@ internal protocol Lumberjack_V1_LumberjackServiceClientProtocol: GRPCClient {
     handler: @escaping (Lumberjack_V1_SyncResponse) -> Void
   ) -> ServerStreamingCall<Lumberjack_V1_SyncRequest, Lumberjack_V1_SyncResponse>
 
+  func tidy(
+    _ request: Lumberjack_V1_TidyRequest,
+    callOptions: CallOptions?
+  ) -> UnaryCall<Lumberjack_V1_TidyRequest, Lumberjack_V1_TidyResponse>
+
   func watch(
     _ request: Lumberjack_V1_WatchRequest,
     callOptions: CallOptions?,
@@ -316,6 +321,26 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
     )
   }
 
+  /// Tidy moves tracked worktrees that sit outside their idiomatic location
+  /// (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
+  /// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to Tidy.
+  ///   - callOptions: Call options.
+  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
+  internal func tidy(
+    _ request: Lumberjack_V1_TidyRequest,
+    callOptions: CallOptions? = nil
+  ) -> UnaryCall<Lumberjack_V1_TidyRequest, Lumberjack_V1_TidyResponse> {
+    return self.makeUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.tidy.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeTidyInterceptors() ?? []
+    )
+  }
+
   /// Watch opens a long-lived stream of worktree/repository change events. On
   /// subscribe it first emits one SNAPSHOT event per tracked repository (each
   /// carrying that repository's current worktrees), then streams live deltas —
@@ -506,6 +531,11 @@ internal protocol Lumberjack_V1_LumberjackServiceAsyncClientProtocol: GRPCClient
     callOptions: CallOptions?
   ) -> GRPCAsyncServerStreamingCall<Lumberjack_V1_SyncRequest, Lumberjack_V1_SyncResponse>
 
+  func makeTidyCall(
+    _ request: Lumberjack_V1_TidyRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_TidyRequest, Lumberjack_V1_TidyResponse>
+
   func makeWatchCall(
     _ request: Lumberjack_V1_WatchRequest,
     callOptions: CallOptions?
@@ -661,6 +691,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeSyncInterceptors() ?? []
+    )
+  }
+
+  internal func makeTidyCall(
+    _ request: Lumberjack_V1_TidyRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_TidyRequest, Lumberjack_V1_TidyResponse> {
+    return self.makeAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.tidy.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeTidyInterceptors() ?? []
     )
   }
 
@@ -835,6 +877,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
     )
   }
 
+  internal func tidy(
+    _ request: Lumberjack_V1_TidyRequest,
+    callOptions: CallOptions? = nil
+  ) async throws -> Lumberjack_V1_TidyResponse {
+    return try await self.performAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.tidy.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeTidyInterceptors() ?? []
+    )
+  }
+
   internal func watch(
     _ request: Lumberjack_V1_WatchRequest,
     callOptions: CallOptions? = nil
@@ -924,6 +978,9 @@ internal protocol Lumberjack_V1_LumberjackServiceClientInterceptorFactoryProtoco
   /// - Returns: Interceptors to use when invoking 'sync'.
   func makeSyncInterceptors() -> [ClientInterceptor<Lumberjack_V1_SyncRequest, Lumberjack_V1_SyncResponse>]
 
+  /// - Returns: Interceptors to use when invoking 'tidy'.
+  func makeTidyInterceptors() -> [ClientInterceptor<Lumberjack_V1_TidyRequest, Lumberjack_V1_TidyResponse>]
+
   /// - Returns: Interceptors to use when invoking 'watch'.
   func makeWatchInterceptors() -> [ClientInterceptor<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse>]
 
@@ -950,6 +1007,7 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.deleteWorktree,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.deleteRepository,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.sync,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.tidy,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.watch,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent,
@@ -1021,6 +1079,12 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       name: "Sync",
       path: "/lumberjack.v1.LumberjackService/Sync",
       type: GRPCCallType.serverStreaming
+    )
+
+    internal static let tidy = GRPCMethodDescriptor(
+      name: "Tidy",
+      path: "/lumberjack.v1.LumberjackService/Tidy",
+      type: GRPCCallType.unary
     )
 
     internal static let watch = GRPCMethodDescriptor(

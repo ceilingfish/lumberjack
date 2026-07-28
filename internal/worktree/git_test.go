@@ -270,3 +270,77 @@ func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
 		t.Errorf("LocalOnlyCommits = %d, want 1", n)
 	}
 }
+
+// TestMoveWorktree exercises the relocation `tidy` relies on against real git:
+// the tree must land at the new path, git must report it there, and the moved
+// worktree must still be a working checkout (its `.git` pointer rewritten).
+func TestMoveWorktree(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	from := filepath.Join(filepath.Dir(main), "misplaced", "foo")
+	if err := g.AddWorktree(ctx, main, from, "origin", "feature/foo"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	to := filepath.Join(filepath.Dir(main), "main-foo")
+
+	if err := g.MoveWorktree(ctx, main, from, to); err != nil {
+		t.Fatalf("MoveWorktree: %v", err)
+	}
+	if _, err := os.Stat(from); !os.IsNotExist(err) {
+		t.Errorf("old worktree dir should be gone, stat err = %v", err)
+	}
+
+	refs, err := g.ListWorktrees(ctx, main)
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	found := false
+	for _, r := range refs {
+		// Compare basenames: on macOS the temp dir git reports is the resolved
+		// /private/var path, not the /var symlink the test built.
+		if filepath.Base(r.Dir) == filepath.Base(to) {
+			found = true
+			if r.Branch != "feature/foo" {
+				t.Errorf("branch = %q, want feature/foo", r.Branch)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("moved worktree not listed at %s: %v", to, refs)
+	}
+
+	// The relocated tree is still usable — a git command run inside it works.
+	if _, err := g.IsDirty(ctx, to); err != nil {
+		t.Errorf("moved worktree is not a working checkout: %v", err)
+	}
+}
+
+// TestMoveWorktreeBuriesIntoAnExistingDestination pins the git behaviour that
+// makes tidy's "destination already exists" check load-bearing: `git worktree
+// move` onto an existing directory does not fail, it moves the worktree
+// *inside* it (mv-style), landing it somewhere the caller did not ask for. A
+// caller that skipped the check would record a path the worktree is not at.
+func TestMoveWorktreeBuriesIntoAnExistingDestination(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	from := filepath.Join(filepath.Dir(main), "misplaced", "foo")
+	if err := g.AddWorktree(ctx, main, from, "origin", "feature/foo"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	to := filepath.Join(filepath.Dir(main), "occupied")
+	if err := os.MkdirAll(to, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := g.MoveWorktree(ctx, main, from, to); err != nil {
+		t.Fatalf("MoveWorktree: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(to, "foo", ".git")); err != nil {
+		t.Errorf("expected the worktree buried at %s/foo, stat err = %v", to, err)
+	}
+	if _, err := os.Stat(filepath.Join(to, ".git")); !os.IsNotExist(err) {
+		t.Errorf("worktree should not have landed at %s itself, stat err = %v", to, err)
+	}
+}

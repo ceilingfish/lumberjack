@@ -2,9 +2,13 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/github"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/grpc"
@@ -425,4 +429,117 @@ func TestRegisterGRPC(t *testing.T) {
 	srv := newServer(newHarness(t))
 	g := grpc.NewServer()
 	srv.RegisterGRPC(g) // must not panic
+}
+
+func TestServerTidySingleRepo(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	from := filepath.Join(h.parent, "elsewhere", "foo")
+	h.track(t, repo, "feature/foo", from)
+
+	resp, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{Repository: "n"})
+	if err != nil {
+		t.Fatalf("Tidy: %v", err)
+	}
+	if len(resp.GetMoves()) != 1 {
+		t.Fatalf("moves=%v, want 1", resp.GetMoves())
+	}
+	m := resp.GetMoves()[0]
+	want := filepath.Join(h.parent, "n-foo")
+	if m.GetRepository() != "n" || m.GetBranch() != "feature/foo" || m.GetFrom() != from ||
+		m.GetTo() != want || !m.GetMoved() || m.GetError() != "" {
+		t.Errorf("move=%+v, want a clean move of feature/foo to %s", m, want)
+	}
+}
+
+func TestServerTidyAllReposDryRun(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	from := filepath.Join(h.parent, "elsewhere", "foo")
+	h.track(t, repo, "feature/foo", from)
+
+	// No CLI command exposes the all-repositories scope today, but the RPC
+	// still supports it (an empty repository), so it stays covered.
+	resp, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{DryRun: true})
+	if err != nil {
+		t.Fatalf("Tidy all: %v", err)
+	}
+	if len(resp.GetMoves()) != 1 || resp.GetMoves()[0].GetMoved() {
+		t.Fatalf("moves=%v, want one unmoved entry", resp.GetMoves())
+	}
+	if _, err := os.Stat(from); err != nil {
+		t.Errorf("dry run moved the worktree off %s: %v", from, err)
+	}
+}
+
+func TestServerTidyUnknownRepo(t *testing.T) {
+	srv := newServer(newHarness(t))
+	_, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{Repository: "ghost"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
+func TestServerTidyWorktreeScoped(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	h.track(t, repo, "feature/foo", filepath.Join(h.parent, "elsewhere", "foo"))
+	h.track(t, repo, "feature/bar", filepath.Join(h.parent, "elsewhere", "bar"))
+
+	resp, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{
+		Repository: "n", Worktree: "feature/foo",
+	})
+	if err != nil {
+		t.Fatalf("Tidy: %v", err)
+	}
+	if len(resp.GetMoves()) != 1 || resp.GetMoves()[0].GetBranch() != "feature/foo" {
+		t.Errorf("moves=%v, want only feature/foo", resp.GetMoves())
+	}
+}
+
+func TestServerTidyUnknownWorktree(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{
+		Repository: "n", Worktree: "ghost",
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
+// A worktree reference only makes sense within one repository, so pairing it
+// with the all-repositories scope is rejected rather than guessed at.
+// A worktree reference without a repository is rejected on the request alone,
+// so the same command is not accepted on a machine tracking one repository and
+// refused on a machine tracking two.
+func TestServerTidyWorktreeWithoutRepositoryRejected(t *testing.T) {
+	for _, repos := range []int{1, 2} {
+		t.Run(fmt.Sprintf("%d-tracked", repos), func(t *testing.T) {
+			h := newHarness(t)
+			srv := newServer(h)
+			h.repo(t)
+			for i := 1; i < repos; i++ {
+				name := fmt.Sprintf("m%d", i)
+				extra := &schema.Repository{
+					LocalPath: filepath.Join(h.parent, name), WorktreeParentDir: h.parent,
+					DirPrefix: name, GithubOwner: "o", GithubName: name,
+					DefaultRemote: "origin", Host: "github.com",
+				}
+				if err := h.db.CreateRepository(context.Background(), extra); err != nil {
+					t.Fatalf("CreateRepository: %v", err)
+				}
+			}
+
+			_, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{Worktree: "feature/foo"})
+			if status.Code(err) != codes.InvalidArgument {
+				t.Errorf("expected InvalidArgument, got %v", err)
+			}
+		})
+	}
 }

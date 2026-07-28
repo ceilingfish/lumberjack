@@ -34,6 +34,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newSyncAllCmd())
+	root.AddCommand(newTidyCmd())
 	root.AddCommand(newUninstallCmd())
 	root.AddCommand(newWorktreeCmd())
 	root.AddCommand(newWorktreesCmd())

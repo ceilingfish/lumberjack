@@ -852,6 +852,78 @@ nonisolated struct Lumberjack_V1_SyncSummary: Sendable {
   fileprivate var _error: String? = nil
 }
 
+nonisolated struct Lumberjack_V1_TidyRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Empty tidies every tracked repository; set tidies just that one.
+  var repository: String = String()
+
+  /// Report what would move without touching anything on disk or in the
+  /// database.
+  var dryRun: Bool = false
+
+  /// Restrict the tidy to one worktree, named by its branch or its directory
+  /// (full path or base name) — the same reference DeleteWorktree accepts.
+  /// Empty considers every worktree in scope. The daemon reports NOT_FOUND
+  /// when nothing matches. Whether the named worktree can move still depends
+  /// on every other worktree in its repository, since none may be moved onto a
+  /// path another already holds.
+  var worktree: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+/// TidyMove is one tracked worktree found outside its idiomatic location. Every
+/// misplaced worktree yields exactly one of these, whether it was moved, only
+/// reported (dry run), or could not be moved (error set).
+nonisolated struct Lumberjack_V1_TidyMove: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The repository the worktree belongs to, so `tidy-all` output can be
+  /// attributed.
+  var repository: String = String()
+
+  var branch: String = String()
+
+  /// Where the worktree is now.
+  var from: String = String()
+
+  /// Where the naming convention says it belongs.
+  var to: String = String()
+
+  /// True when the worktree was actually moved; false for a dry run and for a
+  /// move that failed.
+  var moved: Bool = false
+
+  /// Why the move was not made (e.g. the destination is occupied, or git
+  /// refused to move a locked worktree). Empty when moved, or on a dry run.
+  var error: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+nonisolated struct Lumberjack_V1_TidyResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// One entry per misplaced worktree; empty when everything is already in
+  /// its idiomatic location.
+  var moves: [Lumberjack_V1_TidyMove] = []
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
 nonisolated struct Lumberjack_V1_WatchRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -2130,6 +2202,131 @@ nonisolated extension Lumberjack_V1_SyncSummary: SwiftProtobuf.Message, SwiftPro
     if lhs.worktreesCreated != rhs.worktreesCreated {return false}
     if lhs.worktreesRemoved != rhs.worktreesRemoved {return false}
     if lhs._error != rhs._error {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_TidyRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".TidyRequest"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{3}dry_run\0\u{1}worktree\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.dryRun) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.worktree) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.repository.isEmpty {
+      try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
+    }
+    if self.dryRun != false {
+      try visitor.visitSingularBoolField(value: self.dryRun, fieldNumber: 2)
+    }
+    if !self.worktree.isEmpty {
+      try visitor.visitSingularStringField(value: self.worktree, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_TidyRequest, rhs: Lumberjack_V1_TidyRequest) -> Bool {
+    if lhs.repository != rhs.repository {return false}
+    if lhs.dryRun != rhs.dryRun {return false}
+    if lhs.worktree != rhs.worktree {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_TidyMove: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".TidyMove"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}branch\0\u{1}from\0\u{1}to\0\u{1}moved\0\u{1}error\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.branch) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.from) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.to) }()
+      case 5: try { try decoder.decodeSingularBoolField(value: &self.moved) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.error) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.repository.isEmpty {
+      try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
+    }
+    if !self.branch.isEmpty {
+      try visitor.visitSingularStringField(value: self.branch, fieldNumber: 2)
+    }
+    if !self.from.isEmpty {
+      try visitor.visitSingularStringField(value: self.from, fieldNumber: 3)
+    }
+    if !self.to.isEmpty {
+      try visitor.visitSingularStringField(value: self.to, fieldNumber: 4)
+    }
+    if self.moved != false {
+      try visitor.visitSingularBoolField(value: self.moved, fieldNumber: 5)
+    }
+    if !self.error.isEmpty {
+      try visitor.visitSingularStringField(value: self.error, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_TidyMove, rhs: Lumberjack_V1_TidyMove) -> Bool {
+    if lhs.repository != rhs.repository {return false}
+    if lhs.branch != rhs.branch {return false}
+    if lhs.from != rhs.from {return false}
+    if lhs.to != rhs.to {return false}
+    if lhs.moved != rhs.moved {return false}
+    if lhs.error != rhs.error {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_TidyResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".TidyResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}moves\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.moves) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.moves.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.moves, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_TidyResponse, rhs: Lumberjack_V1_TidyResponse) -> Bool {
+    if lhs.moves != rhs.moves {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
