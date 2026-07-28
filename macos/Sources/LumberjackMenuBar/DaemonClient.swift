@@ -51,4 +51,14 @@ final class DaemonClient: @unchecked Sendable {
         request.repository = repository
         return try await service.listWorktrees(request).worktrees
     }
+
+    /// Triggers a reconcile for one repository and waits for it to finish.
+    /// `Sync` is a server-streaming RPC that emits progress updates; the menu
+    /// bar only cares that it ran (the worktree poll picks up the results), so
+    /// we drain the stream and discard the messages.
+    func sync(repository: String) async throws {
+        var request = Lumberjack_V1_SyncRequest()
+        request.repository = repository
+        for try await _ in service.sync(request) {}
+    }
 }

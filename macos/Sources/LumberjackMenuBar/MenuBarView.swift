@@ -1,213 +1,664 @@
 import Foundation
+import SwiftProtobuf
 import SwiftUI
 
-/// The panel shown when the menu-bar icon is clicked: a repository switcher
-/// plus a live view of the selected repository's worktrees, equivalent to
-/// `lumberjack repositories NAME worktrees` on the CLI.
+/// The panel shown when the menu-bar icon is clicked: connection status, a
+/// repository switcher, a live view of the selected repository's worktrees,
+/// and sync/quit actions. Implements the "Lumberjack popover redesign" from
+/// Claude Design; the fixed light palette below (`Palette`) comes straight from
+/// that spec, which is why the popover is pinned to the light appearance.
 struct MenuBarView: View {
     @ObservedObject var state: AppState
+
+    @State private var reposOpen = false
+    @State private var quitOpen = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            Divider()
-            content
-                .padding(12)
+            hairline
+
+            switch state.connectionState {
+            case .connected where !state.repositories.isEmpty:
+                repositorySection
+                hairline
+                worktreesHeader
+                worktreesList
+            default:
+                statusArea
+            }
+
+            hairline
+            footer
+
+            if quitOpen {
+                hairline
+                quitConfirmation
+            }
         }
-        .frame(width: 320)
+        .frame(width: 360)
+        .background(Palette.card)
         .onAppear { state.start() }
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "tree.fill")
-                .foregroundStyle(.green)
-            Spacer()
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 7)
+                .fill(Palette.iconBoxFill)
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.iconBoxBorder, lineWidth: 1))
+                .frame(width: 26, height: 26)
+                .overlay(
+                    Image(systemName: "tree.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Palette.treeGreen)
+                )
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Lumberjack")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.titleText)
+                Text(headerSubtitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Palette.subtleText)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            connectionPill
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private var connectionPill: some View {
+        let p = connectionPillStyle
+        return HStack(spacing: 6) {
             Circle()
-                .fill(connectionColor)
-                .frame(width: 7, height: 7)
-                .help(connectionHelp)
+                .fill(p.dot)
+                .frame(width: 6, height: 6)
+                .overlay(Circle().stroke(p.dot.opacity(0.18), lineWidth: 2).scaleEffect(1.6))
+            Text(p.label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(p.text)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(p.background))
+        .overlay(Capsule().stroke(p.border, lineWidth: 1))
+        .fixedSize()
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch state.connectionState {
-        case .connecting:
-            statusLine("Connecting to daemon…", systemImage: "arrow.triangle.2.circlepath")
-        case .daemonNotRunning:
-            statusLine("Daemon not running", systemImage: "exclamationmark.triangle")
-        case .connected:
-            connectedBody
+    // MARK: Repository switcher
+
+    private var repositorySection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                sectionLabel("Repository")
+                Spacer()
+                Text("\(state.repositories.count) connected")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.faintText)
+            }
+            .padding(.bottom, 6)
+
+            repositoryButton
+
+            if reposOpen {
+                repositoryDropdown
+                    .padding(.top, 6)
+            }
         }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(Palette.sectionFill)
     }
 
-    @ViewBuilder
-    private var connectedBody: some View {
-        if state.repositories.isEmpty {
-            statusLine("No repositories tracked", systemImage: "tray")
-        } else {
-            repositoryPicker
-            Divider()
-                .padding(.vertical, 6)
-            worktreeSection
+    private var repositoryButton: some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.12)) { reposOpen.toggle() }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Palette.subtleText)
+                Text(selectedRepositoryName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Palette.titleText)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.faintText)
+                    .rotationEffect(.degrees(reposOpen ? 180 : 0))
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+            .modifier(FillOnHover(base: Palette.card, hover: Palette.buttonHover, cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.controlBorder, lineWidth: 1))
         }
+        .buttonStyle(.plain)
     }
 
-    /// A centred "Repository" label paired with a chip-styled switcher. The
-    /// default `Picker` pop-up looked cramped and out of place in the panel; a
-    /// borderless `Menu` with an explicit chevron reads as part of the panel's
-    /// layout.
-    private var repositoryPicker: some View {
-        HStack(spacing: 8) {
-            Text("Repository")
-                .fontWeight(.medium)
-            Menu {
-                ForEach(state.repositories, id: \.localPath) { repo in
-                    Button {
-                        state.selectedRepository = repo.localPath
-                    } label: {
-                        if repo.localPath == state.selectedRepository {
-                            Label(repo.githubName, systemImage: "checkmark")
-                        } else {
-                            Text(repo.githubName)
+    private var repositoryDropdown: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(state.repositories.enumerated()), id: \.element.localPath) { index, repo in
+                Button {
+                    state.selectedRepository = repo.localPath
+                    withAnimation(.easeOut(duration: 0.12)) { reposOpen = false }
+                } label: {
+                    HStack(spacing: 9) {
+                        Text(repo.localPath == state.selectedRepository ? "✓" : "")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Palette.treeGreen)
+                            .frame(width: 14, alignment: .leading)
+                        Text(repo.githubName)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(Palette.titleText)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let count = state.worktreeCountsByRepo[repo.localPath] {
+                            Text("\(count) branch\(count == 1 ? "" : "es")")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Palette.faintText)
                         }
                     }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                    .modifier(FillOnHover(base: .clear, hover: Palette.rowHover, cornerRadius: 0))
                 }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "folder.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(selectedRepositoryName)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .overlay(alignment: .bottom) {
+                    if index < state.repositories.count - 1 {
+                        Rectangle().fill(Palette.rowDivider).frame(height: 1)
+                    }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.primary.opacity(0.06))
-                )
-                .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
         }
-        .frame(maxWidth: .infinity, alignment: .center)
+        .background(Palette.card)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Palette.controlBorder, lineWidth: 1))
+        .shadow(color: Color.black.opacity(0.10), radius: 10, y: 8)
+    }
+
+    // MARK: Worktrees
+
+    private var worktreesHeader: some View {
+        HStack {
+            sectionLabel("Worktrees")
+            Spacer()
+            Text(worktreeSummary)
+                .font(.system(size: 10))
+                .foregroundStyle(Palette.faintText)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
     }
 
     @ViewBuilder
-    private var worktreeSection: some View {
+    private var worktreesList: some View {
         if !state.worktreesLoaded {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Text("Loading worktrees…").foregroundStyle(.secondary)
+                Text("Loading worktrees…").foregroundStyle(Palette.subtleText)
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
         } else if state.worktrees.isEmpty {
-            statusLine("No worktrees", systemImage: "folder")
+            Text("No worktrees")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.subtleText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
         } else {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(state.worktrees, id: \.directoryPath) { worktree in
-                    WorktreeRow(worktree: worktree)
-                }
-            }
-        }
-    }
-
-    private var selectedRepositoryName: String {
-        state.repositories
-            .first { $0.localPath == state.selectedRepository }?
-            .githubName ?? "Select repository"
-    }
-
-    private var connectionColor: Color {
-        switch state.connectionState {
-        case .connecting: return .yellow
-        case .daemonNotRunning: return .red
-        case .connected: return .green
-        }
-    }
-
-    private var connectionHelp: String {
-        switch state.connectionState {
-        case .connecting: return "Connecting to daemon…"
-        case .daemonNotRunning: return "Daemon not running"
-        case .connected: return "Connected to daemon"
-        }
-    }
-
-    private func statusLine(_ text: String, systemImage: String) -> some View {
-        Label(text, systemImage: systemImage)
-            .foregroundStyle(.secondary)
-            .padding(.vertical, 8)
-    }
-}
-
-/// One worktree's branch/PR/status/last-synced row, matching the CLI's
-/// worktree listing columns.
-private struct WorktreeRow: View {
-    let worktree: Lumberjack_V1_Worktree
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(worktree.branchName).bold()
-                if worktree.hasGithubPrNumber {
-                    Text("#\(worktree.githubPrNumber)")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                statusBadge
-                if let icon = WorktreeActions.vscodeIcon {
-                    Button {
-                        WorktreeActions.openInVSCode(worktree.directoryPath)
-                    } label: {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .frame(width: 16, height: 16)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(state.worktrees, id: \.directoryPath) { worktree in
+                        WorktreeRow(
+                            worktree: worktree,
+                            prURL: prURL(for: worktree),
+                            isSyncing: state.syncing
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .help("Open in VS Code")
                 }
+                .padding(.horizontal, 6)
             }
-            if !worktree.reconciliationNote.isEmpty {
-                Text(worktree.reconciliationNote)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // ~46pt per row, capped so the panel never grows without bound;
+            // beyond ~8 rows the list scrolls (matching the design's 372px cap).
+            .frame(height: min(CGFloat(state.worktrees.count) * 46, 372))
+            .padding(.bottom, 6)
+        }
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Button {
+                state.syncAll()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.subtleText)
+                    Text(state.syncing ? "Syncing…" : "Sync all")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Palette.bodyText)
+                }
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+                .modifier(FillOnHover(base: Palette.card, hover: Palette.buttonHover, cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.controlBorder, lineWidth: 1))
             }
-            if worktree.hasLastSyncedAt {
-                let ts = worktree.lastSyncedAt
-                let date = Date(timeIntervalSince1970: TimeInterval(ts.seconds) + TimeInterval(ts.nanos) / 1e9)
-                Text("Last synced \(date.formatted(.relative(presentation: .named)))")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+            .buttonStyle(.plain)
+            .disabled(state.syncing || state.connectionState != .connected)
+
+            Spacer()
+
+            Button {
+                withAnimation(.easeOut(duration: 0.12)) { quitOpen = true; reposOpen = false }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Palette.destructive)
+                    Text("Quit")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Palette.destructive)
+                    Text("⌘Q")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Palette.destructive.opacity(0.6))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+                .modifier(FillOnHover(base: Palette.card, hover: Palette.destructiveHover, cornerRadius: 7))
+                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.destructiveBorder, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut("q", modifiers: .command)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .background(Palette.sectionFill)
+    }
+
+    private var quitConfirmation: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Quit Lumberjack?")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Palette.titleText)
+                .padding(.bottom, 3)
+            Text("Branches stop syncing until you reopen it.")
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.subtleText)
+                .padding(.bottom, 9)
+            HStack(spacing: 7) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.12)) { quitOpen = false }
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(Palette.bodyText)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                        .modifier(FillOnHover(base: Palette.card, hover: Palette.buttonHover, cornerRadius: 7))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Palette.controlBorder, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Text("Quit now")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 6)
+                        .contentShape(Rectangle())
+                        .modifier(FillOnHover(base: Palette.destructive, hover: Palette.destructiveDeep, cornerRadius: 7))
+                }
+                .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            WorktreeActions.openInFinder(worktree.directoryPath)
-        }
-        .help("Double-click to open in Finder")
+        .padding(.horizontal, 14)
+        .padding(.top, 11)
+        .padding(.bottom, 13)
+        .background(Palette.destructiveTint)
+    }
+
+    // MARK: Shared pieces
+
+    private var hairline: some View {
+        Rectangle().fill(Palette.hairline).frame(height: 1)
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.6)
+            .textCase(.uppercase)
+            .foregroundStyle(Palette.faintText)
     }
 
     @ViewBuilder
-    private var statusBadge: some View {
-        if worktree.needsReconciliation {
-            Text("needs attention").font(.caption).foregroundStyle(.orange)
-        } else if worktree.orphaned {
-            Text("orphaned").font(.caption).foregroundStyle(.secondary)
-        } else {
-            Text("in sync").font(.caption).foregroundStyle(.green)
+    private var statusArea: some View {
+        let (text, symbol): (String, String) = {
+            switch state.connectionState {
+            case .connecting: return ("Connecting to daemon…", "arrow.triangle.2.circlepath")
+            case .daemonNotRunning: return ("Daemon not running", "exclamationmark.triangle")
+            case .connected: return ("No repositories tracked", "tray")
+            }
+        }()
+        Label(text, systemImage: symbol)
+            .font(.system(size: 12))
+            .foregroundStyle(Palette.subtleText)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 22)
+            .padding(.horizontal, 14)
+    }
+
+    // MARK: Derived values
+
+    private var selectedRepositoryName: String {
+        state.selectedRepositoryObject?.githubName ?? "Select repository"
+    }
+
+    private var headerSubtitle: String {
+        switch state.connectionState {
+        case .connecting:
+            return "Connecting to daemon…"
+        case .daemonNotRunning:
+            return "Daemon not running"
+        case .connected:
+            let n = state.repositories.count
+            var s = "Watching \(n) \(n == 1 ? "repository" : "repositories")"
+            if let synced = latestSyncText { s += " · synced \(synced)" }
+            return s
         }
+    }
+
+    private var latestSyncText: String? {
+        let dates = state.repositories.compactMap { repo -> Date? in
+            guard repo.hasLastSyncedAt else { return nil }
+            return date(from: repo.lastSyncedAt)
+        }
+        guard let newest = dates.max() else { return nil }
+        return newest.formatted(.relative(presentation: .named))
+    }
+
+    private var worktreeSummary: String {
+        let inSync = state.worktrees.filter { !$0.needsReconciliation && !$0.orphaned }.count
+        let attention = state.worktrees.filter { $0.needsReconciliation }.count
+        let orphaned = state.worktrees.filter { $0.orphaned && !$0.needsReconciliation }.count
+        var parts: [String] = []
+        if inSync > 0 { parts.append("\(inSync) in sync") }
+        if attention > 0 { parts.append("\(attention) needs attention") }
+        if orphaned > 0 { parts.append("\(orphaned) orphaned") }
+        return parts.joined(separator: " · ")
+    }
+
+    private var connectionPillStyle: (dot: Color, text: Color, background: Color, border: Color, label: String) {
+        switch state.connectionState {
+        case .connected:
+            return (Palette.treeGreen, Palette.treeGreen, Palette.pillGreenBg, Palette.pillGreenBorder, "Connected")
+        case .connecting:
+            return (Palette.warnDot, Palette.warnText, Palette.pillWarnBg, Palette.pillWarnBorder, "Connecting")
+        case .daemonNotRunning:
+            return (Palette.destructive, Palette.destructive, Palette.destructiveTint, Palette.destructiveBorder, "Offline")
+        }
+    }
+
+    private func prURL(for worktree: Lumberjack_V1_Worktree) -> URL? {
+        guard worktree.hasGithubPrNumber, let repo = state.selectedRepositoryObject else { return nil }
+        let host = repo.host.isEmpty ? "github.com" : repo.host
+        return URL(string: "https://\(host)/\(repo.githubOwner)/\(repo.githubName)/pull/\(worktree.githubPrNumber)")
+    }
+
+    private func date(from ts: Google_Protobuf_Timestamp) -> Date {
+        Date(timeIntervalSince1970: TimeInterval(ts.seconds) + TimeInterval(ts.nanos) / 1e9)
+    }
+}
+
+/// One worktree's row: status dot, branch name, PR link, subtitle, and — on
+/// the right — a status pill that swaps for Finder/Terminal/VS Code actions
+/// while the pointer is over the row (mirroring the design's hover behaviour).
+private struct WorktreeRow: View {
+    let worktree: Lumberjack_V1_Worktree
+    let prURL: URL?
+    let isSyncing: Bool
+
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(style.dot)
+                .frame(width: 5, height: 5)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(worktree.branchName)
+                        .font(.system(size: 11.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Palette.titleText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    if worktree.hasGithubPrNumber {
+                        prLink
+                    }
+                }
+                if let sub = subtitle {
+                    Text(sub)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(style.subColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if hovered {
+                actions
+            } else {
+                statusPill
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 46)
+        .background(RoundedRectangle(cornerRadius: 7).fill(hovered ? Palette.rowHover : .clear))
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+        .onTapGesture(count: 2) { WorktreeActions.openInFinder(worktree.directoryPath) }
+        .help("Double-click to reveal in Finder")
+    }
+
+    @ViewBuilder
+    private var prLink: some View {
+        let label = Text("#\(worktree.githubPrNumber)")
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(Palette.subtleText)
+        if let prURL {
+            Link(destination: prURL) { label }
+                .help("View pull request on GitHub")
+        } else {
+            label
+        }
+    }
+
+    private var statusPill: some View {
+        Text(style.label)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(style.pillFg)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(style.pillBg))
+            .fixedSize()
+    }
+
+    private var actions: some View {
+        HStack(spacing: 3) {
+            IconButton(image: WorktreeActions.finderIcon, help: "Reveal in Finder") {
+                WorktreeActions.openInFinder(worktree.directoryPath)
+            }
+            IconButton(image: WorktreeActions.terminalIcon, help: "Open in Terminal") {
+                WorktreeActions.openInTerminal(worktree.directoryPath)
+            }
+            if WorktreeActions.vscodeIcon != nil {
+                IconButton(image: WorktreeActions.vscodeIcon, help: "Open in VS Code") {
+                    WorktreeActions.openInVSCode(worktree.directoryPath)
+                }
+            }
+        }
+        .fixedSize()
+    }
+
+    private var subtitle: String? {
+        if worktree.needsReconciliation {
+            return worktree.reconciliationNote.isEmpty
+                ? "Needs reconciliation"
+                : worktree.reconciliationNote
+        }
+        guard worktree.hasLastSyncedAt else { return nil }
+        let ts = worktree.lastSyncedAt
+        let date = Date(timeIntervalSince1970: TimeInterval(ts.seconds) + TimeInterval(ts.nanos) / 1e9)
+        return "Synced \(date.formatted(.relative(presentation: .named)))"
+    }
+
+    private var style: StatusStyle {
+        if isSyncing { return .syncing }
+        if worktree.needsReconciliation { return .attention }
+        if worktree.orphaned { return .orphaned }
+        return .inSync
+    }
+}
+
+/// The colour/label set for a worktree's status, keyed to the design's pills.
+private struct StatusStyle {
+    let label: String
+    let dot: Color
+    let pillFg: Color
+    let pillBg: Color
+    let subColor: Color
+
+    static let inSync = StatusStyle(
+        label: "In sync", dot: Palette.dotGreen,
+        pillFg: Palette.treeGreen, pillBg: Palette.pillGreenBg, subColor: Palette.faintText)
+    static let attention = StatusStyle(
+        label: "Needs attention", dot: Palette.dotAmber,
+        pillFg: Palette.warnText, pillBg: Palette.pillWarnBg, subColor: Palette.warnText)
+    static let syncing = StatusStyle(
+        label: "Syncing", dot: Palette.dotBlue,
+        pillFg: Palette.primary, pillBg: Palette.pillBlueBg, subColor: Palette.faintText)
+    static let orphaned = StatusStyle(
+        label: "Orphaned", dot: Palette.dotGrey,
+        pillFg: Palette.subtleText, pillBg: Palette.pillGreyBg, subColor: Palette.faintText)
+}
+
+/// A 22×22 icon button that fills its background only while hovered — used for
+/// the per-row Finder/Terminal/VS Code actions.
+private struct IconButton: View {
+    let image: NSImage?
+    let help: String
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Group {
+                if let image {
+                    Image(nsImage: image).resizable().scaledToFit()
+                }
+            }
+            .frame(width: 16, height: 16)
+            .frame(width: 22, height: 22)
+            .background(RoundedRectangle(cornerRadius: 6).fill(hovered ? Palette.iconHover : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(help)
+    }
+}
+
+/// Fills a view's background, switching to `hover` while the pointer is over
+/// it. Keeps the many hover-highlighted controls in the panel to one place.
+private struct FillOnHover: ViewModifier {
+    let base: Color
+    let hover: Color
+    let cornerRadius: CGFloat
+
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: cornerRadius).fill(hovering ? hover : base))
+            .onHover { hovering = $0 }
+    }
+}
+
+/// The fixed light palette from the "Lumberjack popover redesign" spec.
+private enum Palette {
+    static let card = Color(hex: 0xffffff)
+    static let sectionFill = Color(hex: 0xfbfbfd)
+    static let hairline = Color(hex: 0xeceef2)
+    static let rowDivider = Color(hex: 0xf1f2f6)
+
+    static let titleText = Color(hex: 0x1f2430)
+    static let bodyText = Color(hex: 0x333333)
+    static let subtleText = Color(hex: 0x6b7280)
+    static let faintText = Color(hex: 0x9aa0ae)
+
+    static let controlBorder = Color(hex: 0xdfe2e9)
+    static let buttonHover = Color(hex: 0xf4f5f9)
+    static let rowHover = Color(hex: 0xf6f7fa)
+    static let iconHover = Color(hex: 0xeceef3)
+
+    static let iconBoxFill = Color(hex: 0xeef3ee)
+    static let iconBoxBorder = Color(hex: 0xdbe6dc)
+    static let treeGreen = Color(hex: 0x2f7d46)
+
+    static let primary = Color(hex: 0x000081)
+
+    static let dotGreen = Color(hex: 0x2f9e52)
+    static let dotAmber = Color(hex: 0xd98b1f)
+    static let dotBlue = Color(hex: 0x4b4bc8)
+    static let dotGrey = Color(hex: 0x9aa0ae)
+
+    static let pillGreenBg = Color(hex: 0xeef6f0)
+    static let pillGreenBorder = Color(hex: 0xd8e7dc)
+    static let pillWarnBg = Color(hex: 0xfdf3e3)
+    static let pillWarnBorder = Color(hex: 0xf0dcbb)
+    static let pillBlueBg = Color(hex: 0xeeeef8)
+    static let pillGreyBg = Color(hex: 0xf1f2f6)
+
+    static let warnText = Color(hex: 0x8a5200)
+    static let warnDot = Color(hex: 0xd98b1f)
+
+    static let destructive = Color(hex: 0xb42d2d)
+    static let destructiveDeep = Color(hex: 0x9d2727)
+    static let destructiveBorder = Color(hex: 0xe6d3d3)
+    static let destructiveHover = Color(hex: 0xfdf5f5)
+    static let destructiveTint = Color(hex: 0xfdf7f7)
+}
+
+private extension Color {
+    /// Builds a colour from a 24-bit `0xRRGGBB` literal — lets the palette read
+    /// the same hex values the design spec uses.
+    init(hex: UInt32) {
+        self.init(
+            .sRGB,
+            red: Double((hex >> 16) & 0xff) / 255,
+            green: Double((hex >> 8) & 0xff) / 255,
+            blue: Double(hex & 0xff) / 255,
+            opacity: 1
+        )
     }
 }

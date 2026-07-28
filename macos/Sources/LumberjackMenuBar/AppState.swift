@@ -30,12 +30,26 @@ final class AppState: ObservableObject {
     /// been fetched at least once, so the UI can show a spinner instead of
     /// prematurely claiming "No worktrees" during the first poll.
     @Published private(set) var worktreesLoaded: Bool = false
+    /// Worktree count per repository (keyed by local path), so the repository
+    /// switcher can show "N branches" for every repo, not just the selected
+    /// one. Populated as a side effect of the same per-repo listing the diff
+    /// notifier already performs each poll.
+    @Published private(set) var worktreeCountsByRepo: [String: Int] = [:]
+    /// True while a "Sync all" fan-out is in flight, so the footer can show
+    /// progress and avoid launching overlapping syncs.
+    @Published private(set) var syncing = false
     @Published var selectedRepository: String? {
         didSet {
             guard selectedRepository != oldValue else { return }
             worktrees = []
             worktreesLoaded = false
         }
+    }
+
+    /// The currently selected repository object, for details the worktree list
+    /// needs (GitHub owner/host to build pull-request URLs).
+    var selectedRepositoryObject: Lumberjack_V1_Repository? {
+        repositories.first { $0.localPath == selectedRepository }
     }
 
     private let pollInterval: UInt64
@@ -64,6 +78,21 @@ final class AppState: ObservableObject {
             Task { await client.close() }
         }
         client = nil
+    }
+
+    /// Reconciles every tracked repository (the footer's "Sync all"), then
+    /// refreshes once so the resulting worktree states show immediately rather
+    /// than on the next poll tick.
+    func syncAll() {
+        guard let client, !syncing else { return }
+        syncing = true
+        Task {
+            for repo in repositories {
+                try? await client.sync(repository: repo.localPath)
+            }
+            syncing = false
+            await refreshOnce()
+        }
     }
 
     private func refreshLoop() async {
@@ -105,14 +134,17 @@ final class AppState: ObservableObject {
 
             pruneKnownWorktrees(tracking: repos.map(\.localPath))
 
+            var counts: [String: Int] = [:]
             for repo in repos {
                 let current = try await client.listWorktrees(repository: repo.localPath)
+                counts[repo.localPath] = current.count
                 diffAndNotify(repository: repo.githubName, worktrees: current, key: repo.localPath)
                 if repo.localPath == selectedRepository {
                     worktrees = current.sorted { $0.branchName < $1.branchName }
                     worktreesLoaded = true
                 }
             }
+            worktreeCountsByRepo = counts
         } catch {
             // A transient RPC failure between two successful health checks;
             // leave the last-known-good data on screen and retry next tick.

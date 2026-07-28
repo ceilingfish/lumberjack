@@ -36,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hosting.sizingOptions = .preferredContentSize
         popover.contentViewController = hosting
         popover.behavior = .transient
+        // The panel is designed as a light "card" with a fixed palette; pin it
+        // to the light appearance so it reads the same whether or not the
+        // system is in dark mode.
+        popover.appearance = NSAppearance(named: .aqua)
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.image = NSImage(systemSymbolName: "tree", accessibilityDescription: "Lumberjack")

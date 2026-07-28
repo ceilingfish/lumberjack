@@ -1,37 +1,53 @@
 import AppKit
 
-/// Opening a worktree's directory from the UI: in Finder (double-click) or in
-/// VS Code (the trailing button). VS Code support is conditional on it being
-/// installed — resolved once via Launch Services — so the button only appears
-/// when there's actually an editor to launch.
+/// Opening a worktree's directory from the UI: reveal in Finder, open a shell
+/// in Terminal, or open the folder in VS Code. Finder and Terminal are always
+/// present on macOS; VS Code is conditional on being installed (resolved once
+/// via Launch Services) so its button only appears when there's an editor to
+/// launch. Each action's button uses the real application icon, fetched from
+/// Launch Services rather than bundled bitmaps, so it stays crisp and matches
+/// whatever the user actually has installed.
 @MainActor
 enum WorktreeActions {
-    /// The installed VS Code application, or nil if it isn't installed.
-    /// Resolved once: Launch Services' answer doesn't change while we run.
+    private static let finderURL = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+    private static let terminalURL: URL? =
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal")
     static let vscodeURL: URL? =
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode")
 
-    private static var cachedIcon: NSImage?
+    private static var iconCache: [String: NSImage] = [:]
 
-    /// VS Code's own app icon, for the "open in VS Code" button. nil when VS
-    /// Code isn't installed (so the button is hidden entirely).
-    static var vscodeIcon: NSImage? {
-        if let cachedIcon { return cachedIcon }
-        guard let vscodeURL else { return nil }
-        let icon = NSWorkspace.shared.icon(forFile: vscodeURL.path)
-        cachedIcon = icon
+    /// The application icon at `url`, memoised — Launch Services' answer
+    /// doesn't change while we run.
+    private static func icon(for url: URL?) -> NSImage? {
+        guard let url else { return nil }
+        if let cached = iconCache[url.path] { return cached }
+        let icon = NSWorkspace.shared.icon(forFile: url.path)
+        iconCache[url.path] = icon
         return icon
     }
+
+    static var finderIcon: NSImage? { icon(for: finderURL) }
+    static var terminalIcon: NSImage? { icon(for: terminalURL) }
+    static var vscodeIcon: NSImage? { icon(for: vscodeURL) }
 
     static func openInFinder(_ path: String) {
         NSWorkspace.shared.open(URL(fileURLWithPath: path))
     }
 
+    static func openInTerminal(_ path: String) {
+        open(path, with: terminalURL)
+    }
+
     static func openInVSCode(_ path: String) {
-        guard let vscodeURL else { return }
+        open(path, with: vscodeURL)
+    }
+
+    private static func open(_ path: String, with app: URL?) {
+        guard let app else { return }
         NSWorkspace.shared.open(
             [URL(fileURLWithPath: path)],
-            withApplicationAt: vscodeURL,
+            withApplicationAt: app,
             configuration: NSWorkspace.OpenConfiguration()
         )
     }
