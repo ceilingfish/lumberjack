@@ -270,13 +270,15 @@ func (s *Server) syncOne(stream grpc.ServerStreamingServer[lumberjackv1.SyncResp
 // Tidy moves misplaced worktrees back to their idiomatic locations, for one
 // repository (req.Repository set) or every tracked one (empty).
 func (s *Server) Tidy(ctx context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
+	// A worktree reference is only unambiguous within one repository. Rejected on
+	// the request, not on how many repositories happen to be tracked, so the same
+	// command is not valid on a one-repo machine and invalid on the next.
+	if req.GetWorktree() != "" && req.GetRepository() == "" {
+		return nil, status.Error(codes.InvalidArgument, "worktree requires a repository")
+	}
 	repos, err := s.resolveScope(ctx, req.GetRepository())
 	if err != nil {
 		return nil, err
-	}
-	if req.GetWorktree() != "" && len(repos) > 1 {
-		// A worktree reference is only unambiguous within one repository.
-		return nil, status.Error(codes.InvalidArgument, "worktree requires a repository")
 	}
 	resp := &lumberjackv1.TidyResponse{}
 	for _, repo := range repos {

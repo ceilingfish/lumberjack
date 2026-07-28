@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -514,21 +515,31 @@ func TestServerTidyUnknownWorktree(t *testing.T) {
 
 // A worktree reference only makes sense within one repository, so pairing it
 // with the all-repositories scope is rejected rather than guessed at.
+// A worktree reference without a repository is rejected on the request alone,
+// so the same command is not accepted on a machine tracking one repository and
+// refused on a machine tracking two.
 func TestServerTidyWorktreeWithoutRepositoryRejected(t *testing.T) {
-	h := newHarness(t)
-	srv := newServer(h)
-	h.repo(t)
-	second := &schema.Repository{
-		LocalPath: filepath.Join(h.parent, "m"), WorktreeParentDir: h.parent,
-		DirPrefix: "m", GithubOwner: "o", GithubName: "m",
-		DefaultRemote: "origin", Host: "github.com",
-	}
-	if err := h.db.CreateRepository(context.Background(), second); err != nil {
-		t.Fatalf("CreateRepository: %v", err)
-	}
+	for _, repos := range []int{1, 2} {
+		t.Run(fmt.Sprintf("%d-tracked", repos), func(t *testing.T) {
+			h := newHarness(t)
+			srv := newServer(h)
+			h.repo(t)
+			for i := 1; i < repos; i++ {
+				name := fmt.Sprintf("m%d", i)
+				extra := &schema.Repository{
+					LocalPath: filepath.Join(h.parent, name), WorktreeParentDir: h.parent,
+					DirPrefix: name, GithubOwner: "o", GithubName: name,
+					DefaultRemote: "origin", Host: "github.com",
+				}
+				if err := h.db.CreateRepository(context.Background(), extra); err != nil {
+					t.Fatalf("CreateRepository: %v", err)
+				}
+			}
 
-	_, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{Worktree: "feature/foo"})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("expected InvalidArgument, got %v", err)
+			_, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{Worktree: "feature/foo"})
+			if status.Code(err) != codes.InvalidArgument {
+				t.Errorf("expected InvalidArgument, got %v", err)
+			}
+		})
 	}
 }

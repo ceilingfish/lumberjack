@@ -26,7 +26,9 @@ func newTidyCmd() *cobra.Command {
 			"with `git worktree move` and its tracked location updated.\n\n" +
 			"Worktrees already in place are left alone and not reported. One that " +
 			"cannot be moved — its destination is occupied, or git has it locked — " +
-			"is reported with the reason, and the rest are still tidied.\n\n" +
+			"is reported with the reason, and the rest are still tidied. A worktree " +
+			"blocked by one that this run moved away is tidied by running the " +
+			"command again.\n\n" +
 			"--worktree BRANCH_OR_DIR narrows the tidy to a single worktree. The " +
 			"repository's other worktrees still hold their directories, so a " +
 			"narrowed tidy can never move one worktree onto another's path.\n\n" +

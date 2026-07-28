@@ -35,6 +35,14 @@ type TidyMove struct {
 // gone — is reported with Err set and the rest are still tidied; only a
 // failure to enumerate the worktrees is returned as an error.
 //
+// One pass, so a chain resolves over successive runs: when A's destination is
+// the directory B is itself moving out of, whether A moves in this pass depends
+// on the arbitrary order the rows come back in. A blocked A is reported as
+// occupied and moves on the next run, once B has vacated. Deliberately not
+// ordered or retried — a chain needs a branch to have been renamed onto another
+// worktree's slug, and running tidy again is a cheaper remedy than a
+// topological sort that still cannot break a cycle without a scratch directory.
+//
 // ref, when non-empty, restricts the tidy to the single worktree it names (a
 // branch, directory path, or directory base name — schema.Worktree.Matches),
 // returning database.ErrWorktreeNotFound when nothing matches. Every other
@@ -106,7 +114,7 @@ func (s *Service) tidyOne(
 
 	switch {
 	case occupied[want]:
-		m.Err = "destination is already tracked by another worktree"
+		m.Err = "destination is already tracked by another worktree; run tidy again if that one moves"
 		return m
 	case pathExists(want):
 		// Load-bearing, not just courtesy: `git worktree move` onto an existing
