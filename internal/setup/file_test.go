@@ -40,13 +40,13 @@ func TestRemoveCommand(t *testing.T) {
 	}
 }
 
-func TestLoadMissingFileIsEmpty(t *testing.T) {
-	cfg, err := Load(t.TempDir())
+func TestLoadIfPresentMissingFile(t *testing.T) {
+	cfg, found, err := loadIfPresent(configPath(t.TempDir()))
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("loadIfPresent: %v", err)
 	}
-	if len(cfg.Steps) != 0 {
-		t.Fatalf("got %d steps, want an empty config for a missing file", len(cfg.Steps))
+	if found || cfg != nil {
+		t.Fatalf("loadIfPresent = (%v, %v), want (nil, false) for a missing file", cfg, found)
 	}
 }
 
@@ -60,9 +60,12 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, err := Load(dir)
+	got, found, err := loadIfPresent(configPath(dir))
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("loadIfPresent: %v", err)
+	}
+	if !found {
+		t.Fatal("loadIfPresent: want the saved file to be found")
 	}
 	if len(got.Steps) != 2 {
 		t.Fatalf("got %d steps after round trip, want 2", len(got.Steps))
