@@ -26,6 +26,9 @@ type GitOps interface {
 	Pull(ctx context.Context, repoPath string) error
 	AddWorktree(ctx context.Context, repoPath, dir, remote, branch string) error
 	RemoveWorktree(ctx context.Context, repoPath, dir string, force bool) error
+	// MoveWorktree relocates a worktree, so `tidy` can put one back in the
+	// location the naming convention gives it.
+	MoveWorktree(ctx context.Context, repoPath, from, to string) error
 	// ListWorktrees enumerates the worktrees already registered on the repo,
 	// so sync can adopt directories checked out by hand instead of failing to
 	// recreate them.

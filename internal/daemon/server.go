@@ -236,23 +236,9 @@ func (s *Server) DeleteRepository(ctx context.Context, req *lumberjackv1.DeleteR
 // Sync reconciles one repository (req.Repository set) or every tracked
 // repository (empty), streaming progress as it runs.
 func (s *Server) Sync(req *lumberjackv1.SyncRequest, stream grpc.ServerStreamingServer[lumberjackv1.SyncResponse]) error {
-	ctx := stream.Context()
-
-	var repos []*schema.Repository
-	if ref := req.GetRepository(); ref != "" {
-		repo, err := s.db.FindRepository(ctx, ref)
-		if err != nil {
-			return toStatus(err)
-		}
-		repos = append(repos, repo)
-	} else {
-		all, err := s.db.ListRepositories(ctx)
-		if err != nil {
-			return toStatus(err)
-		}
-		for i := range all {
-			repos = append(repos, &all[i])
-		}
+	repos, err := s.resolveScope(stream.Context(), req.GetRepository())
+	if err != nil {
+		return err
 	}
 
 	for _, repo := range repos {
@@ -279,6 +265,56 @@ func (s *Server) syncOne(stream grpc.ServerStreamingServer[lumberjackv1.SyncResp
 		Completed:  true,
 		Summary:    toProtoSyncSummary(created, removed, syncErr),
 	})
+}
+
+// Tidy moves misplaced worktrees back to their idiomatic locations, for one
+// repository (req.Repository set) or every tracked one (empty).
+func (s *Server) Tidy(ctx context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
+	repos, err := s.resolveScope(ctx, req.GetRepository())
+	if err != nil {
+		return nil, err
+	}
+	if req.GetWorktree() != "" && len(repos) > 1 {
+		// A worktree reference is only unambiguous within one repository.
+		return nil, status.Error(codes.InvalidArgument, "worktree requires a repository")
+	}
+	resp := &lumberjackv1.TidyResponse{}
+	for _, repo := range repos {
+		moves, err := s.svc.TidyRepository(ctx, repo, req.GetWorktree(), req.GetDryRun())
+		if err != nil {
+			return nil, toStatus(err)
+		}
+		name := displayName(repo)
+		for _, m := range moves {
+			resp.Moves = append(resp.Moves, &lumberjackv1.TidyMove{
+				Repository: name, Branch: m.Branch,
+				From: m.From, To: m.To, Moved: m.Moved, Error: m.Err,
+			})
+		}
+	}
+	return resp, nil
+}
+
+// resolveScope turns a request's repository field into the repositories to
+// operate on: the one it names, or every tracked repository when empty. It is
+// the shared scoping rule for the RPCs that accept either (Sync, Tidy).
+func (s *Server) resolveScope(ctx context.Context, ref string) ([]*schema.Repository, error) {
+	if ref != "" {
+		repo, err := s.db.FindRepository(ctx, ref)
+		if err != nil {
+			return nil, toStatus(err)
+		}
+		return []*schema.Repository{repo}, nil
+	}
+	all, err := s.db.ListRepositories(ctx)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	repos := make([]*schema.Repository, len(all))
+	for i := range all {
+		repos[i] = &all[i]
+	}
+	return repos, nil
 }
 
 // Watch opens a long-lived stream of worktree/repository change events. It

@@ -119,6 +119,46 @@ func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree, color bool) erro
 	return t.flush()
 }
 
+// emitTidyMoves renders tidy's moves per format: a bare JSON array, or a table.
+func emitTidyMoves(w io.Writer, format present.Format, moves []*lumberjackv1.TidyMove, dryRun bool) error {
+	if format == present.JSON {
+		return present.WriteJSONList(w, moves)
+	}
+	return renderTidyMoves(w, moves, dryRun, format == present.Color)
+}
+
+// renderTidyMoves prints a table of the worktrees tidy relocated (or, on a dry
+// run, would relocate), one row per misplaced worktree. Only misplaced
+// worktrees are reported, so an empty list means everything is already in its
+// idiomatic location.
+func renderTidyMoves(w io.Writer, moves []*lumberjackv1.TidyMove, dryRun, color bool) error {
+	if len(moves) == 0 {
+		_, err := fmt.Fprintln(w, "All worktrees are in their idiomatic locations.")
+		return err
+	}
+	t := newTabW(w)
+	t.row("BRANCH\tFROM\tTO\tRESULT\n")
+	for _, m := range moves {
+		t.row("%s\t%s\t%s\t%s\n",
+			present.Branch(m.GetBranch(), color),
+			present.Path(m.GetFrom(), color), present.Path(m.GetTo(), color),
+			tidyResult(m, dryRun, color))
+	}
+	return t.flush()
+}
+
+// tidyResult renders what became of one misplaced worktree.
+func tidyResult(m *lumberjackv1.TidyMove, dryRun, color bool) string {
+	switch {
+	case m.GetError() != "":
+		return present.StatusWarn("⚠ skipped: "+m.GetError(), color)
+	case dryRun:
+		return present.Neutral("would move", color)
+	default:
+		return present.Action("moved", color)
+	}
+}
+
 // renderWorktreeChanges prints a branch/PR/action table of the per-branch
 // changes a sync or init made. It writes nothing when there are no changes.
 func renderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange, color bool) error {

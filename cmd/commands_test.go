@@ -42,6 +42,19 @@ type stubService struct {
 	setupConsentPending  bool
 	setupConsentCommands []string
 	setupConsentGiven    bool
+	// tidyMoves is what Tidy reports; lastTidyTarget/lastTidyDryRun record the
+	// request it received, so tests can assert on scoping and --dry-run.
+	tidyMoves        []*lumberjackv1.TidyMove
+	lastTidyTarget   string
+	lastTidyWorktree string
+	lastTidyDryRun   bool
+}
+
+func (s *stubService) Tidy(_ context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
+	s.lastTidyTarget = req.GetRepository()
+	s.lastTidyWorktree = req.GetWorktree()
+	s.lastTidyDryRun = req.GetDryRun()
+	return &lumberjackv1.TidyResponse{Moves: s.tidyMoves}, nil
 }
 
 func (s *stubService) SetLogin(_ context.Context, req *lumberjackv1.SetLoginRequest) (*lumberjackv1.SetLoginResponse, error) {
@@ -571,5 +584,99 @@ func TestCmdSyncErrorSummary(t *testing.T) {
 	}
 	if !strings.Contains(out, "error") || !strings.Contains(out, "boom") {
 		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdTidyCurrentRepo(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{{
+		Repository: "n", Branch: "feature/foo",
+		From: "/p/n/.claude/worktrees/foo", To: "/p/n-foo", Moved: true,
+	}}}
+	serveStub(t, stub)
+
+	out, err := run(t, "", "tidy")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	cwd, _ := os.Getwd()
+	if stub.lastTidyTarget != cwd {
+		t.Errorf("tidy target = %q, want the cwd %q", stub.lastTidyTarget, cwd)
+	}
+	if stub.lastTidyDryRun {
+		t.Error("tidy sent dry_run without --dry-run")
+	}
+	for _, want := range []string{"feature/foo", "/p/n-foo", "moved"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestCmdTidyDryRun(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{{
+		Repository: "n", Branch: "feature/foo", From: "/elsewhere/foo", To: "/p/n-foo",
+	}}}
+	serveStub(t, stub)
+
+	out, err := run(t, "", "tidy", "--repository", "n", "--dry-run")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if !stub.lastTidyDryRun {
+		t.Error("tidy did not send dry_run for --dry-run")
+	}
+	if !strings.Contains(out, "would move") {
+		t.Errorf("output missing the dry-run verb:\n%s", out)
+	}
+}
+
+func TestCmdTidyWorktreeFlag(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{{
+		Repository: "n", Branch: "feature/foo", From: "/elsewhere/foo", To: "/p/n-foo", Moved: true,
+	}}}
+	serveStub(t, stub)
+
+	out, err := run(t, "", "tidy", "--repository", "n", "--worktree", "feature/foo")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if stub.lastTidyWorktree != "feature/foo" {
+		t.Errorf("tidy worktree = %q, want feature/foo", stub.lastTidyWorktree)
+	}
+}
+
+func TestCmdTidyAllIsUnknownCommand(t *testing.T) {
+	serveStub(t, &stubService{})
+
+	if _, err := run(t, "", "tidy-all"); err == nil {
+		t.Error("tidy-all should not be a command")
+	}
+}
+
+func TestCmdTidyReportsSkippedMove(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{{
+		Repository: "n", Branch: "feature/foo", From: "/elsewhere/foo", To: "/p/n-foo",
+		Error: "destination already exists on disk",
+	}}}
+	serveStub(t, stub)
+
+	out, err := run(t, "", "tidy", "--repository", "n")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "destination already exists on disk") {
+		t.Errorf("output missing the skip reason:\n%s", out)
+	}
+}
+
+func TestCmdTidyNothingToDo(t *testing.T) {
+	serveStub(t, &stubService{})
+
+	out, err := run(t, "", "tidy", "--repository", "n")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "idiomatic locations") {
+		t.Errorf("output missing the all-clear message:\n%s", out)
 	}
 }

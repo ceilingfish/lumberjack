@@ -44,6 +44,10 @@ type fakeGit struct {
 	defaultBranchErr error
 	configFiles      map[string][]byte
 	showFileErr      error
+	// moveErr forces MoveWorktree to fail for a source directory; moves records
+	// the from→to pairs it was asked for.
+	moveErr map[string]error
+	moves   [][2]string
 }
 
 func newFakeGit() *fakeGit {
@@ -81,6 +85,21 @@ func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error
 
 func (f *fakeGit) RemoveWorktree(_ context.Context, _, dir string, _ bool) error {
 	return os.RemoveAll(dir)
+}
+
+// MoveWorktree relocates the directory the way git would, so tidy's tests
+// observe the same on-disk outcome. moveErr, keyed by source directory, forces
+// a move to fail (git refusing a locked worktree, say); moves records each
+// from→to pair for assertions.
+func (f *fakeGit) MoveWorktree(_ context.Context, _, from, to string) error {
+	if err := f.moveErr[from]; err != nil {
+		return err
+	}
+	f.moves = append(f.moves, [2]string{from, to})
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(from, to)
 }
 
 func (f *fakeGit) ListWorktrees(context.Context, string) ([]worktree.Ref, error) {

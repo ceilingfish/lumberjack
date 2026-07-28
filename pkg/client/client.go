@@ -191,6 +191,22 @@ func (c *Client) DeleteRepository(ctx context.Context, ref string) (*lumberjackv
 	return resp, nil
 }
 
+// Tidy moves worktrees that sit outside their idiomatic location back into it,
+// for one repository (ref set) or all of them (ref empty). worktree, when
+// non-empty, restricts the tidy to the single worktree it names (by branch or
+// directory) and requires ref to be set. It returns one move per misplaced
+// worktree — including ones it could not move, whose Error says why. With
+// dryRun set nothing is changed and every move has Moved false.
+func (c *Client) Tidy(ctx context.Context, ref, worktree string, dryRun bool) ([]*lumberjackv1.TidyMove, error) {
+	resp, err := c.svc.Tidy(ctx, &lumberjackv1.TidyRequest{
+		Repository: ref, Worktree: worktree, DryRun: dryRun,
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetMoves(), nil
+}
+
 // Sync reconciles one repository (ref set) or all of them (ref empty),
 // invoking onEvent for each streamed progress update until the stream ends.
 func (c *Client) Sync(ctx context.Context, ref string, onEvent func(*lumberjackv1.SyncResponse) error) error {

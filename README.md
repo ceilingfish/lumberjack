@@ -184,6 +184,7 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack status [--repository NAME]` | Last-sync detail for the repo in the current dir, or the named one. |
 | `lumberjack sync [--repository NAME]` | Reconcile worktrees for the repo in the current dir, or the named one, now. |
 | `lumberjack sync-all` | Sync **all** tracked repositories. |
+| `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR] [--dry-run]` | Move worktrees that aren't in their idiomatic location (`<worktrees dir>/<name>-<branch slug>`) back into it. `--worktree` narrows it to one; `--dry-run` reports without moving. |
 | `lumberjack worktrees [--repository NAME]` | List worktrees for the repo in the current dir, or the named one. |
 | `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
 | `lumberjack set-login [LOGIN] [--repository NAME]` | Set the `gh` account for the repo in the current dir, or the named one. |

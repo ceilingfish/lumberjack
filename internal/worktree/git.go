@@ -124,6 +124,20 @@ func (g *Git) AddWorktree(ctx context.Context, repoPath, dir, remote, branch str
 	return nil
 }
 
+// MoveWorktree relocates the worktree at from to to, letting git rewrite both
+// the worktree's `.git` file and the admin directory's `gitdir` pointer. git
+// refuses when the worktree is locked or when from is the main working tree —
+// conditions the caller reports rather than works around.
+//
+// It does NOT refuse when to already exists: like `mv`, git then moves the
+// worktree *inside* that directory, landing it at to/<basename of from>
+// instead of at to. Callers must therefore check that to is free before
+// calling, or they will record a location the worktree is not at.
+func (g *Git) MoveWorktree(ctx context.Context, repoPath, from, to string) error {
+	_, err := g.run(ctx, repoPath, "worktree", "move", from, to)
+	return err
+}
+
 // RemoveWorktree removes the worktree at dir. force drops the safety checks
 // git applies for dirty or diverged trees; the daemon only sets it after the
 // caller has confirmed the loss (see DeleteWorktree in the proto).
