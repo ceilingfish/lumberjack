@@ -24,13 +24,17 @@ type fakeGit struct {
 	dirty     map[string]bool
 	localOnly map[string]int64
 	addErr    map[string]error // keyed by branch
-	fetchErr  error
-	pullErr   error    // forces Pull to fail
-	pulled    []string // repo paths Pull was called on, for assertions
-	remotes   string
-	remoteErr error
-	remoteURL string
-	urlErr    error
+	// newBranches records, per branch, the base AddWorktreeNewBranch created it
+	// from; newBranchErr forces that fallback to fail, keyed by branch.
+	newBranches  map[string]string
+	newBranchErr map[string]error
+	fetchErr     error
+	pullErr      error    // forces Pull to fail
+	pulled       []string // repo paths Pull was called on, for assertions
+	remotes      string
+	remoteErr    error
+	remoteURL    string
+	urlErr       error
 	// worktrees is what ListWorktrees reports — the worktrees git already has
 	// registered (used to exercise adoption of hand-checked-out directories).
 	// listErr forces the listing to fail.
@@ -48,10 +52,12 @@ type fakeGit struct {
 
 func newFakeGit() *fakeGit {
 	return &fakeGit{
-		dirty:     map[string]bool{},
-		localOnly: map[string]int64{},
-		addErr:    map[string]error{},
-		remotes:   "origin",
+		dirty:        map[string]bool{},
+		localOnly:    map[string]int64{},
+		addErr:       map[string]error{},
+		newBranches:  map[string]string{},
+		newBranchErr: map[string]error{},
+		remotes:      "origin",
 	}
 }
 
@@ -76,6 +82,16 @@ func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error
 	if err := f.addErr[branch]; err != nil {
 		return err
 	}
+	return os.MkdirAll(dir, 0o755)
+}
+
+// AddWorktreeNewBranch records the base each new branch was created from so
+// `worktree add` tests can assert the fallback ran and off which ref.
+func (f *fakeGit) AddWorktreeNewBranch(_ context.Context, _, dir, base, branch string) error {
+	if err := f.newBranchErr[branch]; err != nil {
+		return err
+	}
+	f.newBranches[branch] = base
 	return os.MkdirAll(dir, 0o755)
 }
 

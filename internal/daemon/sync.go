@@ -27,6 +27,10 @@ type GitOps interface {
 	// so a clean checkout tracks the latest default branch.
 	Pull(ctx context.Context, repoPath string) error
 	AddWorktree(ctx context.Context, repoPath, dir, remote, branch string) error
+	// AddWorktreeNewBranch creates a worktree on a branch that exists neither on
+	// the remote nor locally, branched off base — the on-demand `worktree add`
+	// path, which sync itself never takes (a PR's branch always exists already).
+	AddWorktreeNewBranch(ctx context.Context, repoPath, dir, base, branch string) error
 	RemoveWorktree(ctx context.Context, repoPath, dir string, force bool) error
 	// ListWorktrees enumerates the worktrees already registered on the repo,
 	// so sync can adopt directories checked out by hand instead of failing to
@@ -524,7 +528,7 @@ func (s *Service) createWorktree(
 	// created worktree. Failures are recorded on the worktree row and surfaced
 	// via its reconciliation status; they do not fail the sync (the worktree is
 	// kept, per the feature's fail-fast-but-keep design).
-	s.runSetupSteps(ctx, repo, dir, row.ID)
+	_ = s.runSetupSteps(ctx, repo, dir, row.ID)
 	s.emitChange(repo, progress, WorktreeChange{
 		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionCheckedOut, DirectoryPath: dir,
 	})

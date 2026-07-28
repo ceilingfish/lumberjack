@@ -55,6 +55,11 @@ internal protocol Lumberjack_V1_LumberjackServiceClientProtocol: GRPCClient {
     callOptions: CallOptions?
   ) -> UnaryCall<Lumberjack_V1_ListWorktreesRequest, Lumberjack_V1_ListWorktreesResponse>
 
+  func addWorktree(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions?
+  ) -> UnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse>
+
   func deleteWorktree(
     _ request: Lumberjack_V1_DeleteWorktreeRequest,
     callOptions: CallOptions?
@@ -70,6 +75,22 @@ internal protocol Lumberjack_V1_LumberjackServiceClientProtocol: GRPCClient {
     callOptions: CallOptions?,
     handler: @escaping (Lumberjack_V1_SyncResponse) -> Void
   ) -> ServerStreamingCall<Lumberjack_V1_SyncRequest, Lumberjack_V1_SyncResponse>
+
+  func watch(
+    _ request: Lumberjack_V1_WatchRequest,
+    callOptions: CallOptions?,
+    handler: @escaping (Lumberjack_V1_WatchResponse) -> Void
+  ) -> ServerStreamingCall<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse>
+
+  func getSetupConsent(
+    _ request: Lumberjack_V1_GetSetupConsentRequest,
+    callOptions: CallOptions?
+  ) -> UnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse>
+
+  func setSetupConsent(
+    _ request: Lumberjack_V1_SetSetupConsentRequest,
+    callOptions: CallOptions?
+  ) -> UnaryCall<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse>
 }
 
 extension Lumberjack_V1_LumberjackServiceClientProtocol {
@@ -114,7 +135,7 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
     )
   }
 
-  /// ListRepositories lists tracked repos — `lumberjack repositories`.
+  /// ListRepositories lists tracked repos — `lumberjack list`.
   ///
   /// - Parameters:
   ///   - request: Request to send to ListRepositories.
@@ -133,7 +154,7 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
   }
 
   /// GetRepository returns one repo's last-sync detail —
-  /// `lumberjack repositories NAME`.
+  /// `lumberjack status [--repository NAME]`.
   ///
   /// - Parameters:
   ///   - request: Request to send to GetRepository.
@@ -152,8 +173,7 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
   }
 
   /// SetLogin sets the gh account a repository operates under —
-  /// `lumberjack repositories NAME set-login LOGIN` or, from within a tracked
-  /// checkout, `lumberjack set-login LOGIN`. The daemon rejects a login that gh
+  /// `lumberjack set-login LOGIN [--repository NAME]`. The daemon rejects a login that gh
   /// is not authenticated as for the repository's host, or one that authenticates
   /// but cannot reach the repository on GitHub.
   ///
@@ -194,7 +214,7 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
   }
 
   /// ListWorktrees lists a repo's worktrees with live reconciliation status —
-  /// `lumberjack repositories NAME worktrees`.
+  /// `lumberjack worktrees [--repository NAME]`.
   ///
   /// - Parameters:
   ///   - request: Request to send to ListWorktrees.
@@ -212,8 +232,30 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
     )
   }
 
+  /// AddWorktree creates a worktree on demand for a branch, in the same
+  /// conventional location sync would use — `lumberjack worktree add BRANCH
+  /// [--repository NAME]`. The branch may be new (created off the default
+  /// branch), already on the remote, or an existing local branch. The
+  /// repository's setup steps run against the new worktree afterwards.
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to AddWorktree.
+  ///   - callOptions: Call options.
+  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
+  internal func addWorktree(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions? = nil
+  ) -> UnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse> {
+    return self.makeUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeAddWorktreeInterceptors() ?? []
+    )
+  }
+
   /// DeleteWorktree removes a worktree —
-  /// `lumberjack repositories NAME worktree BRANCH_OR_DIRECTORY_NAME delete`.
+  /// `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`.
   ///
   /// - Parameters:
   ///   - request: Request to send to DeleteWorktree.
@@ -252,8 +294,8 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
   }
 
   /// Sync reconciles worktrees against open PRs. With an empty repository it
-  /// syncs everything (`lumberjack repositories --sync`); with one set it syncs
-  /// just that repo (`lumberjack sync`). Progress is streamed back as it runs.
+  /// syncs everything (`lumberjack sync-all`); with one set it syncs
+  /// just that repo (`lumberjack sync [--repository NAME]`). Progress is streamed back as it runs.
   ///
   /// - Parameters:
   ///   - request: Request to send to Sync.
@@ -271,6 +313,75 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeSyncInterceptors() ?? [],
       handler: handler
+    )
+  }
+
+  /// Watch opens a long-lived stream of worktree/repository change events. On
+  /// subscribe it first emits one SNAPSHOT event per tracked repository (each
+  /// carrying that repository's current worktrees), then streams live deltas —
+  /// worktree created/adopted/updated/deleted and repository sync
+  /// started/finished — as they happen. Multiple concurrent Watch calls are
+  /// supported; each gets its own independent feed. A subscriber that falls too
+  /// far behind is disconnected rather than allowed to stall the daemon.
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to Watch.
+  ///   - callOptions: Call options.
+  ///   - handler: A closure called when each response is received from the server.
+  /// - Returns: A `ServerStreamingCall` with futures for the metadata and status.
+  internal func watch(
+    _ request: Lumberjack_V1_WatchRequest,
+    callOptions: CallOptions? = nil,
+    handler: @escaping (Lumberjack_V1_WatchResponse) -> Void
+  ) -> ServerStreamingCall<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse> {
+    return self.makeServerStreamingCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.watch.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeWatchInterceptors() ?? [],
+      handler: handler
+    )
+  }
+
+  /// GetSetupConsent reports whether a repository's `.lumberjack.yml`
+  /// run-command setup steps are pending the local user's consent — either
+  /// never consented, or consented to a config that has since changed. The CLI
+  /// uses this at `init` and on later interactions to prompt for consent.
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to GetSetupConsent.
+  ///   - callOptions: Call options.
+  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
+  internal func getSetupConsent(
+    _ request: Lumberjack_V1_GetSetupConsentRequest,
+    callOptions: CallOptions? = nil
+  ) -> UnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse> {
+    return self.makeUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeGetSetupConsentInterceptors() ?? []
+    )
+  }
+
+  /// SetSetupConsent records the local user's consent to run a repository's
+  /// current trusted `.lumberjack.yml` run-command steps. Consent is bound to
+  /// the config's content: a later change to `.lumberjack.yml` makes it
+  /// pending again.
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to SetSetupConsent.
+  ///   - callOptions: Call options.
+  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
+  internal func setSetupConsent(
+    _ request: Lumberjack_V1_SetSetupConsentRequest,
+    callOptions: CallOptions? = nil
+  ) -> UnaryCall<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse> {
+    return self.makeUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeSetSetupConsentInterceptors() ?? []
     )
   }
 }
@@ -375,6 +486,11 @@ internal protocol Lumberjack_V1_LumberjackServiceAsyncClientProtocol: GRPCClient
     callOptions: CallOptions?
   ) -> GRPCAsyncUnaryCall<Lumberjack_V1_ListWorktreesRequest, Lumberjack_V1_ListWorktreesResponse>
 
+  func makeAddWorktreeCall(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse>
+
   func makeDeleteWorktreeCall(
     _ request: Lumberjack_V1_DeleteWorktreeRequest,
     callOptions: CallOptions?
@@ -389,6 +505,21 @@ internal protocol Lumberjack_V1_LumberjackServiceAsyncClientProtocol: GRPCClient
     _ request: Lumberjack_V1_SyncRequest,
     callOptions: CallOptions?
   ) -> GRPCAsyncServerStreamingCall<Lumberjack_V1_SyncRequest, Lumberjack_V1_SyncResponse>
+
+  func makeWatchCall(
+    _ request: Lumberjack_V1_WatchRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncServerStreamingCall<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse>
+
+  func makeGetSetupConsentCall(
+    _ request: Lumberjack_V1_GetSetupConsentRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse>
+
+  func makeSetSetupConsentCall(
+    _ request: Lumberjack_V1_SetSetupConsentRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse>
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -485,6 +616,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
     )
   }
 
+  internal func makeAddWorktreeCall(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse> {
+    return self.makeAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeAddWorktreeInterceptors() ?? []
+    )
+  }
+
   internal func makeDeleteWorktreeCall(
     _ request: Lumberjack_V1_DeleteWorktreeRequest,
     callOptions: CallOptions? = nil
@@ -518,6 +661,42 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeSyncInterceptors() ?? []
+    )
+  }
+
+  internal func makeWatchCall(
+    _ request: Lumberjack_V1_WatchRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncServerStreamingCall<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse> {
+    return self.makeAsyncServerStreamingCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.watch.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeWatchInterceptors() ?? []
+    )
+  }
+
+  internal func makeGetSetupConsentCall(
+    _ request: Lumberjack_V1_GetSetupConsentRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse> {
+    return self.makeAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeGetSetupConsentInterceptors() ?? []
+    )
+  }
+
+  internal func makeSetSetupConsentCall(
+    _ request: Lumberjack_V1_SetSetupConsentRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse> {
+    return self.makeAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeSetSetupConsentInterceptors() ?? []
     )
   }
 }
@@ -608,6 +787,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
     )
   }
 
+  internal func addWorktree(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions? = nil
+  ) async throws -> Lumberjack_V1_AddWorktreeResponse {
+    return try await self.performAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeAddWorktreeInterceptors() ?? []
+    )
+  }
+
   internal func deleteWorktree(
     _ request: Lumberjack_V1_DeleteWorktreeRequest,
     callOptions: CallOptions? = nil
@@ -641,6 +832,42 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeSyncInterceptors() ?? []
+    )
+  }
+
+  internal func watch(
+    _ request: Lumberjack_V1_WatchRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncResponseStream<Lumberjack_V1_WatchResponse> {
+    return self.performAsyncServerStreamingCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.watch.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeWatchInterceptors() ?? []
+    )
+  }
+
+  internal func getSetupConsent(
+    _ request: Lumberjack_V1_GetSetupConsentRequest,
+    callOptions: CallOptions? = nil
+  ) async throws -> Lumberjack_V1_GetSetupConsentResponse {
+    return try await self.performAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeGetSetupConsentInterceptors() ?? []
+    )
+  }
+
+  internal func setSetupConsent(
+    _ request: Lumberjack_V1_SetSetupConsentRequest,
+    callOptions: CallOptions? = nil
+  ) async throws -> Lumberjack_V1_SetSetupConsentResponse {
+    return try await self.performAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeSetSetupConsentInterceptors() ?? []
     )
   }
 }
@@ -685,6 +912,9 @@ internal protocol Lumberjack_V1_LumberjackServiceClientInterceptorFactoryProtoco
   /// - Returns: Interceptors to use when invoking 'listWorktrees'.
   func makeListWorktreesInterceptors() -> [ClientInterceptor<Lumberjack_V1_ListWorktreesRequest, Lumberjack_V1_ListWorktreesResponse>]
 
+  /// - Returns: Interceptors to use when invoking 'addWorktree'.
+  func makeAddWorktreeInterceptors() -> [ClientInterceptor<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse>]
+
   /// - Returns: Interceptors to use when invoking 'deleteWorktree'.
   func makeDeleteWorktreeInterceptors() -> [ClientInterceptor<Lumberjack_V1_DeleteWorktreeRequest, Lumberjack_V1_DeleteWorktreeResponse>]
 
@@ -693,6 +923,15 @@ internal protocol Lumberjack_V1_LumberjackServiceClientInterceptorFactoryProtoco
 
   /// - Returns: Interceptors to use when invoking 'sync'.
   func makeSyncInterceptors() -> [ClientInterceptor<Lumberjack_V1_SyncRequest, Lumberjack_V1_SyncResponse>]
+
+  /// - Returns: Interceptors to use when invoking 'watch'.
+  func makeWatchInterceptors() -> [ClientInterceptor<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse>]
+
+  /// - Returns: Interceptors to use when invoking 'getSetupConsent'.
+  func makeGetSetupConsentInterceptors() -> [ClientInterceptor<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse>]
+
+  /// - Returns: Interceptors to use when invoking 'setSetupConsent'.
+  func makeSetSetupConsentInterceptors() -> [ClientInterceptor<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse>]
 }
 
 internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
@@ -707,9 +946,13 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setLogin,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.listLogins,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.listWorktrees,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.deleteWorktree,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.deleteRepository,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.sync,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.watch,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent,
     ]
   )
 
@@ -756,6 +999,12 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       type: GRPCCallType.unary
     )
 
+    internal static let addWorktree = GRPCMethodDescriptor(
+      name: "AddWorktree",
+      path: "/lumberjack.v1.LumberjackService/AddWorktree",
+      type: GRPCCallType.unary
+    )
+
     internal static let deleteWorktree = GRPCMethodDescriptor(
       name: "DeleteWorktree",
       path: "/lumberjack.v1.LumberjackService/DeleteWorktree",
@@ -772,6 +1021,24 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       name: "Sync",
       path: "/lumberjack.v1.LumberjackService/Sync",
       type: GRPCCallType.serverStreaming
+    )
+
+    internal static let watch = GRPCMethodDescriptor(
+      name: "Watch",
+      path: "/lumberjack.v1.LumberjackService/Watch",
+      type: GRPCCallType.serverStreaming
+    )
+
+    internal static let getSetupConsent = GRPCMethodDescriptor(
+      name: "GetSetupConsent",
+      path: "/lumberjack.v1.LumberjackService/GetSetupConsent",
+      type: GRPCCallType.unary
+    )
+
+    internal static let setSetupConsent = GRPCMethodDescriptor(
+      name: "SetSetupConsent",
+      path: "/lumberjack.v1.LumberjackService/SetSetupConsent",
+      type: GRPCCallType.unary
     )
   }
 }

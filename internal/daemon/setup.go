@@ -13,16 +13,18 @@ import (
 // freshly created worktree at dir, recording the failing step (if any) on the
 // worktree row so it surfaces on its reconciliation status. It never returns
 // an error: per the feature's fail-fast-but-keep design, a setup failure does
-// not fail the clone or the sync, it is only surfaced.
-func (s *Service) runSetupSteps(ctx context.Context, repo *schema.Repository, dir string, worktreeID int64) {
+// not fail the clone or the sync, it is only surfaced. The recorded failure is
+// returned (empty on success) so a caller driving one worktree — `worktree
+// add` — can report it inline instead of waiting for a later status read.
+func (s *Service) runSetupSteps(ctx context.Context, repo *schema.Repository, dir string, worktreeID int64) string {
 	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
 	if err != nil {
 		msg := fmt.Sprintf("loading %s: %v", setup.ConfigFileName, err)
 		s.recordSetupError(ctx, worktreeID, &msg)
-		return
+		return msg
 	}
 	if cfg == nil || len(cfg.Steps) == 0 {
-		return
+		return ""
 	}
 
 	consented := cfg.HasRunCommands() && repo.SetupConsentFingerprint != "" &&
@@ -36,10 +38,11 @@ func (s *Service) runSetupSteps(ctx context.Context, repo *schema.Repository, di
 	if runErr != nil {
 		msg := fmt.Sprintf("%s failed: %v", failedStep, runErr)
 		s.recordSetupError(ctx, worktreeID, &msg)
-		return
+		return msg
 	}
 	// Clear any stale failure from a previous attempt at this directory.
 	s.recordSetupError(ctx, worktreeID, nil)
+	return ""
 }
 
 // recordSetupError stores (or clears) a worktree's setup failure. It logs
