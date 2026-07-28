@@ -28,6 +28,7 @@ The gRPC contract is the boundary between the two. Design implications:
 - **Non-trivial task logic lives in `scripts/`, not inline in `.mise.toml`.** `mise` tasks should stay one-liners that call a script in `scripts/` (e.g. `scripts/coverage.sh`).
 - **Tests live next to the code**, in the same package directory as the code they test.
 - **Ship as a single self-contained binary** — no cgo, no C toolchain, no bundled libraries. Everything Lumberjack owns (SQLite engine, migrations) is compiled or embedded into the one executable. The exceptions are **`git` and `gh`, which are required host prerequisites**: Lumberjack shells out to the system `git` for all worktree operations and to the GitHub CLI (`gh`) for GitHub API access and authentication, rather than reimplementing them. Reusing `gh` also lets Lumberjack inherit the user's existing `gh auth login` credentials.
+- All new feature requests should, by default, be created in a new worktree using the currently installed `lumberjack` command.
 
 ## Shell completion
 
