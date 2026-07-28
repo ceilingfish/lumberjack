@@ -20,6 +20,7 @@ func newWorktreeCmd() *cobra.Command {
 		Use:   "worktree",
 		Short: "Manage a repository's worktrees",
 	}
+	c.AddCommand(newWorktreeAddCmd())
 	c.AddCommand(newWorktreeDeleteCmd())
 	return c
 }

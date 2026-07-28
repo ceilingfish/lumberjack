@@ -185,6 +185,7 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack sync [--repository NAME]` | Reconcile worktrees for the repo in the current dir, or the named one, now. |
 | `lumberjack sync-all` | Sync **all** tracked repositories. |
 | `lumberjack worktrees [--repository NAME]` | List worktrees for the repo in the current dir, or the named one. |
+| `lumberjack worktree add BRANCH [--repository NAME]` | Create a worktree for `BRANCH` in the conventional location and run the repo's setup steps. Creates the branch off the default branch if it doesn't exist yet. |
 | `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
 | `lumberjack set-login [LOGIN] [--repository NAME]` | Set the `gh` account for the repo in the current dir, or the named one. |
 | `lumberjack setup-steps add/remove/list COMMAND` | Manage the current worktree's `.lumberjack.yml` run-command setup steps. |

@@ -49,6 +49,13 @@ service LumberjackService {
   // `lumberjack worktrees [--repository NAME]`.
   rpc ListWorktrees(ListWorktreesRequest) returns (ListWorktreesResponse);
 
+  // AddWorktree creates a worktree on demand for a branch, in the same
+  // conventional location sync would use — `lumberjack worktree add BRANCH
+  // [--repository NAME]`. The branch may be new (created off the default
+  // branch), already on the remote, or an existing local branch. The
+  // repository's setup steps run against the new worktree afterwards.
+  rpc AddWorktree(AddWorktreeRequest) returns (AddWorktreeResponse);
+
   // DeleteWorktree removes a worktree —
   // `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`.
   rpc DeleteWorktree(DeleteWorktreeRequest) returns (DeleteWorktreeResponse);
@@ -277,6 +284,27 @@ message ListWorktreesRequest {
 
 message ListWorktreesResponse {
   repeated Worktree worktrees = 1;
+}
+
+message AddWorktreeRequest {
+  string repository = 1;
+  // The branch to check out. Created off the repository's default branch when
+  // it exists neither on the remote nor locally.
+  string branch = 2;
+}
+
+message AddWorktreeResponse {
+  // Absolute path of the created worktree.
+  string directory_path = 1;
+  // The branch checked out there.
+  string branch = 2;
+  // True when the branch was created for this worktree rather than checked out
+  // from an existing remote or local branch.
+  bool branch_created = 3;
+  // The setup-step failure, if any. The worktree is created and tracked
+  // regardless (setup failures are surfaced, not fatal); empty on success or
+  // when the repository declares no setup steps.
+  string setup_error = 4;
 }
 
 message DeleteWorktreeRequest {

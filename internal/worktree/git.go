@@ -124,6 +124,15 @@ func (g *Git) AddWorktree(ctx context.Context, repoPath, dir, remote, branch str
 	return nil
 }
 
+// AddWorktreeNewBranch creates a worktree at dir on a branch that does not
+// exist yet, branched off base (e.g. "origin/main"). It is what `worktree add`
+// falls back to for a brand-new branch, which AddWorktree cannot check out
+// because neither remote/branch nor a local branch exists.
+func (g *Git) AddWorktreeNewBranch(ctx context.Context, repoPath, dir, base, branch string) error {
+	_, err := g.run(ctx, repoPath, "worktree", "add", "-b", branch, dir, base)
+	return err
+}
+
 // RemoveWorktree removes the worktree at dir. force drops the safety checks
 // git applies for dirty or diverged trees; the daemon only sets it after the
 // caller has confirmed the loss (see DeleteWorktree in the proto).

@@ -35,6 +35,7 @@ const (
 	LumberjackService_SetLogin_FullMethodName         = "/lumberjack.v1.LumberjackService/SetLogin"
 	LumberjackService_ListLogins_FullMethodName       = "/lumberjack.v1.LumberjackService/ListLogins"
 	LumberjackService_ListWorktrees_FullMethodName    = "/lumberjack.v1.LumberjackService/ListWorktrees"
+	LumberjackService_AddWorktree_FullMethodName      = "/lumberjack.v1.LumberjackService/AddWorktree"
 	LumberjackService_DeleteWorktree_FullMethodName   = "/lumberjack.v1.LumberjackService/DeleteWorktree"
 	LumberjackService_DeleteRepository_FullMethodName = "/lumberjack.v1.LumberjackService/DeleteRepository"
 	LumberjackService_Sync_FullMethodName             = "/lumberjack.v1.LumberjackService/Sync"
@@ -73,6 +74,12 @@ type LumberjackServiceClient interface {
 	// ListWorktrees lists a repo's worktrees with live reconciliation status —
 	// `lumberjack worktrees [--repository NAME]`.
 	ListWorktrees(ctx context.Context, in *ListWorktreesRequest, opts ...grpc.CallOption) (*ListWorktreesResponse, error)
+	// AddWorktree creates a worktree on demand for a branch, in the same
+	// conventional location sync would use — `lumberjack worktree add BRANCH
+	// [--repository NAME]`. The branch may be new (created off the default
+	// branch), already on the remote, or an existing local branch. The
+	// repository's setup steps run against the new worktree afterwards.
+	AddWorktree(ctx context.Context, in *AddWorktreeRequest, opts ...grpc.CallOption) (*AddWorktreeResponse, error)
 	// DeleteWorktree removes a worktree —
 	// `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`.
 	DeleteWorktree(ctx context.Context, in *DeleteWorktreeRequest, opts ...grpc.CallOption) (*DeleteWorktreeResponse, error)
@@ -176,6 +183,16 @@ func (c *lumberjackServiceClient) ListWorktrees(ctx context.Context, in *ListWor
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListWorktreesResponse)
 	err := c.cc.Invoke(ctx, LumberjackService_ListWorktrees_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lumberjackServiceClient) AddWorktree(ctx context.Context, in *AddWorktreeRequest, opts ...grpc.CallOption) (*AddWorktreeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddWorktreeResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_AddWorktree_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -290,6 +307,12 @@ type LumberjackServiceServer interface {
 	// ListWorktrees lists a repo's worktrees with live reconciliation status —
 	// `lumberjack worktrees [--repository NAME]`.
 	ListWorktrees(context.Context, *ListWorktreesRequest) (*ListWorktreesResponse, error)
+	// AddWorktree creates a worktree on demand for a branch, in the same
+	// conventional location sync would use — `lumberjack worktree add BRANCH
+	// [--repository NAME]`. The branch may be new (created off the default
+	// branch), already on the remote, or an existing local branch. The
+	// repository's setup steps run against the new worktree afterwards.
+	AddWorktree(context.Context, *AddWorktreeRequest) (*AddWorktreeResponse, error)
 	// DeleteWorktree removes a worktree —
 	// `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`.
 	DeleteWorktree(context.Context, *DeleteWorktreeRequest) (*DeleteWorktreeResponse, error)
@@ -349,6 +372,9 @@ func (UnimplementedLumberjackServiceServer) ListLogins(context.Context, *ListLog
 }
 func (UnimplementedLumberjackServiceServer) ListWorktrees(context.Context, *ListWorktreesRequest) (*ListWorktreesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListWorktrees not implemented")
+}
+func (UnimplementedLumberjackServiceServer) AddWorktree(context.Context, *AddWorktreeRequest) (*AddWorktreeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AddWorktree not implemented")
 }
 func (UnimplementedLumberjackServiceServer) DeleteWorktree(context.Context, *DeleteWorktreeRequest) (*DeleteWorktreeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorktree not implemented")
@@ -515,6 +541,24 @@ func _LumberjackService_ListWorktrees_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LumberjackService_AddWorktree_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddWorktreeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).AddWorktree(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_AddWorktree_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).AddWorktree(ctx, req.(*AddWorktreeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _LumberjackService_DeleteWorktree_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteWorktreeRequest)
 	if err := dec(in); err != nil {
@@ -643,6 +687,10 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListWorktrees",
 			Handler:    _LumberjackService_ListWorktrees_Handler,
+		},
+		{
+			MethodName: "AddWorktree",
+			Handler:    _LumberjackService_AddWorktree_Handler,
 		},
 		{
 			MethodName: "DeleteWorktree",
