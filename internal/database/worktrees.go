@@ -44,26 +44,18 @@ func (c *Client) FindWorktree(ctx context.Context, repoID int64, ref string) (*s
 	return nil, ErrWorktreeNotFound
 }
 
-// SetWorktreePR links a worktree row to a PR number (or clears it when nil).
-// It lets sync associate an adopted worktree — tracked by branch but with no PR
-// yet — to the open PR whose branch it holds, without recreating anything.
-func (c *Client) SetWorktreePR(ctx context.Context, id int64, prNumber *int64) error {
+// SetWorktreePR links a worktree row to a PR number (or clears it when nil) and
+// records the branch the directory now holds. It lets sync associate an adopted
+// worktree — tracked by branch but with no PR yet — to the open PR whose branch
+// it holds, without recreating anything, correcting the stored branch name in
+// the same statement for when it has gone stale (the branch checked out there
+// was changed outside Lumberjack).
+func (c *Client) SetWorktreePR(ctx context.Context, id int64, prNumber *int64, branch string) error {
 	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
 		Set("github_pr_number = ?", prNumber).
-		Where("id = ?", id).Exec(ctx); err != nil {
-		return fmt.Errorf("updating worktree PR: %w", err)
-	}
-	return nil
-}
-
-// SetWorktreeBranch records the branch a worktree directory now holds, for when
-// the stored name has gone stale (the branch checked out there was changed
-// outside Lumberjack).
-func (c *Client) SetWorktreeBranch(ctx context.Context, id int64, branch string) error {
-	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
 		Set("branch_name = ?", branch).
 		Where("id = ?", id).Exec(ctx); err != nil {
-		return fmt.Errorf("updating worktree branch: %w", err)
+		return fmt.Errorf("updating worktree PR: %w", err)
 	}
 	return nil
 }

@@ -430,17 +430,11 @@ func (s *Service) linkWorktree(
 	progress progressFn, errs *[]error,
 ) {
 	n := num
-	if err := s.db.SetWorktreePR(ctx, wt.ID, &n); err != nil {
+	// The row was matched on the branch git has checked out, which can differ
+	// from the stored one, so the link also records the branch it actually holds.
+	if err := s.db.SetWorktreePR(ctx, wt.ID, &n, pr.HeadBranch); err != nil {
 		*errs = append(*errs, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err))
 		return
-	}
-	// The row was matched on the branch git has checked out, which can differ
-	// from the stored one; record the branch the worktree actually holds.
-	if wt.BranchName != pr.HeadBranch {
-		if err := s.db.SetWorktreeBranch(ctx, wt.ID, pr.HeadBranch); err != nil {
-			*errs = append(*errs, fmt.Errorf("updating branch of worktree %s: %w", wt.DirectoryPath, err))
-			return
-		}
 	}
 	s.emitChange(repo, progress, WorktreeChange{
 		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionUpdated,
