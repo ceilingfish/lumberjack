@@ -28,6 +28,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private let state = AppState()
 
+    /// Key under which our menu-bar slot is remembered. Unique to us, so the
+    /// stored position can't be confused with another app's.
+    private static let statusItemAutosaveName = "com.ceilingfish.lumberjack.menubar.statusItem"
+
+    /// Points from the right-hand edge of the menu bar. Far enough left to sit
+    /// clear of the system items (Control Center is ~180, Now Playing ~330)
+    /// without reaching the notch on built-in displays.
+    private static let defaultMenuBarPosition = 640
+
+    private static func claimDefaultMenuBarPosition() {
+        UserDefaults.standard.register(defaults: [
+            "NSStatusItem Preferred Position \(statusItemAutosaveName)": defaultMenuBarPosition
+        ])
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let hosting = NSHostingController(rootView: MenuBarView(state: state))
         // Let the popover track the SwiftUI view's own size, so it grows and
@@ -41,7 +56,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // system is in dark mode.
         popover.appearance = NSAppearance(named: .aqua)
 
+        // AppKit remembers where the user dragged a status item under
+        // "NSStatusItem Preferred Position <autosaveName>" — points from the
+        // right-hand edge of the menu bar. An item that has never been dragged
+        // has no stored value and lands in the same default slot every other
+        // undragged item picks, so two such items get drawn on top of each
+        // other. That is what hides our icon when Memtime is running: its tray
+        // item takes the identical slot. Registering (rather than writing) a
+        // default claims a slot of our own on first launch, while a real drag
+        // still persists to the same key and takes precedence.
+        Self.claimDefaultMenuBarPosition()
+
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        item.autosaveName = Self.statusItemAutosaveName
         item.button?.image = NSImage(systemSymbolName: "tree", accessibilityDescription: "Lumberjack")
         item.button?.action = #selector(togglePopover(_:))
         item.button?.target = self
