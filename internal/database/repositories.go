@@ -2,7 +2,10 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -39,7 +42,10 @@ func (c *Client) ListRepositories(ctx context.Context) ([]schema.Repository, err
 
 // FindRepository resolves a repository by reference, which may be its local
 // path, its dir_prefix, or its GitHub name. An exact local-path match wins
-// over a name match. It returns ErrRepositoryNotFound when nothing matches.
+// over a name match. An absolute path that is not itself a tracked checkout
+// falls back to the repository enclosing it, so the scoped commands work from
+// inside a tracked worktree or any subdirectory. It returns
+// ErrRepositoryNotFound when nothing matches.
 func (c *Client) FindRepository(ctx context.Context, ref string) (*schema.Repository, error) {
 	var repos []schema.Repository
 	err := c.NewSelect().Model(&repos).
@@ -49,6 +55,9 @@ func (c *Client) FindRepository(ctx context.Context, ref string) (*schema.Reposi
 		return nil, fmt.Errorf("finding repository %q: %w", ref, err)
 	}
 	if len(repos) == 0 {
+		if filepath.IsAbs(ref) {
+			return c.findRepositoryEnclosing(ctx, ref)
+		}
 		return nil, ErrRepositoryNotFound
 	}
 	// Prefer an exact local-path match, then dir_prefix, then fall through.
@@ -63,6 +72,51 @@ func (c *Client) FindRepository(ctx context.Context, ref string) (*schema.Reposi
 		}
 	}
 	return &repos[0], nil
+}
+
+// findRepositoryEnclosing resolves an absolute path lying inside a tracked
+// checkout to the repository that owns it: it walks path's ancestors,
+// deepest first, matching each against a repository's local path and against
+// the directory of a tracked worktree. This is what makes `lumberjack sync`
+// (and every other scoped command) work from a tracked worktree that is not
+// the main checkout, or from a subdirectory of either.
+func (c *Client) findRepositoryEnclosing(ctx context.Context, path string) (*schema.Repository, error) {
+	for dir := filepath.Clean(path); ; {
+		repo, err := c.repositoryOwningDir(ctx, dir)
+		if err != nil {
+			return nil, err
+		}
+		if repo != nil {
+			return repo, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, ErrRepositoryNotFound
+		}
+		dir = parent
+	}
+}
+
+// repositoryOwningDir returns the repository whose main checkout is dir, or
+// whose tracked worktrees include dir, and (nil, nil) when dir belongs to
+// neither.
+func (c *Client) repositoryOwningDir(ctx context.Context, dir string) (*schema.Repository, error) {
+	owners := c.NewSelect().Model((*schema.Worktree)(nil)).
+		Column("repository_id").Where("directory_path = ?", dir)
+
+	var repo schema.Repository
+	err := c.NewSelect().Model(&repo).
+		Where("local_path = ?", dir).
+		WhereOr("id IN (?)", owners).
+		Limit(1).Scan(ctx)
+	switch {
+	case err == nil:
+		return &repo, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("finding repository enclosing %q: %w", dir, err)
+	}
 }
 
 // DeleteRepository stops tracking the repository with the given primary key,
