@@ -110,6 +110,38 @@ func (c *Config) RunCommands() []string {
 	return cmds
 }
 
+// AddCommand appends a run-command step running command. It reports false
+// without changing the config if an identical run-command step already exists,
+// so `setup-steps add` is idempotent and never records a duplicate.
+func (c *Config) AddCommand(command string) bool {
+	for _, cmd := range c.RunCommands() {
+		if cmd == command {
+			return false
+		}
+	}
+	c.Steps = append(c.Steps, Step{
+		Type:       StepRunCommand,
+		RunCommand: &RunCommand{Command: command},
+	})
+	return true
+}
+
+// RemoveCommand deletes every run-command step running command, preserving all
+// other steps in order. It reports whether it removed anything.
+func (c *Config) RemoveCommand(command string) bool {
+	kept := c.Steps[:0]
+	removed := false
+	for _, st := range c.Steps {
+		if st.Type == StepRunCommand && st.RunCommand.Command == command {
+			removed = true
+			continue
+		}
+		kept = append(kept, st)
+	}
+	c.Steps = kept
+	return removed
+}
+
 // Fingerprint hashes the raw config content. Consent is bound to this value:
 // if `.lumberjack.yml` is added or its content changes, the fingerprint
 // changes and previously-recorded consent no longer matches.
