@@ -56,6 +56,18 @@ func (c *Client) SetWorktreePR(ctx context.Context, id int64, prNumber *int64) e
 	return nil
 }
 
+// SetWorktreeBranch records the branch a worktree directory now holds, for when
+// the stored name has gone stale (the branch checked out there was changed
+// outside Lumberjack).
+func (c *Client) SetWorktreeBranch(ctx context.Context, id int64, branch string) error {
+	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
+		Set("branch_name = ?", branch).
+		Where("id = ?", id).Exec(ctx); err != nil {
+		return fmt.Errorf("updating worktree branch: %w", err)
+	}
+	return nil
+}
+
 // TouchWorktreesSyncedAt stamps last_synced_at to at on every worktree row
 // belonging to a repository. It is called once per successful sync, after
 // worktrees are created/adopted/linked/removed, so every worktree still

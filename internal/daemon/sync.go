@@ -342,6 +342,19 @@ func (s *Service) createMissing(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
 	stored []schema.Worktree, progress progressFn, errs *[]error,
 ) (created int) {
+	// Every worktree git has registered, listed once: it tells us both the branch
+	// actually checked out in each tracked directory and which untracked
+	// directories can be adopted. A listing failure is recorded but non-fatal —
+	// sync falls back to creation.
+	refs, lerr := s.git.ListWorktrees(ctx, repo.LocalPath)
+	if lerr != nil {
+		*errs = append(*errs, fmt.Errorf("listing existing worktrees: %w", lerr))
+	}
+	branchByDir := make(map[string]string, len(refs))
+	for _, r := range refs {
+		branchByDir[r.Dir] = r.Branch
+	}
+
 	havePR := make(map[int64]bool, len(stored))
 	st := reconcileState{
 		usedDirs: make(map[string]bool, len(stored)),
@@ -354,14 +367,22 @@ func (s *Service) createMissing(
 		if wt.GithubPRNumber != nil {
 			havePR[*wt.GithubPRNumber] = true
 		} else {
-			st.unlinked[wt.BranchName] = wt
+			// Key on the branch git has checked out there, not the stored one: the
+			// two diverge when the branch in a tracked directory is changed by hand,
+			// and matching on the stale name would try to recreate a branch git
+			// already has checked out.
+			branch := wt.BranchName
+			if b := branchByDir[wt.DirectoryPath]; b != "" {
+				branch = b
+			}
+			st.unlinked[branch] = wt
 		}
 		st.usedDirs[wt.DirectoryPath] = true
 	}
 	// Directories already checked out on disk but not yet tracked, keyed by
 	// branch — hand-created worktrees (or ones a previous run left behind) that
 	// we adopt instead of failing to recreate their branch.
-	st.adoptable = s.adoptableWorktrees(ctx, repo, st.usedDirs, errs)
+	st.adoptable = adoptableWorktrees(refs, repo.LocalPath, st.usedDirs)
 
 	for num, pr := range openByNum {
 		if havePR[num] {
@@ -412,6 +433,14 @@ func (s *Service) linkWorktree(
 	if err := s.db.SetWorktreePR(ctx, wt.ID, &n); err != nil {
 		*errs = append(*errs, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err))
 		return
+	}
+	// The row was matched on the branch git has checked out, which can differ
+	// from the stored one; record the branch the worktree actually holds.
+	if wt.BranchName != pr.HeadBranch {
+		if err := s.db.SetWorktreeBranch(ctx, wt.ID, pr.HeadBranch); err != nil {
+			*errs = append(*errs, fmt.Errorf("updating branch of worktree %s: %w", wt.DirectoryPath, err))
+			return
+		}
 	}
 	s.emitChange(repo, progress, WorktreeChange{
 		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionUpdated,
@@ -478,17 +507,11 @@ func (s *Service) createWorktree(
 // has checked out but that Lumberjack is not yet tracking (their directory is
 // not in usedDirs). These are directories a human created by hand, or ones a
 // previous run left behind, which sync adopts rather than failing to recreate.
-// A listing failure is recorded but non-fatal — sync falls back to creation.
-func (s *Service) adoptableWorktrees(
-	ctx context.Context, repo *schema.Repository, usedDirs map[string]bool, errs *[]error,
-) map[string]string {
-	refs, err := s.untrackedWorktrees(ctx, repo, usedDirs)
-	if err != nil {
-		*errs = append(*errs, fmt.Errorf("listing existing worktrees: %w", err))
-		return nil
-	}
-	byBranch := make(map[string]string, len(refs))
-	for _, r := range refs {
+// refs is the repo's registered worktrees, listed by the caller.
+func adoptableWorktrees(refs []worktree.Ref, mainPath string, usedDirs map[string]bool) map[string]string {
+	untracked := filterUntracked(refs, mainPath, usedDirs)
+	byBranch := make(map[string]string, len(untracked))
+	for _, r := range untracked {
 		// First registered wins; git forbids the same branch in two worktrees, so
 		// a branch maps to at most one directory in practice.
 		if _, seen := byBranch[r.Branch]; !seen {
@@ -509,14 +532,21 @@ func (s *Service) untrackedWorktrees(
 	if err != nil {
 		return nil, err
 	}
+	return filterUntracked(refs, repo.LocalPath, tracked), nil
+}
+
+// filterUntracked drops the entries of refs that are not adoptable: the main
+// checkout at mainPath, detached-HEAD worktrees, and directories already
+// tracked.
+func filterUntracked(refs []worktree.Ref, mainPath string, tracked map[string]bool) []worktree.Ref {
 	out := refs[:0:0]
 	for _, r := range refs {
-		if r.Branch == "" || r.Dir == repo.LocalPath || tracked[r.Dir] {
-			continue // detached HEAD, the main checkout, or already tracked
+		if r.Branch == "" || r.Dir == mainPath || tracked[r.Dir] {
+			continue
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out
 }
 
 // resolveDir computes the worktree directory for a PR, disambiguating a slug
