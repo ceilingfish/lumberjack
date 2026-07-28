@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -335,9 +337,10 @@ type reconcileState struct {
 	adoptable map[string]string
 }
 
-// createMissing gives every open PR that lacks a linked worktree one, returning
-// the number of worktrees created or adopted (linking an existing row is not
-// counted).
+// createMissing gives every open PR that lacks a linked worktree one, then
+// adopts any remaining on-disk worktree Lumberjack is not tracking even when no
+// PR claims its branch. It returns the number of worktrees created or adopted
+// (linking an existing row is not counted).
 func (s *Service) createMissing(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
 	stored []schema.Worktree, progress progressFn, errs *[]error,
@@ -390,7 +393,37 @@ func (s *Service) createMissing(
 		}
 		created += s.reconcilePR(ctx, repo, num, pr, &st, progress, errs)
 	}
+	created += s.adoptOrphans(ctx, repo, &st, progress, errs)
 	return created
+}
+
+// adoptOrphans records every still-unclaimed on-disk worktree as tracked with no
+// PR number. These are the orphans: directories git has checked out that no open
+// PR's branch matches — created by hand (or by another tool) after `init`, or
+// left on a branch whose PR has since merged. Without this they would stay
+// invisible to Lumberjack forever, since `init` adopts only once and the PR loop
+// above only ever claims branches an open PR asks for.
+//
+// A worktree adopted here is tracked, not managed: with no PR number,
+// removeClosed treats it as PRNone and never deletes it. A later sync links it
+// to a PR opened on its branch via linkWorktree.
+func (s *Service) adoptOrphans(
+	ctx context.Context, repo *schema.Repository, st *reconcileState,
+	progress progressFn, errs *[]error,
+) (adopted int) {
+	// Iterate in branch order so progress output and audit counts are
+	// deterministic; adoptable is a map, whose range order is not.
+	for _, branch := range slices.Sorted(maps.Keys(st.adoptable)) {
+		dir := st.adoptable[branch]
+		if st.usedDirs[dir] {
+			continue // already claimed by a PR earlier in this sync
+		}
+		if s.adoptWorktree(ctx, repo, nil, branch, dir, progress, errs) {
+			st.usedDirs[dir] = true
+			adopted++
+		}
+	}
+	return adopted
 }
 
 // reconcilePR ensures one open PR that lacks a linked worktree gets one, in
@@ -408,7 +441,8 @@ func (s *Service) reconcilePR(
 		return 0
 	}
 	if dir := st.adoptable[pr.HeadBranch]; dir != "" && !st.usedDirs[dir] {
-		if s.adoptWorktree(ctx, repo, num, pr, dir, progress, errs) {
+		n := num
+		if s.adoptWorktree(ctx, repo, &n, pr.HeadBranch, dir, progress, errs) {
 			st.usedDirs[dir] = true
 			return 1
 		}
@@ -443,23 +477,23 @@ func (s *Service) linkWorktree(
 }
 
 // adoptWorktree records an already-checked-out directory as a preexisting
-// worktree for the PR, without touching git. It returns true when the row was
-// stored.
+// worktree on branch, without touching git. prNum is the open PR that claimed
+// the branch, or nil for an orphan no PR asks for. It returns true when the row
+// was stored.
 func (s *Service) adoptWorktree(
-	ctx context.Context, repo *schema.Repository, num int64, pr github.PR,
+	ctx context.Context, repo *schema.Repository, prNum *int64, branch string,
 	dir string, progress progressFn, errs *[]error,
 ) bool {
-	n := num
 	row := &schema.Worktree{
-		RepositoryID: repo.ID, GithubPRNumber: &n,
-		BranchName: pr.HeadBranch, DirectoryPath: dir,
+		RepositoryID: repo.ID, GithubPRNumber: prNum,
+		BranchName: branch, DirectoryPath: dir,
 	}
 	if cerr := s.db.CreateWorktree(ctx, row); cerr != nil {
-		*errs = append(*errs, fmt.Errorf("recording adopted worktree for PR #%d: %w", num, cerr))
+		*errs = append(*errs, fmt.Errorf("recording adopted worktree %s: %w", dir, cerr))
 		return false
 	}
 	s.emitChange(repo, progress, WorktreeChange{
-		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionAdopted, DirectoryPath: dir,
+		Branch: branch, PRNumber: prNum, Action: ActionAdopted, DirectoryPath: dir,
 	})
 	return true
 }
