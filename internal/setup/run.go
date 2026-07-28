@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,11 @@ import (
 // DefaultCommandTimeout bounds a single run-command step, guarding the
 // background sync loop against a hung command.
 const DefaultCommandTimeout = 2 * time.Minute
+
+// ManualCommandTimeout bounds a single run-command step during an explicit
+// `setup-steps run`, where a user is watching a possibly slow install and the
+// background loop's tighter budget would cut it off.
+const ManualCommandTimeout = 30 * time.Minute
 
 // Options carries the paths and consent state a Run needs.
 type Options struct {
@@ -29,6 +35,10 @@ type Options struct {
 	// CommandTimeout bounds each run-command step; DefaultCommandTimeout is
 	// used when zero.
 	CommandTimeout time.Duration
+	// Output, when non-nil, receives each run-command's output as it executes,
+	// so an interactive run shows progress instead of going quiet. When nil the
+	// output is captured and only surfaces in the failure error.
+	Output io.Writer
 }
 
 // Run executes cfg's steps in order against opts, stopping at the first
@@ -90,6 +100,10 @@ func runCommand(ctx context.Context, opts Options, rc *RunCommand) error {
 
 	cmd := exec.CommandContext(cctx, "sh", "-c", rc.Command)
 	cmd.Dir = opts.WorktreeDir
+	if opts.Output != nil {
+		cmd.Stdout, cmd.Stderr = opts.Output, opts.Output
+		return cmd.Run()
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		msg := strings.TrimSpace(string(out))
