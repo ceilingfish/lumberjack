@@ -20,16 +20,22 @@ import (
 // end-to-end over a real socket.
 type stubService struct {
 	lumberjackv1.UnimplementedLumberjackServiceServer
-	repos          []*lumberjackv1.Repository
-	worktrees      []*lumberjackv1.Worktree
-	deleteConfirm  bool // first delete returns RequiresConfirmation
-	deletedForced  bool // set when a forced delete arrived
-	getNotFound    bool
-	syncEvents     []*lumberjackv1.SyncResponse
-	initAdopted    []*lumberjackv1.WorktreeChange // worktrees InitRepository reports as adopted
-	lastInitPath   string
-	lastSyncTarget string
-	lastGetRef     string
+	repos     []*lumberjackv1.Repository
+	worktrees []*lumberjackv1.Worktree
+	// addBranchCreated/addSetupError drive what AddWorktree reports; addErr, if
+	// set, makes it fail. lastAddBranch records the branch it received.
+	addBranchCreated bool
+	addSetupError    string
+	addErr           error
+	lastAddBranch    string
+	deleteConfirm    bool // first delete returns RequiresConfirmation
+	deletedForced    bool // set when a forced delete arrived
+	getNotFound      bool
+	syncEvents       []*lumberjackv1.SyncResponse
+	initAdopted      []*lumberjackv1.WorktreeChange // worktrees InitRepository reports as adopted
+	lastInitPath     string
+	lastSyncTarget   string
+	lastGetRef       string
 	// logins is what ListLogins reports; loginErr, if set, is returned by
 	// SetLogin (e.g. an unauthenticated account). lastSetLogin records the login
 	// SetLogin received.
@@ -115,6 +121,19 @@ func (s *stubService) GetRepository(_ context.Context, req *lumberjackv1.GetRepo
 
 func (s *stubService) ListWorktrees(context.Context, *lumberjackv1.ListWorktreesRequest) (*lumberjackv1.ListWorktreesResponse, error) {
 	return &lumberjackv1.ListWorktreesResponse{Worktrees: s.worktrees}, nil
+}
+
+// AddWorktree echoes the branch it was asked for, recording it, and reports
+// whatever addSetupError/addBranchCreated a test set.
+func (s *stubService) AddWorktree(_ context.Context, req *lumberjackv1.AddWorktreeRequest) (*lumberjackv1.AddWorktreeResponse, error) {
+	s.lastAddBranch = req.GetBranch()
+	if s.addErr != nil {
+		return nil, s.addErr
+	}
+	return &lumberjackv1.AddWorktreeResponse{
+		DirectoryPath: "/p/n-x", Branch: req.GetBranch(),
+		BranchCreated: s.addBranchCreated, SetupError: s.addSetupError,
+	}, nil
 }
 
 func (s *stubService) DeleteWorktree(_ context.Context, req *lumberjackv1.DeleteWorktreeRequest) (*lumberjackv1.DeleteWorktreeResponse, error) {
@@ -435,6 +454,52 @@ func TestCmdWorktreesEmpty(t *testing.T) {
 	}
 	if !strings.Contains(out, "No worktrees tracked") {
 		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdWorktreeAdd(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	out, err := run(t, "", "worktree", "add", "feature/#325080-accept-proofread-suggestions", "--repository", "n")
+	if err != nil {
+		t.Fatalf("worktree add: %v", err)
+	}
+	if stub.lastAddBranch != "feature/#325080-accept-proofread-suggestions" {
+		t.Errorf("branch sent = %q", stub.lastAddBranch)
+	}
+	if !strings.Contains(out, "Checked out") || !strings.Contains(out, "/p/n-x") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdWorktreeAddReportsCreatedBranch(t *testing.T) {
+	serveStub(t, &stubService{addBranchCreated: true})
+	out, err := run(t, "", "worktree", "add", "feature/new", "--repository", "n")
+	if err != nil {
+		t.Fatalf("worktree add: %v", err)
+	}
+	if !strings.Contains(out, "Created branch") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+// A setup-step failure is a warning, not an error: the worktree is created and
+// tracked either way, so the command must still succeed.
+func TestCmdWorktreeAddWarnsOnSetupFailure(t *testing.T) {
+	serveStub(t, &stubService{addSetupError: "step 1 (copy-file) failed: no such file"})
+	out, err := run(t, "", "worktree", "add", "feature/x", "--repository", "n")
+	if err != nil {
+		t.Fatalf("worktree add: %v", err)
+	}
+	if !strings.Contains(out, "setup failed") || !strings.Contains(out, "copy-file") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdWorktreeAddRequiresBranch(t *testing.T) {
+	serveStub(t, &stubService{})
+	if _, err := run(t, "", "worktree", "add", "--repository", "n"); err == nil {
+		t.Error("expected an error when BRANCH is omitted")
 	}
 }
 

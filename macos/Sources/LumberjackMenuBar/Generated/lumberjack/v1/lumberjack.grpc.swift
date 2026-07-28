@@ -55,6 +55,11 @@ internal protocol Lumberjack_V1_LumberjackServiceClientProtocol: GRPCClient {
     callOptions: CallOptions?
   ) -> UnaryCall<Lumberjack_V1_ListWorktreesRequest, Lumberjack_V1_ListWorktreesResponse>
 
+  func addWorktree(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions?
+  ) -> UnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse>
+
   func deleteWorktree(
     _ request: Lumberjack_V1_DeleteWorktreeRequest,
     callOptions: CallOptions?
@@ -229,6 +234,28 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeListWorktreesInterceptors() ?? []
+    )
+  }
+
+  /// AddWorktree creates a worktree on demand for a branch, in the same
+  /// conventional location sync would use — `lumberjack worktree add BRANCH
+  /// [--repository NAME]`. The branch may be new (created off the default
+  /// branch), already on the remote, or an existing local branch. The
+  /// repository's setup steps run against the new worktree afterwards.
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to AddWorktree.
+  ///   - callOptions: Call options.
+  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
+  internal func addWorktree(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions? = nil
+  ) -> UnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse> {
+    return self.makeUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeAddWorktreeInterceptors() ?? []
     )
   }
 
@@ -484,6 +511,11 @@ internal protocol Lumberjack_V1_LumberjackServiceAsyncClientProtocol: GRPCClient
     callOptions: CallOptions?
   ) -> GRPCAsyncUnaryCall<Lumberjack_V1_ListWorktreesRequest, Lumberjack_V1_ListWorktreesResponse>
 
+  func makeAddWorktreeCall(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse>
+
   func makeDeleteWorktreeCall(
     _ request: Lumberjack_V1_DeleteWorktreeRequest,
     callOptions: CallOptions?
@@ -611,6 +643,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeListWorktreesInterceptors() ?? []
+    )
+  }
+
+  internal func makeAddWorktreeCall(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse> {
+    return self.makeAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeAddWorktreeInterceptors() ?? []
     )
   }
 
@@ -785,6 +829,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
     )
   }
 
+  internal func addWorktree(
+    _ request: Lumberjack_V1_AddWorktreeRequest,
+    callOptions: CallOptions? = nil
+  ) async throws -> Lumberjack_V1_AddWorktreeResponse {
+    return try await self.performAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeAddWorktreeInterceptors() ?? []
+    )
+  }
+
   internal func deleteWorktree(
     _ request: Lumberjack_V1_DeleteWorktreeRequest,
     callOptions: CallOptions? = nil
@@ -910,6 +966,9 @@ internal protocol Lumberjack_V1_LumberjackServiceClientInterceptorFactoryProtoco
   /// - Returns: Interceptors to use when invoking 'listWorktrees'.
   func makeListWorktreesInterceptors() -> [ClientInterceptor<Lumberjack_V1_ListWorktreesRequest, Lumberjack_V1_ListWorktreesResponse>]
 
+  /// - Returns: Interceptors to use when invoking 'addWorktree'.
+  func makeAddWorktreeInterceptors() -> [ClientInterceptor<Lumberjack_V1_AddWorktreeRequest, Lumberjack_V1_AddWorktreeResponse>]
+
   /// - Returns: Interceptors to use when invoking 'deleteWorktree'.
   func makeDeleteWorktreeInterceptors() -> [ClientInterceptor<Lumberjack_V1_DeleteWorktreeRequest, Lumberjack_V1_DeleteWorktreeResponse>]
 
@@ -944,6 +1003,7 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setLogin,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.listLogins,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.listWorktrees,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.addWorktree,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.deleteWorktree,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.deleteRepository,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.sync,
@@ -994,6 +1054,12 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
     internal static let listWorktrees = GRPCMethodDescriptor(
       name: "ListWorktrees",
       path: "/lumberjack.v1.LumberjackService/ListWorktrees",
+      type: GRPCCallType.unary
+    )
+
+    internal static let addWorktree = GRPCMethodDescriptor(
+      name: "AddWorktree",
+      path: "/lumberjack.v1.LumberjackService/AddWorktree",
       type: GRPCCallType.unary
     )
 

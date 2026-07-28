@@ -654,6 +654,47 @@ nonisolated struct Lumberjack_V1_ListWorktreesResponse: Sendable {
   init() {}
 }
 
+nonisolated struct Lumberjack_V1_AddWorktreeRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var repository: String = String()
+
+  /// The branch to check out. Created off the repository's default branch when
+  /// it exists neither on the remote nor locally.
+  var branch: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+nonisolated struct Lumberjack_V1_AddWorktreeResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Absolute path of the created worktree.
+  var directoryPath: String = String()
+
+  /// The branch checked out there.
+  var branch: String = String()
+
+  /// True when the branch was created for this worktree rather than checked out
+  /// from an existing remote or local branch.
+  var branchCreated: Bool = false
+
+  /// The setup-step failure, if any. The worktree is created and tracked
+  /// regardless (setup failures are surfaced, not fatal); empty on success or
+  /// when the repository declares no setup steps.
+  var setupError: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
 nonisolated struct Lumberjack_V1_DeleteWorktreeRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1798,6 +1839,86 @@ nonisolated extension Lumberjack_V1_ListWorktreesResponse: SwiftProtobuf.Message
 
   static func ==(lhs: Lumberjack_V1_ListWorktreesResponse, rhs: Lumberjack_V1_ListWorktreesResponse) -> Bool {
     if lhs.worktrees != rhs.worktrees {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_AddWorktreeRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".AddWorktreeRequest"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}branch\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.branch) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.repository.isEmpty {
+      try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
+    }
+    if !self.branch.isEmpty {
+      try visitor.visitSingularStringField(value: self.branch, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_AddWorktreeRequest, rhs: Lumberjack_V1_AddWorktreeRequest) -> Bool {
+    if lhs.repository != rhs.repository {return false}
+    if lhs.branch != rhs.branch {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_AddWorktreeResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".AddWorktreeResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}directory_path\0\u{1}branch\0\u{3}branch_created\0\u{3}setup_error\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.directoryPath) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.branch) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.branchCreated) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.setupError) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.directoryPath.isEmpty {
+      try visitor.visitSingularStringField(value: self.directoryPath, fieldNumber: 1)
+    }
+    if !self.branch.isEmpty {
+      try visitor.visitSingularStringField(value: self.branch, fieldNumber: 2)
+    }
+    if self.branchCreated != false {
+      try visitor.visitSingularBoolField(value: self.branchCreated, fieldNumber: 3)
+    }
+    if !self.setupError.isEmpty {
+      try visitor.visitSingularStringField(value: self.setupError, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_AddWorktreeResponse, rhs: Lumberjack_V1_AddWorktreeResponse) -> Bool {
+    if lhs.directoryPath != rhs.directoryPath {return false}
+    if lhs.branch != rhs.branch {return false}
+    if lhs.branchCreated != rhs.branchCreated {return false}
+    if lhs.setupError != rhs.setupError {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

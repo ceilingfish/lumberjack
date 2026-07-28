@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -25,6 +27,10 @@ type GitOps interface {
 	// so a clean checkout tracks the latest default branch.
 	Pull(ctx context.Context, repoPath string) error
 	AddWorktree(ctx context.Context, repoPath, dir, remote, branch string) error
+	// AddWorktreeNewBranch creates a worktree on a branch that exists neither on
+	// the remote nor locally, branched off base — the on-demand `worktree add`
+	// path, which sync itself never takes (a PR's branch always exists already).
+	AddWorktreeNewBranch(ctx context.Context, repoPath, dir, base, branch string) error
 	RemoveWorktree(ctx context.Context, repoPath, dir string, force bool) error
 	// MoveWorktree relocates a worktree, so `tidy` can put one back in the
 	// location the naming convention gives it.
@@ -338,13 +344,27 @@ type reconcileState struct {
 	adoptable map[string]string
 }
 
-// createMissing gives every open PR that lacks a linked worktree one, returning
-// the number of worktrees created or adopted (linking an existing row is not
-// counted).
+// createMissing gives every open PR that lacks a linked worktree one, then
+// adopts any remaining on-disk worktree Lumberjack is not tracking even when no
+// PR claims its branch. It returns the number of worktrees created or adopted
+// (linking an existing row is not counted).
 func (s *Service) createMissing(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
 	stored []schema.Worktree, progress progressFn, errs *[]error,
 ) (created int) {
+	// Every worktree git has registered, listed once: it tells us both the branch
+	// actually checked out in each tracked directory and which untracked
+	// directories can be adopted. A listing failure is recorded but non-fatal —
+	// sync falls back to creation.
+	refs, lerr := s.git.ListWorktrees(ctx, repo.LocalPath)
+	if lerr != nil {
+		*errs = append(*errs, fmt.Errorf("listing existing worktrees: %w", lerr))
+	}
+	branchByDir := make(map[string]string, len(refs))
+	for _, r := range refs {
+		branchByDir[r.Dir] = r.Branch
+	}
+
 	havePR := make(map[int64]bool, len(stored))
 	st := reconcileState{
 		usedDirs: make(map[string]bool, len(stored)),
@@ -357,14 +377,22 @@ func (s *Service) createMissing(
 		if wt.GithubPRNumber != nil {
 			havePR[*wt.GithubPRNumber] = true
 		} else {
-			st.unlinked[wt.BranchName] = wt
+			// Key on the branch git has checked out there, not the stored one: the
+			// two diverge when the branch in a tracked directory is changed by hand,
+			// and matching on the stale name would try to recreate a branch git
+			// already has checked out.
+			branch := wt.BranchName
+			if b := branchByDir[wt.DirectoryPath]; b != "" {
+				branch = b
+			}
+			st.unlinked[branch] = wt
 		}
 		st.usedDirs[wt.DirectoryPath] = true
 	}
 	// Directories already checked out on disk but not yet tracked, keyed by
 	// branch — hand-created worktrees (or ones a previous run left behind) that
 	// we adopt instead of failing to recreate their branch.
-	st.adoptable = s.adoptableWorktrees(ctx, repo, st.usedDirs, errs)
+	st.adoptable = adoptableWorktrees(refs, repo.LocalPath, st.usedDirs)
 
 	for num, pr := range openByNum {
 		if havePR[num] {
@@ -372,7 +400,37 @@ func (s *Service) createMissing(
 		}
 		created += s.reconcilePR(ctx, repo, num, pr, &st, progress, errs)
 	}
+	created += s.adoptOrphans(ctx, repo, &st, progress, errs)
 	return created
+}
+
+// adoptOrphans records every still-unclaimed on-disk worktree as tracked with no
+// PR number. These are the orphans: directories git has checked out that no open
+// PR's branch matches — created by hand (or by another tool) after `init`, or
+// left on a branch whose PR has since merged. Without this they would stay
+// invisible to Lumberjack forever, since `init` adopts only once and the PR loop
+// above only ever claims branches an open PR asks for.
+//
+// A worktree adopted here is tracked, not managed: with no PR number,
+// removeClosed treats it as PRNone and never deletes it. A later sync links it
+// to a PR opened on its branch via linkWorktree.
+func (s *Service) adoptOrphans(
+	ctx context.Context, repo *schema.Repository, st *reconcileState,
+	progress progressFn, errs *[]error,
+) (adopted int) {
+	// Iterate in branch order so progress output and audit counts are
+	// deterministic; adoptable is a map, whose range order is not.
+	for _, branch := range slices.Sorted(maps.Keys(st.adoptable)) {
+		dir := st.adoptable[branch]
+		if st.usedDirs[dir] {
+			continue // already claimed by a PR earlier in this sync
+		}
+		if s.adoptWorktree(ctx, repo, nil, branch, dir, progress, errs) {
+			st.usedDirs[dir] = true
+			adopted++
+		}
+	}
+	return adopted
 }
 
 // reconcilePR ensures one open PR that lacks a linked worktree gets one, in
@@ -390,7 +448,8 @@ func (s *Service) reconcilePR(
 		return 0
 	}
 	if dir := st.adoptable[pr.HeadBranch]; dir != "" && !st.usedDirs[dir] {
-		if s.adoptWorktree(ctx, repo, num, pr, dir, progress, errs) {
+		n := num
+		if s.adoptWorktree(ctx, repo, &n, pr.HeadBranch, dir, progress, errs) {
 			st.usedDirs[dir] = true
 			return 1
 		}
@@ -412,7 +471,9 @@ func (s *Service) linkWorktree(
 	progress progressFn, errs *[]error,
 ) {
 	n := num
-	if err := s.db.SetWorktreePR(ctx, wt.ID, &n); err != nil {
+	// The row was matched on the branch git has checked out, which can differ
+	// from the stored one, so the link also records the branch it actually holds.
+	if err := s.db.SetWorktreePR(ctx, wt.ID, &n, pr.HeadBranch); err != nil {
 		*errs = append(*errs, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err))
 		return
 	}
@@ -423,23 +484,23 @@ func (s *Service) linkWorktree(
 }
 
 // adoptWorktree records an already-checked-out directory as a preexisting
-// worktree for the PR, without touching git. It returns true when the row was
-// stored.
+// worktree on branch, without touching git. prNum is the open PR that claimed
+// the branch, or nil for an orphan no PR asks for. It returns true when the row
+// was stored.
 func (s *Service) adoptWorktree(
-	ctx context.Context, repo *schema.Repository, num int64, pr github.PR,
+	ctx context.Context, repo *schema.Repository, prNum *int64, branch string,
 	dir string, progress progressFn, errs *[]error,
 ) bool {
-	n := num
 	row := &schema.Worktree{
-		RepositoryID: repo.ID, GithubPRNumber: &n,
-		BranchName: pr.HeadBranch, DirectoryPath: dir,
+		RepositoryID: repo.ID, GithubPRNumber: prNum,
+		BranchName: branch, DirectoryPath: dir,
 	}
 	if cerr := s.db.CreateWorktree(ctx, row); cerr != nil {
-		*errs = append(*errs, fmt.Errorf("recording adopted worktree for PR #%d: %w", num, cerr))
+		*errs = append(*errs, fmt.Errorf("recording adopted worktree %s: %w", dir, cerr))
 		return false
 	}
 	s.emitChange(repo, progress, WorktreeChange{
-		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionAdopted, DirectoryPath: dir,
+		Branch: branch, PRNumber: prNum, Action: ActionAdopted, DirectoryPath: dir,
 	})
 	return true
 }
@@ -470,7 +531,7 @@ func (s *Service) createWorktree(
 	// created worktree. Failures are recorded on the worktree row and surfaced
 	// via its reconciliation status; they do not fail the sync (the worktree is
 	// kept, per the feature's fail-fast-but-keep design).
-	s.runSetupSteps(ctx, repo, dir, row.ID)
+	_ = s.runSetupSteps(ctx, repo, dir, row.ID)
 	s.emitChange(repo, progress, WorktreeChange{
 		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionCheckedOut, DirectoryPath: dir,
 	})
@@ -481,17 +542,11 @@ func (s *Service) createWorktree(
 // has checked out but that Lumberjack is not yet tracking (their directory is
 // not in usedDirs). These are directories a human created by hand, or ones a
 // previous run left behind, which sync adopts rather than failing to recreate.
-// A listing failure is recorded but non-fatal — sync falls back to creation.
-func (s *Service) adoptableWorktrees(
-	ctx context.Context, repo *schema.Repository, usedDirs map[string]bool, errs *[]error,
-) map[string]string {
-	refs, err := s.untrackedWorktrees(ctx, repo, usedDirs)
-	if err != nil {
-		*errs = append(*errs, fmt.Errorf("listing existing worktrees: %w", err))
-		return nil
-	}
-	byBranch := make(map[string]string, len(refs))
-	for _, r := range refs {
+// refs is the repo's registered worktrees, listed by the caller.
+func adoptableWorktrees(refs []worktree.Ref, mainPath string, usedDirs map[string]bool) map[string]string {
+	untracked := filterUntracked(refs, mainPath, usedDirs)
+	byBranch := make(map[string]string, len(untracked))
+	for _, r := range untracked {
 		// First registered wins; git forbids the same branch in two worktrees, so
 		// a branch maps to at most one directory in practice.
 		if _, seen := byBranch[r.Branch]; !seen {
@@ -512,14 +567,21 @@ func (s *Service) untrackedWorktrees(
 	if err != nil {
 		return nil, err
 	}
+	return filterUntracked(refs, repo.LocalPath, tracked), nil
+}
+
+// filterUntracked drops the entries of refs that are not adoptable: the main
+// checkout at mainPath, detached-HEAD worktrees, and directories already
+// tracked.
+func filterUntracked(refs []worktree.Ref, mainPath string, tracked map[string]bool) []worktree.Ref {
 	out := refs[:0:0]
 	for _, r := range refs {
-		if r.Branch == "" || r.Dir == repo.LocalPath || tracked[r.Dir] {
-			continue // detached HEAD, the main checkout, or already tracked
+		if r.Branch == "" || r.Dir == mainPath || tracked[r.Dir] {
+			continue
 		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out
 }
 
 // resolveDir computes the worktree directory for a PR, disambiguating a slug

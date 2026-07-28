@@ -194,6 +194,28 @@ func (s *Server) ListWorktrees(ctx context.Context, req *lumberjackv1.ListWorktr
 	return &lumberjackv1.ListWorktreesResponse{Worktrees: out}, nil
 }
 
+// AddWorktree creates a worktree for a branch on demand (see the domain
+// Service.AddWorktree).
+func (s *Server) AddWorktree(ctx context.Context, req *lumberjackv1.AddWorktreeRequest) (*lumberjackv1.AddWorktreeResponse, error) {
+	if req.GetBranch() == "" {
+		return nil, status.Error(codes.InvalidArgument, "branch is required")
+	}
+	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	res, err := s.svc.AddWorktree(ctx, repo, req.GetBranch())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &lumberjackv1.AddWorktreeResponse{
+		DirectoryPath: res.DirectoryPath,
+		Branch:        res.Branch,
+		BranchCreated: res.BranchCreated,
+		SetupError:    res.SetupError,
+	}, nil
+}
+
 // DeleteWorktree removes a worktree, requiring confirmation when work is at
 // risk (see the domain Service.DeleteWorktree).
 func (s *Server) DeleteWorktree(ctx context.Context, req *lumberjackv1.DeleteWorktreeRequest) (*lumberjackv1.DeleteWorktreeResponse, error) {

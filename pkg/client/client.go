@@ -167,6 +167,18 @@ func (c *Client) ListWorktrees(ctx context.Context, ref string) ([]*lumberjackv1
 	return resp.GetWorktrees(), nil
 }
 
+// AddWorktree creates a worktree for branch in the repository resolved by ref,
+// in the conventional location, and runs its setup steps. The response reports
+// where it landed, whether the branch was created, and any setup failure (which
+// does not fail the call).
+func (c *Client) AddWorktree(ctx context.Context, ref, branch string) (*lumberjackv1.AddWorktreeResponse, error) {
+	resp, err := c.svc.AddWorktree(ctx, &lumberjackv1.AddWorktreeRequest{Repository: ref, Branch: branch})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp, nil
+}
+
 // DeleteWorktree removes a worktree. When force is false and the worktree
 // holds work at risk, the response has RequiresConfirmation=true and nothing
 // is deleted (the CLI then re-calls with force=true).

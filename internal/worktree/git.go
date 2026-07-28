@@ -124,6 +124,15 @@ func (g *Git) AddWorktree(ctx context.Context, repoPath, dir, remote, branch str
 	return nil
 }
 
+// AddWorktreeNewBranch creates a worktree at dir on a branch that does not
+// exist yet, branched off base (e.g. "origin/main"). It is what `worktree add`
+// falls back to for a brand-new branch, which AddWorktree cannot check out
+// because neither remote/branch nor a local branch exists.
+func (g *Git) AddWorktreeNewBranch(ctx context.Context, repoPath, dir, base, branch string) error {
+	_, err := g.run(ctx, repoPath, "worktree", "add", "-b", branch, dir, base)
+	return err
+}
+
 // MoveWorktree relocates the worktree at from to to, letting git rewrite both
 // the worktree's `.git` file and the admin directory's `gitdir` pointer. git
 // refuses when the worktree is locked or when from is the main working tree —
