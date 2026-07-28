@@ -948,6 +948,91 @@ func TestSyncAdoptsExistingWorktree(t *testing.T) {
 	}
 }
 
+// An on-disk worktree no open PR claims is still adopted, so a directory
+// created by hand after `init` does not stay invisible to Lumberjack.
+func TestSyncAdoptsOrphanWorktreeWithNoPR(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = nil // no open PRs at all
+
+	orphan := filepath.Join(h.parent, "hand-checkout")
+	if err := os.MkdirAll(orphan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{
+		{Dir: repo.LocalPath, Branch: "main"}, // the main checkout is never adopted
+		{Dir: orphan, Branch: "feature/orphan"},
+	}
+
+	var changes []WorktreeChange
+	created, removed, err := h.svc.SyncRepository(context.Background(), repo,
+		func(c WorktreeChange) { changes = append(changes, c) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if created != 1 || removed != 0 {
+		t.Errorf("created=%d removed=%d, want 1 and 0", created, removed)
+	}
+	if !hasAction(changes, "feature/orphan", ActionAdopted) {
+		t.Errorf("expected an adopted change for the orphan, got %v", changes)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 tracked worktree, got %d", len(wts))
+	}
+	if wts[0].DirectoryPath != orphan || wts[0].BranchName != "feature/orphan" {
+		t.Errorf("adopted wrong worktree: %+v", wts[0])
+	}
+	if wts[0].GithubPRNumber != nil {
+		t.Errorf("orphan should have no PR number, got %v", *wts[0].GithubPRNumber)
+	}
+
+	// A second sync must not re-adopt it, and must not delete it either: with no
+	// PR recorded it is tracked, not managed.
+	created, removed, err = h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if created != 0 || removed != 0 {
+		t.Errorf("second sync created=%d removed=%d, want 0 and 0", created, removed)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 1 {
+		t.Fatalf("expected the orphan to stay tracked once, got %d", len(got))
+	}
+}
+
+// An orphan adopted with no PR is linked to a PR later opened on its branch,
+// rather than being re-adopted as a second row.
+func TestSyncLinksOrphanToLaterPR(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	orphan := filepath.Join(h.parent, "hand-checkout")
+	if err := os.MkdirAll(orphan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/x"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+
+	// A PR now exists for the orphan's branch. Recreating the worktree would
+	// fail, so linking is the only way through.
+	h.gh.prs = []github.PR{{Number: 7, HeadBranch: "feature/x"}}
+	h.git.addErr["feature/x"] = errors.New("a branch named 'feature/x' already exists")
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 tracked worktree, got %d", len(wts))
+	}
+	if wts[0].GithubPRNumber == nil || *wts[0].GithubPRNumber != 7 {
+		t.Errorf("expected the orphan linked to PR #7, got %+v", wts[0])
+	}
+}
+
 func TestSyncDoesNotAdoptTrackedWorktree(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)

@@ -87,7 +87,9 @@ Optional but recommended — audit log for `lumberjack status` detail and daemon
 - **`github_pr_number`** — immutable link back to the source PR; lets a worktree be re-associated even after slug rules change, without caching mutable PR state.
 - **`directory_path` stored, not computed** — makes the reverse (directory → branch) lookup reliable and immune to slug-rule changes.
 
-The daemon manages every tracked worktree uniformly, regardless of whether it created the worktree or adopted one already on disk. A worktree whose PR has merged or closed is removed only when it is provably safe to do so — a clean tree with no local-only commits; anything dirty or holding un-pushed work is retained (see "Derived live, not stored").
+The daemon manages every tracked worktree uniformly, regardless of whether it created the worktree or adopted one already on disk. Adoption is not limited to branches an open PR claims: each sync also adopts any worktree git has checked out that Lumberjack is not yet tracking, recording it with a null `github_pr_number` so it becomes visible to `lumberjack worktrees` without becoming a cleanup candidate. Should a PR later open on such a branch, the next sync links it to the existing row rather than recreating the worktree.
+
+A worktree whose PR has merged or closed is removed only when it is provably safe to do so — a clean tree with no local-only commits; anything dirty or holding un-pushed work is retained (see "Derived live, not stored").
 
 ## Derived live, not stored
 
