@@ -5,7 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -391,15 +392,9 @@ func (s *Service) adoptOrphans(
 ) (adopted int) {
 	// Iterate in branch order so progress output and audit counts are
 	// deterministic; adoptable is a map, whose range order is not.
-	branches := make([]string, 0, len(st.adoptable))
-	for branch := range st.adoptable {
-		branches = append(branches, branch)
-	}
-	sort.Strings(branches)
-
-	for _, branch := range branches {
+	for _, branch := range slices.Sorted(maps.Keys(st.adoptable)) {
 		dir := st.adoptable[branch]
-		if dir == "" || st.usedDirs[dir] {
+		if st.usedDirs[dir] {
 			continue // already claimed by a PR earlier in this sync
 		}
 		if s.adoptWorktree(ctx, repo, nil, branch, dir, progress, errs) {
