@@ -94,16 +94,29 @@ func (s *Service) addWorktreeLocked(ctx context.Context, repo *schema.Repository
 // to be created. It first tries the same path sync takes (track the remote
 // branch, or check out an existing local one) and falls back to branching off
 // the default branch for a branch that exists nowhere yet.
-func (s *Service) addWorktreeDir(ctx context.Context, repo *schema.Repository, dir, branch string) (created bool, err error) {
-	if err := s.git.AddWorktree(ctx, repo.LocalPath, dir, repo.DefaultRemote, branch); err == nil {
+//
+// The fallback is a probe, not a diagnosis: git's failure for a branch that
+// does not exist is indistinguishable here from one caused by a locked index,
+// an unreadable parent, or a branch already checked out elsewhere. So when the
+// fallback also fails, both errors are reported — the first attempt's is
+// usually the one naming the real cause.
+func (s *Service) addWorktreeDir(ctx context.Context, repo *schema.Repository, dir, branch string) (bool, error) {
+	addErr := s.git.AddWorktree(ctx, repo.LocalPath, dir, repo.DefaultRemote, branch)
+	if addErr == nil {
 		return false, nil
 	}
 	base, err := s.git.DefaultBranch(ctx, repo.LocalPath, repo.DefaultRemote)
 	if err != nil {
-		return false, fmt.Errorf("determining default branch to branch %s from: %w", branch, err)
+		return false, errors.Join(
+			fmt.Errorf("checking out %s: %w", branch, addErr),
+			fmt.Errorf("determining default branch to branch %s from: %w", branch, err),
+		)
 	}
 	if err := s.git.AddWorktreeNewBranch(ctx, repo.LocalPath, dir, repo.DefaultRemote+"/"+base, branch); err != nil {
-		return false, fmt.Errorf("creating worktree for %s: %w", branch, err)
+		return false, errors.Join(
+			fmt.Errorf("checking out %s: %w", branch, addErr),
+			fmt.Errorf("creating %s off %s instead: %w", branch, base, err),
+		)
 	}
 	return true, nil
 }
