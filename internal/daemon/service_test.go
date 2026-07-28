@@ -325,6 +325,46 @@ func TestSyncLinksAdoptedWorktreeToPR(t *testing.T) {
 	}
 }
 
+func TestSyncLinksAdoptedWorktreeAfterBranchRename(t *testing.T) {
+	h := newHarness(t)
+	dir := filepath.Join(h.parent, "n")
+	existing := filepath.Join(h.parent, "n-tidy")
+	h.git.worktrees = []worktree.Ref{
+		{Dir: dir, Branch: "main"},
+		{Dir: existing, Branch: "worktree-tidy"},
+	}
+	repo, adopted, err := h.svc.InitRepository(context.Background(), dir)
+	if err != nil || len(adopted) != 1 {
+		t.Fatalf("init: adopted=%v err=%v", adopted, err)
+	}
+
+	// The branch checked out in the tracked directory is then changed outside
+	// Lumberjack, so the stored branch name is stale. A sync seeing an open PR on
+	// the branch now checked out there must still link the existing row rather
+	// than try to recreate a branch git already has.
+	h.git.worktrees[1].Branch = "feature/tidy"
+	h.gh.prs = []github.PR{{Number: 28, HeadBranch: "feature/tidy"}}
+	h.git.addErr["feature/tidy"] = errors.New("a branch named 'feature/tidy' already exists")
+
+	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if created != 0 {
+		t.Errorf("created=%d, want 0 (linked, not created)", created)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 worktree, got %d", len(wts))
+	}
+	if wts[0].GithubPRNumber == nil || *wts[0].GithubPRNumber != 28 {
+		t.Errorf("worktree not linked to PR #28: %+v", wts[0])
+	}
+	if wts[0].BranchName != "feature/tidy" {
+		t.Errorf("branch_name=%q, want the branch actually checked out", wts[0].BranchName)
+	}
+}
+
 func TestInitRepositoryNotGitHub(t *testing.T) {
 	h := newHarness(t)
 	h.gh.infoErr = errors.New("not a repo")

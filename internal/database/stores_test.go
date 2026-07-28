@@ -155,6 +155,39 @@ func TestFindRepositoryPrefersLocalPath(t *testing.T) {
 	}
 }
 
+func TestFindRepositoryFromEnclosingPath(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/code/repo", "repo", "RepoName")
+	_ = c.CreateRepository(ctx, repo)
+	_ = c.CreateWorktree(ctx, &schema.Worktree{
+		RepositoryID: repo.ID, BranchName: "feature/x", DirectoryPath: "/code/repo-feature-x",
+	})
+
+	// A tracked worktree, a subdirectory of one, and a subdirectory of the main
+	// checkout all resolve to the owning repository — so the scoped commands
+	// work from anywhere inside a tracked tree.
+	for _, ref := range []string{
+		"/code/repo-feature-x",
+		"/code/repo-feature-x/internal/database",
+		"/code/repo/cmd",
+	} {
+		got, err := c.FindRepository(ctx, ref)
+		if err != nil {
+			t.Fatalf("FindRepository(%q): %v", ref, err)
+		}
+		if got.ID != repo.ID {
+			t.Errorf("FindRepository(%q) = %q, want %q", ref, got.LocalPath, repo.LocalPath)
+		}
+	}
+
+	// A path outside every tracked tree still reports not found rather than
+	// walking up to an unrelated repository.
+	if _, err := c.FindRepository(ctx, "/elsewhere/thing"); !errors.Is(err, ErrRepositoryNotFound) {
+		t.Errorf("expected ErrRepositoryNotFound, got %v", err)
+	}
+}
+
 func TestUpdateSyncResult(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
