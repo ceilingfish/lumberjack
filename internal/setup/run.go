@@ -75,9 +75,15 @@ func Run(ctx context.Context, cfg *Config, opts Options) (failedStep string, err
 
 // runCopyFile copies one file from the main checkout into the worktree,
 // creating destination directories as needed and preserving the source's mode.
-// With opts.PreserveExisting it does nothing when the destination is already
-// there; a destination that cannot be read is treated as absent, leaving the
-// copy to fail (or succeed) on its own terms.
+//
+// With opts.PreserveExisting it does nothing when anything at all is already at
+// the destination. Lstat, not Stat, so the test is "has the user put something
+// here", not "is there a readable file here": a symlink counts as something,
+// and is left alone even when it dangles. Both halves matter — following the
+// link would clobber whatever it points at, which may be well outside the
+// worktree, and a broken link is as likely to be deliberate (a target that
+// appears when a volume mounts) as it is to be junk. Neither is ours to
+// replace.
 func runCopyFile(opts Options, cf *CopyFile) error {
 	src := filepath.Join(opts.MainCheckout, filepath.Clean(cf.Source))
 	dst := filepath.Join(opts.WorktreeDir, filepath.Clean(cf.Destination))
