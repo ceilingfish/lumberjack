@@ -35,34 +35,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Where we would like to sit, in points from the right-hand edge of the
     /// menu bar: far enough left to clear the system items (Control Center is
     /// ~180, Now Playing ~330) and the apps that cluster near them.
-    private static let preferredMenuBarPosition = 640
-
-    /// Never sit further right than this, however narrow the bar: crowding the
-    /// system items is recoverable with one ⌘-drag, and is the lesser evil.
-    private static let minimumMenuBarPosition = 360
+    static let preferredMenuBarPosition = 640
 
     /// Room for the item itself, so it is the *whole* icon that clears the
     /// notch rather than just its right-hand edge.
-    private static let statusItemWidthAllowance = 32
+    static let statusItemWidthAllowance = 32
 
     /// The slot to claim on first launch, before the user has ever dragged the
-    /// icon.
+    /// icon, given the width of the usable strip to the right of the notch —
+    /// nil on a display that has no notch, where the whole bar is ours.
     ///
-    /// Not a fixed 640: on a notched display at a scaled resolution the usable
-    /// strip to the right of the notch can be a good deal narrower than that
-    /// (a 13" Air at ~1280pt logical width puts the notch around 555–725pt from
-    /// the right edge), and a slot that lands under the notch reproduces the
-    /// invisible icon this whole change exists to fix.
+    /// Not a fixed 640: on a notched display at a scaled resolution that strip
+    /// can be a good deal narrower (a 13" Air at ~1280pt logical width puts the
+    /// notch around 555–725pt from the right edge), and a slot landing under the
+    /// notch reproduces the invisible icon this whole change exists to fix.
     ///
-    /// `auxiliaryTopRightArea` is exactly that strip, and is nil on a display
-    /// with no notch — where the whole bar is ours and the preferred slot
-    /// stands.
+    /// So the notch bound wins outright, even when it forces us right of where
+    /// we would like to be and into the system items' territory: crowding a
+    /// neighbour is visible and one ⌘-drag fixes it for good, while sitting
+    /// under the notch is the original bug wearing a different hat.
+    ///
+    /// Pure, and separate from the screen lookup, so all three cases can be
+    /// tested without a display.
+    static func menuBarSlot(rightOfNotch: CGFloat?) -> Int {
+        guard let rightOfNotch else { return preferredMenuBarPosition }
+        let clearOfNotch = Int(rightOfNotch) - statusItemWidthAllowance
+        return min(preferredMenuBarPosition, clearOfNotch)
+    }
+
+    /// The menu bar lives on the primary display, which is `screens.first` —
+    /// *not* `NSScreen.main`, which is whichever screen has the key window. With
+    /// an external display focused, `main` is that screen, reports no notch, and
+    /// would send us straight back to 640 and under the built-in one.
     private static var defaultMenuBarPosition: Int {
-        guard let rightOfNotch = NSScreen.main?.auxiliaryTopRightArea?.width else {
-            return preferredMenuBarPosition
-        }
-        let clearOfNotch = Int(rightOfNotch.rounded(.down)) - statusItemWidthAllowance
-        return max(min(preferredMenuBarPosition, clearOfNotch), minimumMenuBarPosition)
+        menuBarSlot(rightOfNotch: NSScreen.screens.first?.auxiliaryTopRightArea?.width)
     }
 
     private static func claimDefaultMenuBarPosition() {
