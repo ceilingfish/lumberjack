@@ -47,26 +47,24 @@ struct MenuBarView: View {
     }
 
     private func openSearch() {
+        // Opening always starts from empty. Belt and braces alongside the
+        // `.disabled` on the collapsed field: search must never open onto a
+        // query the user cannot remember typing.
+        searchQuery = ""
         withAnimation(Self.searchAnimation) { searchOpen = true }
         searchFocused = true
     }
 
-    private func closeSearch() {
+    /// Collapses search and clears the query. Clearing inside the same
+    /// transaction as the collapse is what makes the list grow back to its full
+    /// height as part of one motion. Pass `animated: false` when the panel is
+    /// already hidden, where animating would only be work nobody sees.
+    private func closeSearch(animated: Bool = true) {
         searchFocused = false
-        // Clearing the query inside the same transaction as the collapse means
-        // the list grows back to its full height as part of one motion.
-        withAnimation(Self.searchAnimation) {
+        withAnimation(animated ? Self.searchAnimation : nil) {
             searchOpen = false
             searchQuery = ""
         }
-    }
-
-    /// Drops search without animating — for when the panel is already hidden,
-    /// where animating would only be work nobody sees.
-    private func resetSearch() {
-        searchFocused = false
-        searchOpen = false
-        searchQuery = ""
     }
 
     var body: some View {
@@ -79,7 +77,12 @@ struct MenuBarView: View {
                 repositorySection
                 hairline
                 worktreesHeader
+                // On the list itself, not inside it: dropping to zero matches
+                // swaps the ScrollView out for the no-match message, so an
+                // animation attached in there goes with it and the resize
+                // becomes a jump cut. Here it survives the branch change.
                 worktreesList
+                    .animation(Self.searchAnimation, value: visibleWorktrees.count)
             default:
                 statusArea
             }
@@ -101,7 +104,7 @@ struct MenuBarView: View {
         // Without this, reopening the panel could show a filtered list the user
         // had forgotten they were filtering.
         .onReceive(NotificationCenter.default.publisher(for: NSPopover.didCloseNotification)) { _ in
-            resetSearch()
+            closeSearch(animated: false)
         }
         // A branch or PR query from one repository rarely means anything in
         // another, and a stale filter could hide every worktree in the one just
@@ -278,6 +281,11 @@ struct MenuBarView: View {
                     .frame(width: searchOpen ? 170 : 0)
                     .opacity(searchOpen ? 1 : 0)
                     .clipped()
+                    // Zero width and zero opacity hide the field but leave it in
+                    // the key-view loop, so Tab could focus it while collapsed
+                    // and text typed there would be silently swallowed. Disabled
+                    // takes it out of the loop as well as out of sight.
+                    .disabled(!searchOpen)
             }
             .frame(height: 22)
 
@@ -289,6 +297,12 @@ struct MenuBarView: View {
         .padding(.horizontal, 14)
         .padding(.top, 6)
         .padding(.bottom, 4)
+        // Losing the connection (or the repository list) swaps this whole
+        // section out for the status area, destroying the field and with it the
+        // focus state — while `searchOpen` and the query would survive. Without
+        // this, reconnecting restored a field that looked open and still
+        // filtered the list but could not be typed into.
+        .onDisappear { closeSearch(animated: false) }
     }
 
     private var searchField: some View {
@@ -366,7 +380,6 @@ struct MenuBarView: View {
             // Sized to the *matching* rows so a narrowed list doesn't leave a
             // panel of dead space below it.
             .frame(height: min(CGFloat(visibleWorktrees.count) * 46, 372))
-            .animation(Self.searchAnimation, value: visibleWorktrees.count)
             .padding(.bottom, 6)
         }
     }
