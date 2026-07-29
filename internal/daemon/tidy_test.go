@@ -640,6 +640,11 @@ func TestTidyRepositoryDryRunWithAbortStillPreviews(t *testing.T) {
 	if len(moves) != 1 || !moves[0].Locked || moves[0].Moved {
 		t.Fatalf("moves=%+v, want one unmoved entry reporting the lock", moves)
 	}
+	// The preview must say what the real run would do — abort — rather than
+	// leaving the error empty, which reads as "would move".
+	if !strings.Contains(moves[0].Err, "abort") {
+		t.Errorf("Err=%q, want it to say the real run would abort", moves[0].Err)
+	}
 	if got := h.storedDir(t, wt.ID); got != from {
 		t.Errorf("tracked directory=%s, want it left at %s", got, from)
 	}
@@ -670,5 +675,25 @@ func TestTidyRepositoryContinuesWhenGitCannotListWorktrees(t *testing.T) {
 	}
 	if got := h.storedDir(t, wt.ID); got != want {
 		t.Errorf("tracked directory=%s, want %s", got, want)
+	}
+}
+
+// Abort asks to be protected from moving anything while any worktree is locked,
+// and a repository git cannot enumerate is one where "nothing is locked" is
+// unknown rather than true. Degrading to "no locks found" here would quietly
+// turn the most cautious strategy into a partial tidy.
+func TestTidyRepositoryAbortFailsWhenLocksCannotBeRead(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	from := filepath.Join(h.parent, "elsewhere", "foo")
+	h.track(t, repo, "feature/foo", from)
+	h.git.listErr = errors.New("not a git repository")
+
+	if _, err := h.svc.TidyRepository(context.Background(), repo,
+		TidyOptions{LockStrategy: LockAbort}); err == nil {
+		t.Fatal("TidyRepository succeeded, want the unreadable lock state reported")
+	}
+	if len(h.git.moves) != 0 {
+		t.Errorf("git moves=%v, want none", h.git.moves)
 	}
 }

@@ -138,7 +138,7 @@ func (s *Service) TidyRepository(ctx context.Context, repo *schema.Repository, o
 
 	// The misplaced worktrees in scope, each with the lock (if any) git holds on
 	// it. Resolved up front so an abort can refuse before anything has moved.
-	candidates, err := s.tidyCandidates(ctx, repo, stored, opts.Ref)
+	candidates, err := s.tidyCandidates(ctx, repo, stored, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +200,15 @@ func (o TidyOptions) CanAbortOnLock() bool {
 // along with the error, their moves would go unreported as well as unmentioned.
 // Running this over every repository in scope first makes abort mean nothing
 // moved anywhere.
+//
+// It takes and releases the lock per repository rather than holding it across
+// the whole run, so a lock taken from outside the daemon between this check and
+// the moves can still produce the mid-run abort it exists to prevent. Narrowing
+// that window would mean holding s.mu across every repository's moves — blocking
+// all other RPCs for the length of a full multi-repository tidy — to defend
+// against someone running `git worktree lock` by hand in the second it takes.
+// Not worth it: the window is small, the failure is loud, and abort is a safety
+// valve rather than a transaction.
 func (s *Service) TidyAbortCheck(ctx context.Context, repo *schema.Repository, opts TidyOptions) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -208,7 +217,7 @@ func (s *Service) TidyAbortCheck(ctx context.Context, repo *schema.Repository, o
 	if err != nil {
 		return err
 	}
-	candidates, err := s.tidyCandidates(ctx, repo, stored, opts.Ref)
+	candidates, err := s.tidyCandidates(ctx, repo, stored, opts)
 	if err != nil {
 		return err
 	}
@@ -230,8 +239,9 @@ type tidyCandidate struct {
 // branch or directory, not a tidy repository, and reporting "nothing to do"
 // would hide the typo.
 func (s *Service) tidyCandidates(
-	ctx context.Context, repo *schema.Repository, stored []schema.Worktree, ref string,
+	ctx context.Context, repo *schema.Repository, stored []schema.Worktree, opts TidyOptions,
 ) ([]tidyCandidate, error) {
+	ref := opts.Ref
 	var candidates []tidyCandidate
 	matched := false
 	for i := range stored {
@@ -258,15 +268,24 @@ func (s *Service) tidyCandidates(
 	// worktree. git is the only place a lock is recorded, so a listing that
 	// fails leaves tidy unable to tell a movable worktree from a locked one.
 	//
-	// That is not fatal, though: this call is the only reason an unusable
-	// repository (its LocalPath deleted, its .git corrupt) would now sink a
-	// whole multi-repository tidy — including the moves already made in the
-	// repositories before it, which the caller discards along with the error.
-	// Carrying on with no lock information restores what tidy did before locks
-	// were handled at all: the move is attempted, and git refuses a locked one
-	// with its own message, per worktree.
+	// That is not fatal for the strategies that only ever lift a lock they can
+	// see: this call is otherwise the sole reason an unusable repository (its
+	// LocalPath deleted, its .git corrupt) would sink a whole multi-repository
+	// tidy — including the moves already made in the repositories before it,
+	// which the caller discards along with the error. Carrying on with no lock
+	// information restores what tidy did before locks were handled at all: the
+	// move is attempted, and git refuses a locked one with its own message, per
+	// worktree.
+	//
+	// Abort is the exception. It asks to be protected from moving anything while
+	// any worktree is locked, and "we could not tell" is not "nothing is locked"
+	// — silently treating every worktree as free would turn the most cautious
+	// strategy into a partial tidy with no explanation.
 	refs, err := s.git.ListWorktrees(ctx, repo.LocalPath)
 	if err != nil {
+		if opts.CanAbortOnLock() {
+			return nil, fmt.Errorf("listing git worktrees for %s: %w", repo.LocalPath, err)
+		}
 		return candidates, nil
 	}
 	locks := make(map[string]worktree.Ref, len(refs))
@@ -312,11 +331,17 @@ func (s *Service) tidyOne(
 	}
 
 	// A lock has to be dealt with before the move, since git refuses to move a
-	// locked worktree. LockAbort never reaches here — TidyRepository refuses the
-	// whole run — so what is left is to leave the lock alone or to lift it.
+	// locked worktree: leave the lock alone, or lift it.
 	strategy := opts.strategyFor(wt.DirectoryPath)
 	if c.lock.Locked && strategy == LockSkip {
 		m.Err = lockedMessage(c.lock.LockReason)
+		return m
+	}
+	// LockAbort only reaches here on a dry run — a real run is refused before the
+	// first move. Saying "would move" would be a lie about the very thing the
+	// preview is for, so the preview says what the real run would do instead.
+	if c.lock.Locked && strategy == LockAbort {
+		m.Err = "worktree is locked; --lock-strategy abort would cancel the whole tidy, moving nothing"
 		return m
 	}
 	if opts.DryRun {
