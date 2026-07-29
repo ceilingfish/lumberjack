@@ -1,3 +1,5 @@
+import AppKit
+import Combine
 import Foundation
 import SwiftProtobuf
 import SwiftUI
@@ -13,6 +15,64 @@ struct MenuBarView: View {
     @State private var reposOpen = false
     @State private var quitOpen = false
 
+    /// Search is view-local UI state, not daemon state: it never leaves this
+    /// panel and has no business on `AppState` alongside the live worktree data.
+    @State private var searchOpen = false
+    @State private var searchQuery = ""
+    @FocusState private var searchFocused: Bool
+
+    /// One short easing curve for the whole search transition — the field's
+    /// width, the summary's cross-fade, and the list's height change all ride
+    /// it, so the panel resizes as a single motion. Deliberately not a spring:
+    /// overshoot looks wrong at this panel size.
+    private static let searchAnimation: Animation = .easeInOut(duration: 0.18)
+
+    /// The spyglass, built once. A template image so it takes the tint applied
+    /// to the button rather than rendering as flat black like the row actions'
+    /// application icons.
+    private static let searchIcon: NSImage? = {
+        let image = NSImage(
+            systemSymbolName: "magnifyingglass",
+            accessibilityDescription: "Search worktrees"
+        )?
+        .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .medium))
+        image?.isTemplate = true
+        return image
+    }()
+
+    /// The worktrees actually listed: everything when search is closed or the
+    /// query is empty, otherwise the matches.
+    private var visibleWorktrees: [Lumberjack_V1_Worktree] {
+        WorktreeSearch.filter(state.worktrees, query: searchOpen ? searchQuery : "")
+    }
+
+    private func openSearch() {
+        // Opening always starts from empty. Belt and braces alongside the
+        // `.disabled` on the collapsed field: search must never open onto a
+        // query the user cannot remember typing.
+        searchQuery = ""
+        withAnimation(Self.searchAnimation) { searchOpen = true }
+        // Deliberately not in the same transaction. The field is `.disabled`
+        // while collapsed and SwiftUI resolves a focus request against the tree
+        // as it stands when the request is made, so asking here — before the
+        // update that enables the field has been applied — can be dropped, and
+        // search would open without a caret. One turn of the main queue later
+        // the field is enabled and the request lands.
+        DispatchQueue.main.async { searchFocused = true }
+    }
+
+    /// Collapses search and clears the query. Clearing inside the same
+    /// transaction as the collapse is what makes the list grow back to its full
+    /// height as part of one motion. Pass `animated: false` when the panel is
+    /// already hidden, where animating would only be work nobody sees.
+    private func closeSearch(animated: Bool = true) {
+        searchFocused = false
+        withAnimation(animated ? Self.searchAnimation : nil) {
+            searchOpen = false
+            searchQuery = ""
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -23,7 +83,12 @@ struct MenuBarView: View {
                 repositorySection
                 hairline
                 worktreesHeader
+                // On the list itself, not inside it: dropping to zero matches
+                // swaps the ScrollView out for the no-match message, so an
+                // animation attached in there goes with it and the resize
+                // becomes a jump cut. Here it survives the branch change.
                 worktreesList
+                    .animation(Self.searchAnimation, value: visibleWorktrees.count)
             default:
                 statusArea
             }
@@ -39,6 +104,20 @@ struct MenuBarView: View {
         .frame(width: 360)
         .background(Palette.card)
         .onAppear { state.start() }
+        // The popover reuses one hosting controller for the app's lifetime, so
+        // `@State` survives a dismiss and `onDisappear` never fires for it —
+        // the popover's own notification is what tells us the panel went away.
+        // Without this, reopening the panel could show a filtered list the user
+        // had forgotten they were filtering.
+        .onReceive(NotificationCenter.default.publisher(for: NSPopover.didCloseNotification)) { _ in
+            closeSearch(animated: false)
+        }
+        // A branch or PR query from one repository rarely means anything in
+        // another, and a stale filter could hide every worktree in the one just
+        // selected.
+        .onChange(of: state.selectedRepository) { _, _ in
+            closeSearch()
+        }
     }
 
     // MARK: Header
@@ -188,16 +267,83 @@ struct MenuBarView: View {
     // MARK: Worktrees
 
     private var worktreesHeader: some View {
-        HStack {
+        HStack(spacing: 6) {
             sectionLabel("Worktrees")
-            Spacer()
-            Text(worktreeSummary)
-                .font(.system(size: 10))
-                .foregroundStyle(Palette.faintText)
+            Spacer(minLength: 6)
+
+            // The summary and the search field share the header's right-hand
+            // slot: the field stays in the hierarchy but is clipped to zero
+            // width and disabled while closed, and the two cross-fade. Keeping
+            // it mounted is what lets the width animate rather than the field
+            // popping into existence at full size; `openSearch` focuses it a
+            // tick later, once it is enabled. A fixed height keeps the header
+            // from changing size between the two states, which would make the
+            // panel jitter as search opens.
+            ZStack(alignment: .trailing) {
+                Text(worktreeSummary)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.faintText)
+                    .opacity(searchOpen ? 0 : 1)
+
+                searchField
+                    .frame(width: searchOpen ? 170 : 0)
+                    .opacity(searchOpen ? 1 : 0)
+                    .clipped()
+                    // Zero width and zero opacity hide the field but leave it in
+                    // the key-view loop, so Tab could focus it while collapsed
+                    // and text typed there would be silently swallowed. Disabled
+                    // takes it out of the loop as well as out of sight.
+                    .disabled(!searchOpen)
+            }
+            .frame(height: 22)
+
+            IconButton(image: Self.searchIcon, help: "Search worktrees") {
+                if searchOpen { closeSearch() } else { openSearch() }
+            }
+            .foregroundStyle(searchOpen ? Palette.primary : Palette.subtleText)
         }
         .padding(.horizontal, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 6)
+        .padding(.top, 6)
+        .padding(.bottom, 4)
+        // Losing the connection (or the repository list) swaps this whole
+        // section out for the status area, destroying the field and with it the
+        // focus state — while `searchOpen` and the query would survive. Without
+        // this, reconnecting restored a field that looked open and still
+        // filtered the list but could not be typed into.
+        .onDisappear { closeSearch(animated: false) }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 4) {
+            TextField("Branch or #PR", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(Palette.titleText)
+                .focused($searchFocused)
+                // Escape closes search rather than only clearing it, matching
+                // the expectation set by the toggle button.
+                .onExitCommand { closeSearch() }
+
+            if !searchQuery.isEmpty {
+                Button {
+                    searchQuery = ""
+                    searchFocused = true
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(Palette.faintText)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Palette.iconBoxFill)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Palette.iconBoxBorder, lineWidth: 1))
+        )
     }
 
     @ViewBuilder
@@ -215,10 +361,19 @@ struct MenuBarView: View {
                 .foregroundStyle(Palette.subtleText)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
+        } else if visibleWorktrees.isEmpty {
+            // Distinct from "No worktrees" above: the repository does have
+            // worktrees, the query just excluded all of them. Naming the query
+            // makes it obvious the list is filtered rather than empty.
+            Text("No worktrees match “\(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines))”")
+                .font(.system(size: 12))
+                .foregroundStyle(Palette.subtleText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(state.worktrees, id: \.directoryPath) { worktree in
+                    ForEach(visibleWorktrees, id: \.directoryPath) { worktree in
                         WorktreeRow(
                             worktree: worktree,
                             prURL: prURL(for: worktree),
@@ -230,7 +385,9 @@ struct MenuBarView: View {
             }
             // ~46pt per row, capped so the panel never grows without bound;
             // beyond ~8 rows the list scrolls (matching the design's 372px cap).
-            .frame(height: min(CGFloat(state.worktrees.count) * 46, 372))
+            // Sized to the *matching* rows so a narrowed list doesn't leave a
+            // panel of dead space below it.
+            .frame(height: min(CGFloat(visibleWorktrees.count) * 46, 372))
             .padding(.bottom, 6)
         }
     }
