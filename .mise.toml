@@ -46,6 +46,12 @@ run = "go test ./..."
 description = "Format all Go source with gofumpt"
 run = "gofumpt -w ."
 
+# Check-only counterpart to `format`, for CI: fails on a diff instead of
+# writing one, so the release workflow never pushes a reformatting commit.
+[tasks.format-check]
+description = "Check Go formatting with gofumpt; fails on a diff without writing"
+run = "scripts/format-check.sh"
+
 [tasks.lint]
 description = "Run golangci-lint"
 run = "golangci-lint run"

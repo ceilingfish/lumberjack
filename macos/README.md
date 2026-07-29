@@ -76,6 +76,19 @@ with a Developer ID certificate and notarize before distributing the `.dmg`.
 
 1. Build (above) or download a released `.dmg`, open it, and drag
    `LumberjackMenuBar.app` to `/Applications`.
+
+   **Gatekeeper warning on a downloaded `.dmg`:** released builds are
+   currently **ad-hoc signed only, not notarized** (see issue #11; Developer
+   ID signing and notarization are a follow-up). macOS quarantines anything
+   downloaded from a browser, so a plain double-click on the `.app` reports it
+   as damaged or refuses to open it. To run it anyway:
+
+   - **Right-click (or Control-click) `LumberjackMenuBar.app` → Open**, then
+     confirm in the dialog that appears — this only needs to be done once.
+   - Or clear the quarantine attribute from the Terminal before launching:
+     ```sh
+     xattr -dr com.apple.quarantine /Applications/LumberjackMenuBar.app
+     ```
 2. Launch it. It has no Dock icon (menu-bar-only, `LSUIElement`); look for the
    tree icon in the menu bar.
 3. It connects to whatever `lumberjack daemon` is already running for the
