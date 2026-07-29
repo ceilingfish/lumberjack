@@ -52,7 +52,13 @@ struct MenuBarView: View {
         // query the user cannot remember typing.
         searchQuery = ""
         withAnimation(Self.searchAnimation) { searchOpen = true }
-        searchFocused = true
+        // Deliberately not in the same transaction. The field is `.disabled`
+        // while collapsed and SwiftUI resolves a focus request against the tree
+        // as it stands when the request is made, so asking here — before the
+        // update that enables the field has been applied — can be dropped, and
+        // search would open without a caret. One turn of the main queue later
+        // the field is enabled and the request lands.
+        DispatchQueue.main.async { searchFocused = true }
     }
 
     /// Collapses search and clears the query. Clearing inside the same
@@ -266,11 +272,13 @@ struct MenuBarView: View {
             Spacer(minLength: 6)
 
             // The summary and the search field share the header's right-hand
-            // slot: the field is always in the hierarchy (so it can take focus
-            // before it is visible) but clipped to zero width while closed, and
-            // the two cross-fade. A fixed height keeps the header from changing
-            // size between the two states, which would make the panel jitter as
-            // search opens.
+            // slot: the field stays in the hierarchy but is clipped to zero
+            // width and disabled while closed, and the two cross-fade. Keeping
+            // it mounted is what lets the width animate rather than the field
+            // popping into existence at full size; `openSearch` focuses it a
+            // tick later, once it is enabled. A fixed height keeps the header
+            // from changing size between the two states, which would make the
+            // panel jitter as search opens.
             ZStack(alignment: .trailing) {
                 Text(worktreeSummary)
                     .font(.system(size: 10))
