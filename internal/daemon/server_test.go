@@ -500,6 +500,53 @@ func TestServerTidyWorktreeScoped(t *testing.T) {
 	}
 }
 
+// The proto's lock fields reach the service: a per-worktree decision beats the
+// request-wide strategy, and the lock state tidy found comes back on the move.
+func TestServerTidyLockDecisionOverridesStrategy(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	from := filepath.Join(h.parent, "elsewhere", "foo")
+	h.lockedWorktree(t, repo, "feature/foo", from, "in use")
+
+	resp, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{
+		Repository:   "n",
+		LockStrategy: lumberjackv1.LockStrategy_LOCK_STRATEGY_SKIP,
+		LockDecisions: []*lumberjackv1.LockDecision{{
+			WorktreePath: from, Strategy: lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Tidy: %v", err)
+	}
+	if len(resp.GetMoves()) != 1 {
+		t.Fatalf("moves=%v, want 1", resp.GetMoves())
+	}
+	m := resp.GetMoves()[0]
+	if !m.GetMoved() || !m.GetLocked() || m.GetLockReason() != "in use" {
+		t.Errorf("move=%+v, want it moved and reported as having been locked", m)
+	}
+	if len(h.git.locks) != 0 {
+		t.Errorf("locks=%v, want the lock deleted", h.git.locks)
+	}
+}
+
+// Aborting is a failed call, not a report of nothing done, so the CLI can exit
+// non-zero without inspecting the moves.
+func TestServerTidyAbortOnLockIsAborted(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	h.lockedWorktree(t, repo, "feature/foo", filepath.Join(h.parent, "elsewhere", "foo"), "")
+
+	_, err := srv.Tidy(context.Background(), &lumberjackv1.TidyRequest{
+		Repository: "n", LockStrategy: lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT,
+	})
+	if status.Code(err) != codes.Aborted {
+		t.Errorf("expected Aborted, got %v", err)
+	}
+}
+
 func TestServerTidyUnknownWorktree(t *testing.T) {
 	h := newHarness(t)
 	srv := newServer(h)

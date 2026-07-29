@@ -184,7 +184,7 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack status [--repository NAME]` | Last-sync detail for the repo in the current dir, or the named one. |
 | `lumberjack sync [--repository NAME]` | Reconcile worktrees for the repo in the current dir, or the named one, now. |
 | `lumberjack sync-all` | Sync **all** tracked repositories. |
-| `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR] [--dry-run]` | Move worktrees that aren't in their idiomatic location (`<worktrees dir>/<name>-<branch slug>`) back into it. `--worktree` narrows it to one; `--dry-run` reports without moving. |
+| `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR] [--dry-run] [--lock-strategy STRATEGY]` | Move worktrees that aren't in their idiomatic location (`<worktrees dir>/<name>-<branch slug>`) back into it. `--worktree` narrows it to one; `--dry-run` reports without moving. A locked worktree is prompted about — unlock it for the move and lock it again (default), skip it, delete the lock, or abort — and `--lock-strategy skip\|unlock\|delete\|abort` answers for all of them up front. |
 | `lumberjack worktrees [--repository NAME]` | List worktrees for the repo in the current dir, or the named one. |
 | `lumberjack worktree add BRANCH [--repository NAME]` | Create a worktree for `BRANCH` in the conventional location and run the repo's setup steps. Creates the branch off the default branch if it doesn't exist yet. |
 | `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |

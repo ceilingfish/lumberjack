@@ -52,6 +52,15 @@ type fakeGit struct {
 	// the from→to pairs it was asked for.
 	moveErr map[string]error
 	moves   [][2]string
+	// locks is git's lock state, keyed by worktree directory and holding the
+	// lock's reason — the same thing `worktree list --porcelain` reports, and
+	// what lockWorktrees() turns into the ListWorktrees output. LockWorktree and
+	// UnlockWorktree keep it current so tidy's tests can assert a lifted lock was
+	// put back (and at the new location). lockErr/unlockErr force those calls to
+	// fail, keyed by directory.
+	locks     map[string]string
+	lockErr   map[string]error
+	unlockErr map[string]error
 }
 
 func newFakeGit() *fakeGit {
@@ -62,6 +71,7 @@ func newFakeGit() *fakeGit {
 		newBranches:  map[string]string{},
 		newBranchErr: map[string]error{},
 		remotes:      "origin",
+		locks:        map[string]string{},
 	}
 }
 
@@ -118,8 +128,47 @@ func (f *fakeGit) MoveWorktree(_ context.Context, _, from, to string) error {
 	return os.Rename(from, to)
 }
 
+// ListWorktrees reports the registered worktrees, with git's lock state folded
+// in: a locked directory that is not otherwise registered still appears, since
+// that is what `worktree list --porcelain` would show and what tidy reads locks
+// from.
 func (f *fakeGit) ListWorktrees(context.Context, string) ([]worktree.Ref, error) {
-	return f.worktrees, f.listErr
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	refs := make([]worktree.Ref, 0, len(f.worktrees)+len(f.locks))
+	listed := map[string]bool{}
+	for _, r := range f.worktrees {
+		if reason, ok := f.locks[r.Dir]; ok {
+			r.Locked, r.LockReason = true, reason
+		}
+		listed[r.Dir] = true
+		refs = append(refs, r)
+	}
+	for dir, reason := range f.locks {
+		if !listed[dir] {
+			refs = append(refs, worktree.Ref{Dir: dir, Locked: true, LockReason: reason})
+		}
+	}
+	return refs, nil
+}
+
+// LockWorktree and UnlockWorktree mutate the fake's lock state the way git
+// would, so a test can assert where a lifted lock ended up.
+func (f *fakeGit) LockWorktree(_ context.Context, _, dir, reason string) error {
+	if err := f.lockErr[dir]; err != nil {
+		return err
+	}
+	f.locks[dir] = reason
+	return nil
+}
+
+func (f *fakeGit) UnlockWorktree(_ context.Context, _, dir string) error {
+	if err := f.unlockErr[dir]; err != nil {
+		return err
+	}
+	delete(f.locks, dir)
+	return nil
 }
 
 func (f *fakeGit) IsDirty(_ context.Context, dir string) (bool, error) {

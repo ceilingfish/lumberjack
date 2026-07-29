@@ -147,6 +147,27 @@ func (g *Git) MoveWorktree(ctx context.Context, repoPath, from, to string) error
 	return err
 }
 
+// LockWorktree locks the worktree at dir, recording reason with the lock when
+// it is non-empty. It is how tidy restores a lock it lifted only to be able to
+// move the worktree; git refuses to lock one that is already locked, which the
+// caller reports rather than works around.
+func (g *Git) LockWorktree(ctx context.Context, repoPath, dir, reason string) error {
+	args := []string{"worktree", "lock"}
+	if reason != "" {
+		args = append(args, "--reason", reason)
+	}
+	args = append(args, dir)
+	_, err := g.run(ctx, repoPath, args...)
+	return err
+}
+
+// UnlockWorktree removes the lock on the worktree at dir, so it can be moved
+// or removed.
+func (g *Git) UnlockWorktree(ctx context.Context, repoPath, dir string) error {
+	_, err := g.run(ctx, repoPath, "worktree", "unlock", dir)
+	return err
+}
+
 // RemoveWorktree removes the worktree at dir. force drops the safety checks
 // git applies for dirty or diverged trees; the daemon only sets it after the
 // caller has confirmed the loss (see DeleteWorktree in the proto).
@@ -211,6 +232,12 @@ func (g *Git) ShowFile(ctx context.Context, repoPath, ref, path string) (data []
 type Ref struct {
 	Dir    string
 	Branch string
+	// Locked reports whether git has the worktree locked (`git worktree lock`),
+	// which makes it refuse to move or remove it. LockReason is the message
+	// recorded with the lock, empty when the lock carries none — `worktree list
+	// --porcelain` prints the reason on the `locked` line itself.
+	Locked     bool
+	LockReason string
 }
 
 // ListWorktrees returns every worktree registered on repoPath (including the
@@ -235,6 +262,11 @@ func (g *Git) ListWorktrees(ctx context.Context, repoPath string) ([]Ref, error)
 		}
 		if b, ok := strings.CutPrefix(line, "branch refs/heads/"); ok {
 			cur.Branch = b
+		}
+		// "locked" alone, or "locked <reason>" when the lock was given one.
+		if line == "locked" || strings.HasPrefix(line, "locked ") {
+			cur.Locked = true
+			cur.LockReason = strings.TrimSpace(strings.TrimPrefix(line, "locked"))
 		}
 	}
 	return refs, nil

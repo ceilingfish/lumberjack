@@ -54,12 +54,17 @@ type stubService struct {
 	lastTidyTarget   string
 	lastTidyWorktree string
 	lastTidyDryRun   bool
+	// tidyRequests records every Tidy request in order, since resolving locked
+	// worktrees interactively takes two calls: a dry-run probe to find the locks,
+	// then the real tidy carrying the user's answers.
+	tidyRequests []*lumberjackv1.TidyRequest
 }
 
 func (s *stubService) Tidy(_ context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
 	s.lastTidyTarget = req.GetRepository()
 	s.lastTidyWorktree = req.GetWorktree()
 	s.lastTidyDryRun = req.GetDryRun()
+	s.tidyRequests = append(s.tidyRequests, req)
 	return &lumberjackv1.TidyResponse{Moves: s.tidyMoves}, nil
 }
 
@@ -743,5 +748,174 @@ func TestCmdTidyNothingToDo(t *testing.T) {
 	}
 	if !strings.Contains(out, "idiomatic locations") {
 		t.Errorf("output missing the all-clear message:\n%s", out)
+	}
+}
+
+// lockedMove is a misplaced worktree that git has locked and that nothing else
+// stands in the way of moving — the one shape tidy prompts about.
+func lockedMove() *lumberjackv1.TidyMove {
+	return &lumberjackv1.TidyMove{
+		Repository: "n", Branch: "feature/foo", From: "/elsewhere/foo", To: "/p/n-foo",
+		Locked: true, LockReason: "in use",
+	}
+}
+
+// answerLockPrompt makes the terminal look interactive and answers every prompt
+// with strategy, recording the worktrees it was asked about.
+func answerLockPrompt(t *testing.T, strategy lumberjackv1.LockStrategy) *[]string {
+	t.Helper()
+	var asked []string
+	prevInteractive, prevPrompter := interactiveStdin, lockPrompter
+	interactiveStdin = func() bool { return true }
+	lockPrompter = func(_ *cobra.Command, path, _ string) (lumberjackv1.LockStrategy, error) {
+		asked = append(asked, path)
+		return strategy, nil
+	}
+	t.Cleanup(func() { interactiveStdin, lockPrompter = prevInteractive, prevPrompter })
+	return &asked
+}
+
+// --lock-strategy answers up front, so the tidy is a single call and no prompt
+// is shown even on a terminal.
+func TestCmdTidyLockStrategyFlagSkipsThePrompt(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{lockedMove()}}
+	serveStub(t, stub)
+	asked := answerLockPrompt(t, lumberjackv1.LockStrategy_LOCK_STRATEGY_SKIP)
+
+	out, err := run(t, "", "tidy", "--repository", "n", "--lock-strategy", "unlock")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if len(stub.tidyRequests) != 1 {
+		t.Fatalf("tidy requests = %d, want 1: the flag answers without probing", len(stub.tidyRequests))
+	}
+	req := stub.tidyRequests[0]
+	if req.GetLockStrategy() != lumberjackv1.LockStrategy_LOCK_STRATEGY_UNLOCK {
+		t.Errorf("lock strategy = %v, want UNLOCK", req.GetLockStrategy())
+	}
+	if len(*asked) != 0 {
+		t.Errorf("prompted about %v, want no prompt when the flag is given", *asked)
+	}
+}
+
+func TestCmdTidyRejectsUnknownLockStrategy(t *testing.T) {
+	serveStub(t, &stubService{})
+
+	out, err := run(t, "", "tidy", "--repository", "n", "--lock-strategy", "maybe")
+	if err == nil {
+		t.Fatalf("tidy accepted an unknown --lock-strategy (%s)", out)
+	}
+	if !strings.Contains(err.Error(), "unlock") {
+		t.Errorf("error should list the valid values, got %v", err)
+	}
+}
+
+// On a terminal with no flag, tidy probes with a dry run, asks about each locked
+// worktree, and sends the answers back keyed by the worktree's directory.
+func TestCmdTidyPromptsForLockedWorktree(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{lockedMove()}}
+	serveStub(t, stub)
+	asked := answerLockPrompt(t, lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE)
+
+	out, err := run(t, "", "tidy", "--repository", "n")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if len(*asked) != 1 || (*asked)[0] != "/elsewhere/foo" {
+		t.Errorf("prompted about %v, want the locked worktree's directory", *asked)
+	}
+	if len(stub.tidyRequests) != 2 {
+		t.Fatalf("tidy requests = %d, want a dry-run probe then the real tidy", len(stub.tidyRequests))
+	}
+	if probe := stub.tidyRequests[0]; !probe.GetDryRun() {
+		t.Error("the first call should be a dry run, so nothing moves before the user answers")
+	}
+	actual := stub.tidyRequests[1]
+	if actual.GetDryRun() {
+		t.Error("the second call should not be a dry run")
+	}
+	// Unasked-about locks stay put; the answered one carries its own decision.
+	if actual.GetLockStrategy() != lumberjackv1.LockStrategy_LOCK_STRATEGY_SKIP {
+		t.Errorf("fallback strategy = %v, want SKIP", actual.GetLockStrategy())
+	}
+	if len(actual.GetLockDecisions()) != 1 {
+		t.Fatalf("lock decisions = %v, want one", actual.GetLockDecisions())
+	}
+	d := actual.GetLockDecisions()[0]
+	if d.GetWorktreePath() != "/elsewhere/foo" ||
+		d.GetStrategy() != lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE {
+		t.Errorf("lock decision = %+v, want /elsewhere/foo deleted", d)
+	}
+}
+
+// Aborting at the prompt stops the command before anything is moved.
+func TestCmdTidyPromptAbortMovesNothing(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{lockedMove()}}
+	serveStub(t, stub)
+	answerLockPrompt(t, lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT)
+
+	out, err := run(t, "", "tidy", "--repository", "n")
+	if err == nil {
+		t.Fatalf("tidy succeeded after an abort (%s)", out)
+	}
+	if len(stub.tidyRequests) != 1 || !stub.tidyRequests[0].GetDryRun() {
+		t.Errorf("requests = %v, want only the dry-run probe", stub.tidyRequests)
+	}
+}
+
+// A locked worktree that could not be moved anyway is not worth a question.
+func TestCmdTidyDoesNotPromptForLockedWorktreeBlockedAnyway(t *testing.T) {
+	blocked := lockedMove()
+	blocked.Error = "destination already exists on disk"
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{blocked}}
+	serveStub(t, stub)
+	asked := answerLockPrompt(t, lumberjackv1.LockStrategy_LOCK_STRATEGY_UNLOCK)
+
+	out, err := run(t, "", "tidy", "--repository", "n")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if len(*asked) != 0 {
+		t.Errorf("prompted about %v, want no prompt for a worktree blocked by something else", *asked)
+	}
+}
+
+// A dry run moves nothing, so there is nothing to consent to: it reports rather
+// than asks, even on a terminal.
+func TestCmdTidyDryRunDoesNotPrompt(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{lockedMove()}}
+	serveStub(t, stub)
+	asked := answerLockPrompt(t, lumberjackv1.LockStrategy_LOCK_STRATEGY_UNLOCK)
+
+	out, err := run(t, "", "tidy", "--repository", "n", "--dry-run")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if len(*asked) != 0 {
+		t.Errorf("prompted about %v, want no prompt on a dry run", *asked)
+	}
+	if len(stub.tidyRequests) != 1 {
+		t.Errorf("tidy requests = %d, want 1", len(stub.tidyRequests))
+	}
+}
+
+// With no terminal to ask on and no flag, the strategy is left unspecified — the
+// daemon then leaves locked worktrees, and their locks, alone.
+func TestCmdTidyWithoutATerminalDoesNotProbe(t *testing.T) {
+	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{lockedMove()}}
+	serveStub(t, stub)
+	prev := interactiveStdin
+	interactiveStdin = func() bool { return false }
+	t.Cleanup(func() { interactiveStdin = prev })
+
+	out, err := run(t, "", "tidy", "--repository", "n")
+	if err != nil {
+		t.Fatalf("tidy: %v (%s)", err, out)
+	}
+	if len(stub.tidyRequests) != 1 {
+		t.Fatalf("tidy requests = %d, want 1", len(stub.tidyRequests))
+	}
+	if got := stub.tidyRequests[0].GetLockStrategy(); got != lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED {
+		t.Errorf("lock strategy = %v, want it left unspecified", got)
 	}
 }

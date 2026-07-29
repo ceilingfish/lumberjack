@@ -302,9 +302,15 @@ func (s *Server) Tidy(ctx context.Context, req *lumberjackv1.TidyRequest) (*lumb
 	if err != nil {
 		return nil, err
 	}
+	opts := TidyOptions{
+		Ref:           req.GetWorktree(),
+		DryRun:        req.GetDryRun(),
+		LockStrategy:  toLockStrategy(req.GetLockStrategy()),
+		LockDecisions: toLockDecisions(req.GetLockDecisions()),
+	}
 	resp := &lumberjackv1.TidyResponse{}
 	for _, repo := range repos {
-		moves, err := s.svc.TidyRepository(ctx, repo, req.GetWorktree(), req.GetDryRun())
+		moves, err := s.svc.TidyRepository(ctx, repo, opts)
 		if err != nil {
 			return nil, toStatus(err)
 		}
@@ -313,10 +319,41 @@ func (s *Server) Tidy(ctx context.Context, req *lumberjackv1.TidyRequest) (*lumb
 			resp.Moves = append(resp.Moves, &lumberjackv1.TidyMove{
 				Repository: name, Branch: m.Branch,
 				From: m.From, To: m.To, Moved: m.Moved, Error: m.Err,
+				Locked: m.Locked, LockReason: m.LockReason,
 			})
 		}
 	}
 	return resp, nil
+}
+
+// toLockStrategy maps the proto enum to the domain one. An unrecognised or
+// unset value becomes LockSkip: the daemon cannot prompt, so it leaves a lock
+// (and the worktree) alone.
+func toLockStrategy(s lumberjackv1.LockStrategy) LockStrategy {
+	switch s {
+	case lumberjackv1.LockStrategy_LOCK_STRATEGY_UNLOCK:
+		return LockUnlock
+	case lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE:
+		return LockDelete
+	case lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT:
+		return LockAbort
+	default:
+		return LockSkip
+	}
+}
+
+// toLockDecisions indexes the request's per-worktree lock choices by directory,
+// the key TidyOptions uses. A repeated later entry for the same path wins,
+// which is what a client that resent a decision would mean.
+func toLockDecisions(decisions []*lumberjackv1.LockDecision) map[string]LockStrategy {
+	if len(decisions) == 0 {
+		return nil
+	}
+	byPath := make(map[string]LockStrategy, len(decisions))
+	for _, d := range decisions {
+		byPath[d.GetWorktreePath()] = toLockStrategy(d.GetStrategy())
+	}
+	return byPath
 }
 
 // resolveScope turns a request's repository field into the repositories to
@@ -401,6 +438,8 @@ func toStatus(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, database.ErrRepositoryExists):
 		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, ErrTidyAborted):
+		return status.Error(codes.Aborted, err.Error())
 	default:
 		return status.Error(codes.Internal, err.Error())
 	}

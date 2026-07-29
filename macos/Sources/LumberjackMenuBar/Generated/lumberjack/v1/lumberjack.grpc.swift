@@ -323,7 +323,9 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
 
   /// Tidy moves tracked worktrees that sit outside their idiomatic location
   /// (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
-  /// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+  /// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`. A
+  /// worktree git has locked is handled per the request's LockStrategy, since
+  /// `git worktree move` refuses to move one.
   ///
   /// - Parameters:
   ///   - request: Request to send to Tidy.
