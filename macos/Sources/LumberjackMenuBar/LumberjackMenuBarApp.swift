@@ -32,10 +32,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// stored position can't be confused with another app's.
     private static let statusItemAutosaveName = "com.ceilingfish.lumberjack.menubar.statusItem"
 
-    /// Points from the right-hand edge of the menu bar. Far enough left to sit
-    /// clear of the system items (Control Center is ~180, Now Playing ~330)
-    /// without reaching the notch on built-in displays.
-    private static let defaultMenuBarPosition = 640
+    /// Where we would like to sit, in points from the right-hand edge of the
+    /// menu bar: far enough left to clear the system items (Control Center is
+    /// ~180, Now Playing ~330) and the apps that cluster near them.
+    private static let preferredMenuBarPosition = 640
+
+    /// Never sit further right than this, however narrow the bar: crowding the
+    /// system items is recoverable with one ⌘-drag, and is the lesser evil.
+    private static let minimumMenuBarPosition = 360
+
+    /// Room for the item itself, so it is the *whole* icon that clears the
+    /// notch rather than just its right-hand edge.
+    private static let statusItemWidthAllowance = 32
+
+    /// The slot to claim on first launch, before the user has ever dragged the
+    /// icon.
+    ///
+    /// Not a fixed 640: on a notched display at a scaled resolution the usable
+    /// strip to the right of the notch can be a good deal narrower than that
+    /// (a 13" Air at ~1280pt logical width puts the notch around 555–725pt from
+    /// the right edge), and a slot that lands under the notch reproduces the
+    /// invisible icon this whole change exists to fix.
+    ///
+    /// `auxiliaryTopRightArea` is exactly that strip, and is nil on a display
+    /// with no notch — where the whole bar is ours and the preferred slot
+    /// stands.
+    private static var defaultMenuBarPosition: Int {
+        guard let rightOfNotch = NSScreen.main?.auxiliaryTopRightArea?.width else {
+            return preferredMenuBarPosition
+        }
+        let clearOfNotch = Int(rightOfNotch.rounded(.down)) - statusItemWidthAllowance
+        return max(min(preferredMenuBarPosition, clearOfNotch), minimumMenuBarPosition)
+    }
 
     private static func claimDefaultMenuBarPosition() {
         UserDefaults.standard.register(defaults: [
@@ -65,6 +93,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // item takes the identical slot. Registering (rather than writing) a
         // default claims a slot of our own on first launch, while a real drag
         // still persists to the same key and takes precedence.
+        //
+        // Naming the item does change which key AppKit persists under, so anyone
+        // who had already dragged the icon — stored under the auto-generated
+        // name — starts again from the slot below. Accepted rather than migrated:
+        // one drag re-fixes it permanently, which is more than was possible
+        // before, and the app has no released version whose placement we would
+        // be breaking.
         Self.claimDefaultMenuBarPosition()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
