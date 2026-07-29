@@ -266,10 +266,32 @@ func (g *Git) ListWorktrees(ctx context.Context, repoPath string) ([]Ref, error)
 		// "locked" alone, or "locked <reason>" when the lock was given one.
 		if line == "locked" || strings.HasPrefix(line, "locked ") {
 			cur.Locked = true
-			cur.LockReason = strings.TrimSpace(strings.TrimPrefix(line, "locked"))
+			cur.LockReason = unquoteCStyle(strings.TrimSpace(strings.TrimPrefix(line, "locked")))
 		}
 	}
 	return refs, nil
+}
+
+// unquoteCStyle undoes the C-style quoting git applies to a porcelain field
+// whose value needs escaping — a lock reason containing a newline is emitted as
+// `locked "agent busy\nsince tuesday"`, quotes and all. Left as-is that reason
+// is not just misreported: tidy writes it back with `worktree lock --reason`
+// when it restores a lock it lifted, so the escaping would be baked in one
+// layer deeper on every pass.
+//
+// An unquoted value is returned untouched, as is one whose quoting we cannot
+// parse — a wrong reason is better than an empty one, since it is what tells
+// the user which lock they are being asked about.
+func unquoteCStyle(s string) string {
+	if !strings.HasPrefix(s, `"`) {
+		return s
+	}
+	// Go's unquoting accepts the same escapes git's quote_c_style emits,
+	// including the octal \nnn it uses for non-ASCII bytes.
+	if unquoted, err := strconv.Unquote(s); err == nil {
+		return unquoted
+	}
+	return s
 }
 
 // IsDirty reports whether the worktree at dir has uncommitted changes

@@ -22,10 +22,6 @@ var lockStrategyNames = map[string]lumberjackv1.LockStrategy{
 	"abort":  lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT,
 }
 
-// errLockAbort is the outcome of choosing to abort, at the prompt or via
-// --lock-strategy abort: the command stops without moving anything.
-var errLockAbort = errors.New("aborted: the worktree is locked")
-
 // lockStrategyValues lists the accepted --lock-strategy values, for the flag's
 // error message and its shell completion.
 func lockStrategyValues() []string {
@@ -54,19 +50,25 @@ func parseLockStrategy(value string) (lumberjackv1.LockStrategy, error) {
 // tests can substitute a scripted answer for the raw-terminal UI.
 var lockPrompter = promptLockStrategy
 
-// interactiveStdin reports whether there is a terminal to prompt on. A package
-// var for the same reason as lockPrompter.
-var interactiveStdin = func() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+// interactiveTerminal reports whether there is a terminal to prompt on. Both
+// ends have to be one: stdin because the answer is read from it, and stderr
+// because the question is written there — with stderr redirected,
+// `lumberjack tidy 2>/dev/null` would otherwise sit in raw mode waiting for an
+// answer to a question the user never saw. A package var so tests can
+// substitute a scripted answer for the raw-terminal UI.
+var interactiveTerminal = func() bool {
+	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+}
 
 // promptLockStrategy asks, on the controlling terminal, what to do about the
 // locked worktree at path (reason being the message git recorded with the lock,
 // if any). Enter takes the default: unlock for the move and lock it again
 // afterwards, which leaves the worktree as the user left it.
 func promptLockStrategy(cmd *cobra.Command, path, reason string) (lumberjackv1.LockStrategy, error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
+	if !interactiveTerminal() {
 		return 0, errors.New("no interactive terminal to ask about a locked worktree; pass --lock-strategy")
 	}
+	fd := int(os.Stdin.Fd())
 	out := cmd.ErrOrStderr()
 
 	oldState, err := term.MakeRaw(fd)

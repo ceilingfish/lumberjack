@@ -406,3 +406,28 @@ func TestLockUnlockWorktree(t *testing.T) {
 		t.Errorf("ref = %+v, want locked with no reason", ref)
 	}
 }
+
+// git C-quotes a porcelain field whose value needs escaping, so a lock reason
+// containing a newline arrives as `locked "agent busy\nsince tuesday"`. Left
+// quoted it would be misreported and — worse — written back through
+// `worktree lock --reason` when tidy restores a lock it lifted, escaping it one
+// layer deeper each pass.
+func TestUnquoteCStyleLockReason(t *testing.T) {
+	for _, tc := range []struct {
+		name, in, want string
+	}{
+		{"unquoted is untouched", "in use", "in use"},
+		{"newline", `"agent busy\nsince tuesday"`, "agent busy\nsince tuesday"},
+		{"embedded quote", `"say \"hi\""`, `say "hi"`},
+		{"tab", `"a\tb"`, "a\tb"},
+		{"octal utf-8", `"caf\303\251"`, "café"},
+		{"unparseable quoting is kept as-is", `"unterminated`, `"unterminated`},
+		{"empty", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := unquoteCStyle(tc.in); got != tc.want {
+				t.Errorf("unquoteCStyle(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

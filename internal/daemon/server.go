@@ -308,6 +308,19 @@ func (s *Server) Tidy(ctx context.Context, req *lumberjackv1.TidyRequest) (*lumb
 		LockStrategy:  toLockStrategy(req.GetLockStrategy()),
 		LockDecisions: toLockDecisions(req.GetLockDecisions()),
 	}
+	// Abort promises that nothing is moved, so every repository in scope must be
+	// checked before the first one is touched — otherwise a `tidy` with no
+	// --repository tidies A in full and only then aborts on B, and the moves in A
+	// are discarded along with the error and never reported. Skipped when no
+	// abort is possible, so an ordinary tidy pays nothing for it.
+	if opts.CanAbortOnLock() && !opts.DryRun {
+		for _, repo := range repos {
+			if err := s.svc.TidyAbortCheck(ctx, repo, opts); err != nil {
+				return nil, toStatus(err)
+			}
+		}
+	}
+
 	resp := &lumberjackv1.TidyResponse{}
 	for _, repo := range repos {
 		moves, err := s.svc.TidyRepository(ctx, repo, opts)

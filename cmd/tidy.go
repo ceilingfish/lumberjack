@@ -65,7 +65,7 @@ func newTidyCmd() *cobra.Command {
 				// when there is a terminal to ask on. A dry run moves nothing, so
 				// there is nothing to consent to: it reports locked worktrees as
 				// skipped instead.
-				if strategy == lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED && !dryRun && interactiveStdin() {
+				if strategy == lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED && !dryRun && interactiveTerminal() {
 					decisions, err := resolveLockedWorktrees(ctx, cmd, cl, opts)
 					if err != nil {
 						return err
@@ -131,7 +131,7 @@ func resolveLockedWorktrees(
 		if strategy == lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT {
 			// Abort cancels the whole tidy, not just this worktree, so nothing is
 			// moved — not even the worktrees already answered for.
-			return nil, fmt.Errorf("%w: %s", errLockAbort, m.GetFrom())
+			return nil, fmt.Errorf("aborted: the worktree at %s is locked", m.GetFrom())
 		}
 		if decisions == nil {
 			decisions = map[string]lumberjackv1.LockStrategy{}

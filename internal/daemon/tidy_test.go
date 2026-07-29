@@ -596,22 +596,9 @@ func TestTidyRepositoryReportsRelockFailureOnAMoveThatLanded(t *testing.T) {
 	}
 }
 
-// Locks live only in git, so a listing tidy cannot read leaves it unable to tell
-// a movable worktree from a locked one. It refuses the run rather than moving
-// worktrees it has not checked.
-func TestTidyRepositoryFailsWhenGitCannotBeListed(t *testing.T) {
-	h := newHarness(t)
-	repo := h.repo(t)
-	h.track(t, repo, "feature/foo", filepath.Join(h.parent, "elsewhere", "foo"))
-	h.git.listErr = errors.New("not a git repository")
-
-	if _, err := h.svc.TidyRepository(context.Background(), repo, TidyOptions{}); err == nil {
-		t.Fatal("TidyRepository succeeded, want the listing failure reported")
-	}
-	if len(h.git.moves) != 0 {
-		t.Errorf("git moves=%v, want none", h.git.moves)
-	}
-}
+// Superseded by TestTidyRepositoryContinuesWhenGitCannotListWorktrees below:
+// refusing the run made one unusable repository fatal to a whole multi-repository
+// tidy, discarding the moves already made in the repositories before it.
 
 // A locked worktree that could not be moved anyway is reported for the obstacle
 // that actually blocks it, and its lock is never touched — there is no point
@@ -633,5 +620,55 @@ func TestTidyRepositoryPrefersOtherObstaclesOverTheLock(t *testing.T) {
 	}
 	if _, stillLocked := h.git.locks[from]; !stillLocked {
 		t.Error("lock was lifted for a move that could never happen")
+	}
+}
+
+// A dry run moves nothing, so there is nothing for an abort to prevent: the
+// preview is exactly what a user reaching for --lock-strategy abort wants to
+// see first, and refusing it would deny the flag's own purpose.
+func TestTidyRepositoryDryRunWithAbortStillPreviews(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	from := filepath.Join(h.parent, "elsewhere", "foo")
+	wt := h.lockedWorktree(t, repo, "feature/foo", from, "in use")
+
+	moves, err := h.svc.TidyRepository(context.Background(), repo,
+		TidyOptions{DryRun: true, LockStrategy: LockAbort})
+	if err != nil {
+		t.Fatalf("a dry run must not abort: %v", err)
+	}
+	if len(moves) != 1 || !moves[0].Locked || moves[0].Moved {
+		t.Fatalf("moves=%+v, want one unmoved entry reporting the lock", moves)
+	}
+	if got := h.storedDir(t, wt.ID); got != from {
+		t.Errorf("tracked directory=%s, want it left at %s", got, from)
+	}
+	if _, stillLocked := h.git.locks[from]; !stillLocked {
+		t.Error("a dry run lifted the lock")
+	}
+}
+
+// A repository git cannot enumerate leaves tidy unable to tell a locked
+// worktree from a free one, but that must not sink the run: on a tidy with no
+// --repository it would discard the moves already made in the repositories
+// before it. Tidy carries on with no lock information, and git refuses the
+// locked move itself — which is what tidy did before locks were handled at all.
+func TestTidyRepositoryContinuesWhenGitCannotListWorktrees(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	from := filepath.Join(h.parent, "elsewhere", "foo")
+	want := filepath.Join(h.parent, "n-foo")
+	wt := h.track(t, repo, "feature/foo", from)
+	h.git.listErr = errors.New("not a git repository")
+
+	moves, err := h.svc.TidyRepository(context.Background(), repo, TidyOptions{})
+	if err != nil {
+		t.Fatalf("an unlistable repository must not fail the tidy: %v", err)
+	}
+	if len(moves) != 1 || !moves[0].Moved {
+		t.Fatalf("moves=%+v, want the move still attempted and made", moves)
+	}
+	if got := h.storedDir(t, wt.ID); got != want {
+		t.Errorf("tracked directory=%s, want %s", got, want)
 	}
 }

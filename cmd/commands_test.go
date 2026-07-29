@@ -765,13 +765,13 @@ func lockedMove() *lumberjackv1.TidyMove {
 func answerLockPrompt(t *testing.T, strategy lumberjackv1.LockStrategy) *[]string {
 	t.Helper()
 	var asked []string
-	prevInteractive, prevPrompter := interactiveStdin, lockPrompter
-	interactiveStdin = func() bool { return true }
+	prevInteractive, prevPrompter := interactiveTerminal, lockPrompter
+	interactiveTerminal = func() bool { return true }
 	lockPrompter = func(_ *cobra.Command, path, _ string) (lumberjackv1.LockStrategy, error) {
 		asked = append(asked, path)
 		return strategy, nil
 	}
-	t.Cleanup(func() { interactiveStdin, lockPrompter = prevInteractive, prevPrompter })
+	t.Cleanup(func() { interactiveTerminal, lockPrompter = prevInteractive, prevPrompter })
 	return &asked
 }
 
@@ -904,9 +904,9 @@ func TestCmdTidyDryRunDoesNotPrompt(t *testing.T) {
 func TestCmdTidyWithoutATerminalDoesNotProbe(t *testing.T) {
 	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{lockedMove()}}
 	serveStub(t, stub)
-	prev := interactiveStdin
-	interactiveStdin = func() bool { return false }
-	t.Cleanup(func() { interactiveStdin = prev })
+	prev := interactiveTerminal
+	interactiveTerminal = func() bool { return false }
+	t.Cleanup(func() { interactiveTerminal = prev })
 
 	out, err := run(t, "", "tidy", "--repository", "n")
 	if err != nil {
