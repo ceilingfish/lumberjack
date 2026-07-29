@@ -509,8 +509,10 @@ func (s *Service) adoptWorktree(
 		return false
 	}
 	// Failures are recorded on the row and surfaced via its reconciliation
-	// status; they do not fail the sync, and the worktree is kept.
-	_ = s.runSetupSteps(ctx, repo, dir, row.ID)
+	// status; they do not fail the sync, and the worktree is kept. The user
+	// checked this directory out themselves, so copy-file steps must not
+	// overwrite what is already in it.
+	_ = s.runSetupSteps(ctx, repo, dir, row.ID, true /* preserveExisting */)
 	s.emitChange(repo, progress, WorktreeChange{
 		Branch: branch, PRNumber: prNum, Action: ActionAdopted, DirectoryPath: dir,
 	})
@@ -543,7 +545,7 @@ func (s *Service) createWorktree(
 	// created worktree. Failures are recorded on the worktree row and surfaced
 	// via its reconciliation status; they do not fail the sync (the worktree is
 	// kept, per the feature's fail-fast-but-keep design).
-	_ = s.runSetupSteps(ctx, repo, dir, row.ID)
+	_ = s.runSetupSteps(ctx, repo, dir, row.ID, false /* preserveExisting */)
 	s.emitChange(repo, progress, WorktreeChange{
 		Branch: pr.HeadBranch, PRNumber: &n, Action: ActionCheckedOut, DirectoryPath: dir,
 	})

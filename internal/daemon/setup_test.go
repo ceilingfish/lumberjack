@@ -241,6 +241,77 @@ func TestAdoptedOrphanRunsSetupStepsOnceOnly(t *testing.T) {
 	}
 }
 
+// The whole point of the preserve-existing rule: the user checked this
+// directory out by hand and tuned its (gitignored, so unrecoverable) .env.
+// Adoption must not silently overwrite it with the main checkout's copy.
+func TestAdoptionDoesNotOverwriteExistingFiles(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	copyEnvConfig(t, h, repo)
+
+	existing := filepath.Join(h.parent, "hand-tuned")
+	if err := os.MkdirAll(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(existing, ".env")
+	const mine = "SECRET=my-own-value\n"
+	if err := os.WriteFile(dest, []byte(mine), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/tuned"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != mine {
+		t.Errorf("adoption overwrote the user's file: got %q, want %q", got, mine)
+	}
+}
+
+// A setup failure during adoption is surfaced on the worktree's reconciliation
+// status, but the sync still succeeds and the worktree is kept — the same
+// fail-fast-but-keep contract createWorktree has.
+func TestAdoptionSetupFailureIsRecordedButKeepsWorktree(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	// A copy-file step whose source does not exist in the main checkout, so the
+	// step fails without needing consent or a subprocess.
+	h.git.configFiles = map[string][]byte{
+		trustedRef("origin", "main") + ":" + setup.ConfigFileName: []byte(`
+steps:
+  - type: copy-file
+    copy_file:
+      source: nonexistent.env
+      destination: .env
+`),
+	}
+
+	existing := filepath.Join(h.parent, "will-fail")
+	if err := os.MkdirAll(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/fails"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("a setup failure must not fail the sync: %v", err)
+	}
+
+	rows, err := h.svc.db.ListWorktrees(context.Background(), repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("adopted worktree count = %d, want 1 (a setup failure must not drop it)", len(rows))
+	}
+	if rows[0].SetupError == nil || *rows[0].SetupError == "" {
+		t.Error("expected the setup failure to be recorded on the adopted worktree row")
+	}
+}
+
 func TestGetSetupConsentPendingWhenNeverConsented(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)

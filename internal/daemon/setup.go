@@ -9,14 +9,21 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
 
-// runSetupSteps runs repo's trusted `.lumberjack.yml` setup steps against a
-// freshly created worktree at dir, recording the failing step (if any) on the
-// worktree row so it surfaces on its reconciliation status. It never returns
-// an error: per the feature's fail-fast-but-keep design, a setup failure does
-// not fail the clone or the sync, it is only surfaced. The recorded failure is
-// returned (empty on success) so a caller driving one worktree — `worktree
-// add` — can report it inline instead of waiting for a later status read.
-func (s *Service) runSetupSteps(ctx context.Context, repo *schema.Repository, dir string, worktreeID int64) string {
+// runSetupSteps runs repo's trusted `.lumberjack.yml` setup steps against the
+// worktree at dir, recording the failing step (if any) on the worktree row so
+// it surfaces on its reconciliation status. It never returns an error: per the
+// feature's fail-fast-but-keep design, a setup failure does not fail the clone
+// or the sync, it is only surfaced. The recorded failure is returned (empty on
+// success) so a caller driving one worktree — `worktree add` — can report it
+// inline instead of waiting for a later status read.
+//
+// preserveExisting must be set when dir is a directory Lumberjack did not
+// create, so copy-file steps cannot destroy the user's own files (see
+// setup.Options.PreserveExisting).
+func (s *Service) runSetupSteps(
+	ctx context.Context, repo *schema.Repository, dir string, worktreeID int64,
+	preserveExisting bool,
+) string {
 	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
 	if err != nil {
 		msg := fmt.Sprintf("loading %s: %v", setup.ConfigFileName, err)
@@ -31,9 +38,10 @@ func (s *Service) runSetupSteps(ctx context.Context, repo *schema.Repository, di
 		repo.SetupConsentFingerprint == setup.Fingerprint(raw)
 
 	failedStep, runErr := setup.Run(ctx, cfg, setup.Options{
-		MainCheckout: repo.LocalPath,
-		WorktreeDir:  dir,
-		Consented:    consented,
+		MainCheckout:     repo.LocalPath,
+		WorktreeDir:      dir,
+		Consented:        consented,
+		PreserveExisting: preserveExisting,
 	})
 	if runErr != nil {
 		msg := fmt.Sprintf("%s failed: %v", failedStep, runErr)
