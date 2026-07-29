@@ -182,7 +182,7 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack delete NAME` | Stop tracking a repository — removes it and its worktrees from the database only (nothing on disk or GitHub). |
 | `lumberjack list` | List every tracked repository. |
 | `lumberjack status [--repository NAME]` | Last-sync detail for the repo in the current dir, or the named one. |
-| `lumberjack sync [--repository NAME]` | Reconcile worktrees for the repo in the current dir, or the named one, now. |
+| `lumberjack sync [--repository NAME]` | Reconcile worktrees for the repo in the current dir, or the named one, now. Runs the repo's setup steps against every worktree it newly tracks — created or adopted. |
 | `lumberjack sync-all` | Sync **all** tracked repositories. |
 | `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR] [--dry-run] [--lock-strategy STRATEGY]` | Move worktrees that aren't in their idiomatic location (`<worktrees dir>/<name>-<branch slug>`) back into it. `--worktree` narrows it to one; `--dry-run` reports without moving. A locked worktree is prompted about — unlock it for the move and lock it again (default), skip it, delete the lock, or abort — and `--lock-strategy skip\|unlock\|delete\|abort` answers for all of them up front. |
 | `lumberjack worktrees [--repository NAME]` | List worktrees for the repo in the current dir, or the named one. |

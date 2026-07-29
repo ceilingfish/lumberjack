@@ -135,3 +135,52 @@ steps:
 		t.Fatalf("failed step = %q", step)
 	}
 }
+
+// PreserveExisting asks "has the user put something here", so a symlink counts
+// as something — following it would clobber a target that may be well outside
+// the worktree, and a dangling one is as likely to be deliberate as junk.
+func TestRunCopyFilePreservesExistingSymlink(t *testing.T) {
+	main, wt := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, ".env"), []byte("from-main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Two destinations: one symlink to a real file elsewhere, one dangling.
+	outside := filepath.Join(t.TempDir(), "real.env")
+	if err := os.WriteFile(outside, []byte("mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(wt, "linked.env")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(wt, "nope"), filepath.Join(wt, "dangling.env")); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: "linked.env"}},
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: "dangling.env"}},
+	}}
+	if _, err := Run(context.Background(), cfg, Options{
+		MainCheckout: main, WorktreeDir: wt, PreserveExisting: true,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The symlink's target must be untouched, and the link still a link.
+	got, err := os.ReadFile(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "mine\n" {
+		t.Errorf("followed the symlink and overwrote its target: %q", got)
+	}
+	for _, name := range []string{"linked.env", "dangling.env"} {
+		fi, err := os.Lstat(filepath.Join(wt, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s is no longer a symlink; the copy replaced it", name)
+		}
+	}
+}

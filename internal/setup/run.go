@@ -25,9 +25,17 @@ type Options struct {
 	// MainCheckout is the repository's main checkout — copy-file sources
 	// resolve against it, so untracked local files (e.g. .env) can be picked up.
 	MainCheckout string
-	// WorktreeDir is the freshly created worktree — copy-file destinations and
+	// WorktreeDir is the worktree being set up — copy-file destinations and
 	// run-command's working directory resolve against it.
 	WorktreeDir string
+	// PreserveExisting makes copy-file steps leave a destination that already
+	// exists alone rather than overwriting it. Set when setting up a worktree
+	// Lumberjack did not create: a directory the user checked out by hand may
+	// already hold a tuned, gitignored file — a .env with real credentials —
+	// that a copy would destroy with no way to get it back. On a worktree
+	// Lumberjack created the destination can only be a tracked file from the
+	// fresh checkout, which a copy-file step is precisely meant to replace.
+	PreserveExisting bool
 	// Consented reports whether the local user has consented to run-command
 	// steps for the config being run. When false, run-command steps are
 	// skipped (not failed); copy-file steps still run.
@@ -65,11 +73,26 @@ func Run(ctx context.Context, cfg *Config, opts Options) (failedStep string, err
 	return "", nil
 }
 
-// runCopyFile copies one file from the main checkout into the new worktree,
+// runCopyFile copies one file from the main checkout into the worktree,
 // creating destination directories as needed and preserving the source's mode.
+//
+// With opts.PreserveExisting it does nothing when anything at all is already at
+// the destination. Lstat, not Stat, so the test is "has the user put something
+// here", not "is there a readable file here": a symlink counts as something,
+// and is left alone even when it dangles. Both halves matter — following the
+// link would clobber whatever it points at, which may be well outside the
+// worktree, and a broken link is as likely to be deliberate (a target that
+// appears when a volume mounts) as it is to be junk. Neither is ours to
+// replace.
 func runCopyFile(opts Options, cf *CopyFile) error {
 	src := filepath.Join(opts.MainCheckout, filepath.Clean(cf.Source))
 	dst := filepath.Join(opts.WorktreeDir, filepath.Clean(cf.Destination))
+
+	if opts.PreserveExisting {
+		if _, err := os.Lstat(dst); err == nil {
+			return nil
+		}
+	}
 
 	info, err := os.Stat(src)
 	if err != nil {

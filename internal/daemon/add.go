@@ -79,7 +79,7 @@ func (s *Service) addWorktreeLocked(ctx context.Context, repo *schema.Repository
 		return AddResult{}, fmt.Errorf("recording worktree for %s: %w", branch, err)
 	}
 
-	setupErr := s.runSetupSteps(ctx, repo, dir, row.ID)
+	setupErr := s.runSetupSteps(ctx, repo, dir, row.ID, false /* preserveExisting */)
 	s.events.Publish(Event{
 		Type: EventWorktreeChanged, Repository: repo,
 		Change: &WorktreeChange{
