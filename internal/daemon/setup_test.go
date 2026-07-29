@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/github"
 	"github.com/ceilingfish/lumberjack/internal/setup"
+	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
 
 // trustedRef mirrors loadTrustedSetupConfig's ref computation for tests.
@@ -156,6 +158,86 @@ steps:
 	}
 	if views[0].Status.Note == "" {
 		t.Error("expected a non-empty reconciliation note naming the failed step")
+	}
+}
+
+// copyEnvConfig is the trusted-config fixture the adoption tests share: a
+// single copy-file step lifting .env out of the main checkout.
+func copyEnvConfig(t *testing.T, h *harness, repo *schema.Repository) {
+	t.Helper()
+	if err := os.MkdirAll(repo.LocalPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.LocalPath, ".env"), []byte("SECRET=1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.git.configFiles = map[string][]byte{
+		trustedRef("origin", "main") + ":" + setup.ConfigFileName: []byte(`
+steps:
+  - type: copy-file
+    copy_file:
+      source: .env
+      destination: .env
+`),
+	}
+}
+
+// A directory checked out by hand and claimed by an open PR is adopted rather
+// than created, but it is still newly tracked, so setup steps must run.
+func TestAdoptedWorktreeRunsSetupSteps(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	copyEnvConfig(t, h, repo)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/x"}}
+
+	existing := filepath.Join(h.parent, "hand-checkout")
+	if err := os.MkdirAll(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/x"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(existing, ".env"))
+	if err != nil {
+		t.Fatalf("setup steps did not run on the adopted worktree: %v", err)
+	}
+	if string(got) != "SECRET=1\n" {
+		t.Errorf("copied content = %q", got)
+	}
+}
+
+// An orphan — checked out by hand with no open PR asking for its branch — is
+// adopted too, and gets the same setup treatment. A second sync sees an
+// already-tracked row and must not run the steps again.
+func TestAdoptedOrphanRunsSetupStepsOnceOnly(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	copyEnvConfig(t, h, repo)
+
+	existing := filepath.Join(h.parent, "orphan")
+	if err := os.MkdirAll(existing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/orphan"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	dest := filepath.Join(existing, ".env")
+	if _, err := os.Stat(dest); err != nil {
+		t.Fatalf("setup steps did not run on the adopted orphan: %v", err)
+	}
+
+	if err := os.Remove(dest); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("second SyncRepository: %v", err)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Error("setup steps re-ran on an already-tracked worktree")
 	}
 }
 
