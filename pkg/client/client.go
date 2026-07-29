@@ -203,16 +203,40 @@ func (c *Client) DeleteRepository(ctx context.Context, ref string) (*lumberjackv
 	return resp, nil
 }
 
-// Tidy moves worktrees that sit outside their idiomatic location back into it,
-// for one repository (ref set) or all of them (ref empty). worktree, when
-// non-empty, restricts the tidy to the single worktree it names (by branch or
-// directory) and requires ref to be set. It returns one move per misplaced
-// worktree — including ones it could not move, whose Error says why. With
-// dryRun set nothing is changed and every move has Moved false.
-func (c *Client) Tidy(ctx context.Context, ref, worktree string, dryRun bool) ([]*lumberjackv1.TidyMove, error) {
-	resp, err := c.svc.Tidy(ctx, &lumberjackv1.TidyRequest{
-		Repository: ref, Worktree: worktree, DryRun: dryRun,
-	})
+// TidyOptions configures a Tidy call.
+type TidyOptions struct {
+	// Repository names the repository to tidy; empty tidies every tracked one.
+	Repository string
+	// Worktree, when non-empty, restricts the tidy to the single worktree it
+	// names (by branch or directory) and requires Repository to be set.
+	Worktree string
+	// DryRun reports the moves that would be made without making any.
+	DryRun bool
+	// LockStrategy is what to do with a locked worktree — git refuses to move
+	// one — for every worktree without a LockDecision of its own.
+	LockStrategy lumberjackv1.LockStrategy
+	// LockDecisions overrides LockStrategy for individual worktrees, keyed by
+	// the directory the worktree is currently at (TidyMove.From). It is how an
+	// interactive caller sends a per-worktree answer.
+	LockDecisions map[string]lumberjackv1.LockStrategy
+}
+
+// Tidy moves worktrees that sit outside their idiomatic location back into it.
+// It returns one move per misplaced worktree — including ones it could not
+// move, whose Error says why. With opts.DryRun nothing is changed and every
+// move has Moved false. A locked worktree is handled per opts; with
+// LOCK_STRATEGY_ABORT a locked worktree fails the whole call and nothing moves.
+func (c *Client) Tidy(ctx context.Context, opts TidyOptions) ([]*lumberjackv1.TidyMove, error) {
+	req := &lumberjackv1.TidyRequest{
+		Repository: opts.Repository, Worktree: opts.Worktree, DryRun: opts.DryRun,
+		LockStrategy: opts.LockStrategy,
+	}
+	for path, strategy := range opts.LockDecisions {
+		req.LockDecisions = append(req.LockDecisions, &lumberjackv1.LockDecision{
+			WorktreePath: path, Strategy: strategy,
+		})
+	}
+	resp, err := c.svc.Tidy(ctx, req)
 	if err != nil {
 		return nil, mapError(err)
 	}

@@ -147,6 +147,27 @@ func (g *Git) MoveWorktree(ctx context.Context, repoPath, from, to string) error
 	return err
 }
 
+// LockWorktree locks the worktree at dir, recording reason with the lock when
+// it is non-empty. It is how tidy restores a lock it lifted only to be able to
+// move the worktree; git refuses to lock one that is already locked, which the
+// caller reports rather than works around.
+func (g *Git) LockWorktree(ctx context.Context, repoPath, dir, reason string) error {
+	args := []string{"worktree", "lock"}
+	if reason != "" {
+		args = append(args, "--reason", reason)
+	}
+	args = append(args, dir)
+	_, err := g.run(ctx, repoPath, args...)
+	return err
+}
+
+// UnlockWorktree removes the lock on the worktree at dir, so it can be moved
+// or removed.
+func (g *Git) UnlockWorktree(ctx context.Context, repoPath, dir string) error {
+	_, err := g.run(ctx, repoPath, "worktree", "unlock", dir)
+	return err
+}
+
 // RemoveWorktree removes the worktree at dir. force drops the safety checks
 // git applies for dirty or diverged trees; the daemon only sets it after the
 // caller has confirmed the loss (see DeleteWorktree in the proto).
@@ -211,6 +232,12 @@ func (g *Git) ShowFile(ctx context.Context, repoPath, ref, path string) (data []
 type Ref struct {
 	Dir    string
 	Branch string
+	// Locked reports whether git has the worktree locked (`git worktree lock`),
+	// which makes it refuse to move or remove it. LockReason is the message
+	// recorded with the lock, empty when the lock carries none — `worktree list
+	// --porcelain` prints the reason on the `locked` line itself.
+	Locked     bool
+	LockReason string
 }
 
 // ListWorktrees returns every worktree registered on repoPath (including the
@@ -236,8 +263,35 @@ func (g *Git) ListWorktrees(ctx context.Context, repoPath string) ([]Ref, error)
 		if b, ok := strings.CutPrefix(line, "branch refs/heads/"); ok {
 			cur.Branch = b
 		}
+		// "locked" alone, or "locked <reason>" when the lock was given one.
+		if line == "locked" || strings.HasPrefix(line, "locked ") {
+			cur.Locked = true
+			cur.LockReason = unquoteCStyle(strings.TrimSpace(strings.TrimPrefix(line, "locked")))
+		}
 	}
 	return refs, nil
+}
+
+// unquoteCStyle undoes the C-style quoting git applies to a porcelain field
+// whose value needs escaping — a lock reason containing a newline is emitted as
+// `locked "agent busy\nsince tuesday"`, quotes and all. Left as-is that reason
+// is not just misreported: tidy writes it back with `worktree lock --reason`
+// when it restores a lock it lifted, so the escaping would be baked in one
+// layer deeper on every pass.
+//
+// An unquoted value is returned untouched, as is one whose quoting we cannot
+// parse — a wrong reason is better than an empty one, since it is what tells
+// the user which lock they are being asked about.
+func unquoteCStyle(s string) string {
+	if !strings.HasPrefix(s, `"`) {
+		return s
+	}
+	// Go's unquoting accepts the same escapes git's quote_c_style emits,
+	// including the octal \nnn it uses for non-ASCII bytes.
+	if unquoted, err := strconv.Unquote(s); err == nil {
+		return unquoted
+	}
+	return s
 }
 
 // IsDirty reports whether the worktree at dir has uncommitted changes

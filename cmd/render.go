@@ -150,6 +150,10 @@ func renderTidyMoves(w io.Writer, moves []*lumberjackv1.TidyMove, dryRun, color 
 // tidyResult renders what became of one misplaced worktree.
 func tidyResult(m *lumberjackv1.TidyMove, dryRun, color bool) string {
 	switch {
+	case m.GetMoved() && m.GetError() != "":
+		// The move landed but something after it did not — the database was not
+		// updated, or a lock lifted for the move was not restored.
+		return present.StatusWarn("⚠ moved: "+m.GetError(), color)
 	case m.GetError() != "":
 		return present.StatusWarn("⚠ skipped: "+m.GetError(), color)
 	case dryRun:

@@ -35,6 +35,11 @@ type GitOps interface {
 	// MoveWorktree relocates a worktree, so `tidy` can put one back in the
 	// location the naming convention gives it.
 	MoveWorktree(ctx context.Context, repoPath, from, to string) error
+	// LockWorktree and UnlockWorktree manage a worktree's git lock, so `tidy`
+	// can lift a lock that would otherwise make MoveWorktree refuse — and put it
+	// back, with its original reason, once the worktree has moved.
+	LockWorktree(ctx context.Context, repoPath, dir, reason string) error
+	UnlockWorktree(ctx context.Context, repoPath, dir string) error
 	// ListWorktrees enumerates the worktrees already registered on the repo,
 	// so sync can adopt directories checked out by hand instead of failing to
 	// recreate them.

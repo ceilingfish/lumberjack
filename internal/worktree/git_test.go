@@ -344,3 +344,90 @@ func TestMoveWorktreeBuriesIntoAnExistingDestination(t *testing.T) {
 		t.Errorf("worktree should not have landed at %s itself, stat err = %v", to, err)
 	}
 }
+
+// lockedRef finds the listed worktree whose directory ends in base. Basenames
+// are compared for the reason TestMoveWorktree gives: git reports the resolved
+// /private/var path on macOS, not the /var symlink the test built.
+func lockedRef(t *testing.T, g *Git, repoPath, base string) Ref {
+	t.Helper()
+	refs, err := g.ListWorktrees(context.Background(), repoPath)
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	for _, r := range refs {
+		if filepath.Base(r.Dir) == base {
+			return r
+		}
+	}
+	t.Fatalf("worktree %s not listed: %v", base, refs)
+	return Ref{}
+}
+
+// TestLockUnlockWorktree exercises the premise tidy's lock handling exists for
+// against real git: a locked worktree refuses to move, the lock and its reason
+// are visible in the listing, and unlocking makes the move possible again.
+func TestLockUnlockWorktree(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	from := filepath.Join(filepath.Dir(main), "misplaced", "foo")
+	if err := g.AddWorktree(ctx, main, from, "origin", "feature/foo"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if err := g.LockWorktree(ctx, main, from, "keeping this one"); err != nil {
+		t.Fatalf("LockWorktree: %v", err)
+	}
+
+	ref := lockedRef(t, g, main, "foo")
+	if !ref.Locked || ref.LockReason != "keeping this one" {
+		t.Errorf("ref = %+v, want locked with the reason it was given", ref)
+	}
+
+	to := filepath.Join(filepath.Dir(main), "main-foo")
+	if err := g.MoveWorktree(ctx, main, from, to); err == nil {
+		t.Fatal("MoveWorktree succeeded on a locked worktree, want it refused")
+	}
+
+	if err := g.UnlockWorktree(ctx, main, from); err != nil {
+		t.Fatalf("UnlockWorktree: %v", err)
+	}
+	if ref := lockedRef(t, g, main, "foo"); ref.Locked {
+		t.Errorf("ref = %+v, want unlocked", ref)
+	}
+	if err := g.MoveWorktree(ctx, main, from, to); err != nil {
+		t.Fatalf("MoveWorktree after unlocking: %v", err)
+	}
+
+	// A lock with no reason: locked, but nothing to quote back to the user.
+	if err := g.LockWorktree(ctx, main, to, ""); err != nil {
+		t.Fatalf("LockWorktree without a reason: %v", err)
+	}
+	if ref := lockedRef(t, g, main, "main-foo"); !ref.Locked || ref.LockReason != "" {
+		t.Errorf("ref = %+v, want locked with no reason", ref)
+	}
+}
+
+// git C-quotes a porcelain field whose value needs escaping, so a lock reason
+// containing a newline arrives as `locked "agent busy\nsince tuesday"`. Left
+// quoted it would be misreported and — worse — written back through
+// `worktree lock --reason` when tidy restores a lock it lifted, escaping it one
+// layer deeper each pass.
+func TestUnquoteCStyleLockReason(t *testing.T) {
+	for _, tc := range []struct {
+		name, in, want string
+	}{
+		{"unquoted is untouched", "in use", "in use"},
+		{"newline", `"agent busy\nsince tuesday"`, "agent busy\nsince tuesday"},
+		{"embedded quote", `"say \"hi\""`, `say "hi"`},
+		{"tab", `"a\tb"`, "a\tb"},
+		{"octal utf-8", `"caf\303\251"`, "café"},
+		{"unparseable quoting is kept as-is", `"unterminated`, `"unterminated`},
+		{"empty", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := unquoteCStyle(tc.in); got != tc.want {
+				t.Errorf("unquoteCStyle(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

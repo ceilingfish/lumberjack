@@ -72,7 +72,9 @@ service LumberjackService {
 
   // Tidy moves tracked worktrees that sit outside their idiomatic location
   // (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
-  // `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+  // `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`. A
+  // worktree git has locked is handled per the request's LockStrategy, since
+  // `git worktree move` refuses to move one.
   rpc Tidy(TidyRequest) returns (TidyResponse);
 
   // Watch opens a long-lived stream of worktree/repository change events. On
@@ -374,6 +376,37 @@ message SyncSummary {
   optional string error = 4;
 }
 
+// LockStrategy is what Tidy does with a misplaced worktree git has locked.
+// `git worktree move` refuses to move a locked worktree, so one of these must
+// be chosen before the move can be attempted. The CLI resolves it from
+// `--lock-strategy`, or by prompting per locked worktree.
+enum LockStrategy {
+  // Unset. The daemon treats it as SKIP: it never prompts (only the CLI can),
+  // and leaving a lock in place is the choice that changes nothing.
+  LOCK_STRATEGY_UNSPECIFIED = 0;
+  // Leave the worktree where it is, reporting it as skipped because it is
+  // locked.
+  LOCK_STRATEGY_SKIP = 1;
+  // Unlock the worktree, move it, then lock it again with the same reason.
+  LOCK_STRATEGY_UNLOCK = 2;
+  // Unlock the worktree, move it, and leave it unlocked.
+  LOCK_STRATEGY_DELETE = 3;
+  // Cancel the whole tidy when any worktree in scope is locked: nothing is
+  // moved and the daemon returns ABORTED.
+  LOCK_STRATEGY_ABORT = 4;
+}
+
+// LockDecision is a strategy chosen for one specific locked worktree, as the
+// CLI's interactive prompt produces (one question per locked worktree). It
+// overrides TidyRequest.lock_strategy for that worktree only.
+message LockDecision {
+  // The worktree's current directory — TidyMove.from, which is unique across
+  // repositories and is what the prompt named.
+  string worktree_path = 1;
+  // What to do with that worktree's lock. UNSPECIFIED is treated as SKIP.
+  LockStrategy strategy = 2;
+}
+
 message TidyRequest {
   // Empty tidies every tracked repository; set tidies just that one.
   string repository = 1;
@@ -387,6 +420,11 @@ message TidyRequest {
   // on every other worktree in its repository, since none may be moved onto a
   // path another already holds.
   string worktree = 3;
+  // What to do with a locked worktree that has no lock_decision of its own.
+  LockStrategy lock_strategy = 4;
+  // Per-worktree overrides of lock_strategy, at most one per worktree path. A
+  // path that is not (or is no longer) a locked misplaced worktree is ignored.
+  repeated LockDecision lock_decisions = 5;
 }
 
 // TidyMove is one tracked worktree found outside its idiomatic location. Every
@@ -404,9 +442,18 @@ message TidyMove {
   // True when the worktree was actually moved; false for a dry run and for a
   // move that failed.
   bool moved = 5;
-  // Why the move was not made (e.g. the destination is occupied, or git
-  // refused to move a locked worktree). Empty when moved, or on a dry run.
+  // Why the move was not made (e.g. the destination is occupied, or the
+  // worktree is locked and the strategy was SKIP). Empty when moved, or on a
+  // dry run with nothing standing in the way.
   string error = 6;
+  // True when git had the worktree locked when tidy looked. It stays true for
+  // a worktree that was unlocked, moved and re-locked — it describes what tidy
+  // found, which is what a dry run needs to report so the CLI knows which
+  // worktrees to prompt about.
+  bool locked = 7;
+  // The reason git recorded with the lock, empty when the lock has none (or
+  // the worktree is not locked).
+  string lock_reason = 8;
 }
 
 message TidyResponse {

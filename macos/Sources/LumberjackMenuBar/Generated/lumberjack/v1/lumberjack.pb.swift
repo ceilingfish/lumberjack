@@ -121,6 +121,69 @@ nonisolated enum Lumberjack_V1_WorktreeAction: SwiftProtobuf.Enum, Swift.CaseIte
 
 }
 
+/// LockStrategy is what Tidy does with a misplaced worktree git has locked.
+/// `git worktree move` refuses to move a locked worktree, so one of these must
+/// be chosen before the move can be attempted. The CLI resolves it from
+/// `--lock-strategy`, or by prompting per locked worktree.
+nonisolated enum Lumberjack_V1_LockStrategy: SwiftProtobuf.Enum, Swift.CaseIterable {
+  typealias RawValue = Int
+
+  /// Unset. The daemon treats it as SKIP: it never prompts (only the CLI can),
+  /// and leaving a lock in place is the choice that changes nothing.
+  case unspecified // = 0
+
+  /// Leave the worktree where it is, reporting it as skipped because it is
+  /// locked.
+  case skip // = 1
+
+  /// Unlock the worktree, move it, then lock it again with the same reason.
+  case unlock // = 2
+
+  /// Unlock the worktree, move it, and leave it unlocked.
+  case delete // = 3
+
+  /// Cancel the whole tidy when any worktree in scope is locked: nothing is
+  /// moved and the daemon returns ABORTED.
+  case abort // = 4
+  case UNRECOGNIZED(Int)
+
+  init() {
+    self = .unspecified
+  }
+
+  init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .skip
+    case 2: self = .unlock
+    case 3: self = .delete
+    case 4: self = .abort
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .skip: return 1
+    case .unlock: return 2
+    case .delete: return 3
+    case .abort: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  static let allCases: [Lumberjack_V1_LockStrategy] = [
+    .unspecified,
+    .skip,
+    .unlock,
+    .delete,
+    .abort,
+  ]
+
+}
+
 /// WatchResponseType identifies what a WatchResponse carries.
 nonisolated enum Lumberjack_V1_WatchResponseType: SwiftProtobuf.Enum, Swift.CaseIterable {
   typealias RawValue = Int
@@ -852,6 +915,26 @@ nonisolated struct Lumberjack_V1_SyncSummary: Sendable {
   fileprivate var _error: String? = nil
 }
 
+/// LockDecision is a strategy chosen for one specific locked worktree, as the
+/// CLI's interactive prompt produces (one question per locked worktree). It
+/// overrides TidyRequest.lock_strategy for that worktree only.
+nonisolated struct Lumberjack_V1_LockDecision: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The worktree's current directory — TidyMove.from, which is unique across
+  /// repositories and is what the prompt named.
+  var worktreePath: String = String()
+
+  /// What to do with that worktree's lock. UNSPECIFIED is treated as SKIP.
+  var strategy: Lumberjack_V1_LockStrategy = .unspecified
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
 nonisolated struct Lumberjack_V1_TidyRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -871,6 +954,13 @@ nonisolated struct Lumberjack_V1_TidyRequest: Sendable {
   /// on every other worktree in its repository, since none may be moved onto a
   /// path another already holds.
   var worktree: String = String()
+
+  /// What to do with a locked worktree that has no lock_decision of its own.
+  var lockStrategy: Lumberjack_V1_LockStrategy = .unspecified
+
+  /// Per-worktree overrides of lock_strategy, at most one per worktree path. A
+  /// path that is not (or is no longer) a locked misplaced worktree is ignored.
+  var lockDecisions: [Lumberjack_V1_LockDecision] = []
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -901,9 +991,20 @@ nonisolated struct Lumberjack_V1_TidyMove: Sendable {
   /// move that failed.
   var moved: Bool = false
 
-  /// Why the move was not made (e.g. the destination is occupied, or git
-  /// refused to move a locked worktree). Empty when moved, or on a dry run.
+  /// Why the move was not made (e.g. the destination is occupied, or the
+  /// worktree is locked and the strategy was SKIP). Empty when moved, or on a
+  /// dry run with nothing standing in the way.
   var error: String = String()
+
+  /// True when git had the worktree locked when tidy looked. It stays true for
+  /// a worktree that was unlocked, moved and re-locked — it describes what tidy
+  /// found, which is what a dry run needs to report so the CLI knows which
+  /// worktrees to prompt about.
+  var locked: Bool = false
+
+  /// The reason git recorded with the lock, empty when the lock has none (or
+  /// the worktree is not locked).
+  var lockReason: String = String()
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -998,6 +1099,10 @@ nonisolated extension Lumberjack_V1_SyncStatus: SwiftProtobuf._ProtoNameProvidin
 
 nonisolated extension Lumberjack_V1_WorktreeAction: SwiftProtobuf._ProtoNameProviding {
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0WORKTREE_ACTION_UNSPECIFIED\0\u{1}WORKTREE_ACTION_CHECKED_OUT\0\u{1}WORKTREE_ACTION_ADOPTED\0\u{1}WORKTREE_ACTION_UPDATED\0\u{1}WORKTREE_ACTION_DELETED\0\u{1}WORKTREE_ACTION_RETAINED\0")
+}
+
+nonisolated extension Lumberjack_V1_LockStrategy: SwiftProtobuf._ProtoNameProviding {
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LOCK_STRATEGY_UNSPECIFIED\0\u{1}LOCK_STRATEGY_SKIP\0\u{1}LOCK_STRATEGY_UNLOCK\0\u{1}LOCK_STRATEGY_DELETE\0\u{1}LOCK_STRATEGY_ABORT\0")
 }
 
 nonisolated extension Lumberjack_V1_WatchResponseType: SwiftProtobuf._ProtoNameProviding {
@@ -2207,9 +2312,44 @@ nonisolated extension Lumberjack_V1_SyncSummary: SwiftProtobuf.Message, SwiftPro
   }
 }
 
+nonisolated extension Lumberjack_V1_LockDecision: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".LockDecision"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}worktree_path\0\u{1}strategy\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.worktreePath) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.strategy) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.worktreePath.isEmpty {
+      try visitor.visitSingularStringField(value: self.worktreePath, fieldNumber: 1)
+    }
+    if self.strategy != .unspecified {
+      try visitor.visitSingularEnumField(value: self.strategy, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_LockDecision, rhs: Lumberjack_V1_LockDecision) -> Bool {
+    if lhs.worktreePath != rhs.worktreePath {return false}
+    if lhs.strategy != rhs.strategy {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Lumberjack_V1_TidyRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".TidyRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{3}dry_run\0\u{1}worktree\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{3}dry_run\0\u{1}worktree\0\u{3}lock_strategy\0\u{3}lock_decisions\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2220,6 +2360,8 @@ nonisolated extension Lumberjack_V1_TidyRequest: SwiftProtobuf.Message, SwiftPro
       case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self.dryRun) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.worktree) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.lockStrategy) }()
+      case 5: try { try decoder.decodeRepeatedMessageField(value: &self.lockDecisions) }()
       default: break
       }
     }
@@ -2235,6 +2377,12 @@ nonisolated extension Lumberjack_V1_TidyRequest: SwiftProtobuf.Message, SwiftPro
     if !self.worktree.isEmpty {
       try visitor.visitSingularStringField(value: self.worktree, fieldNumber: 3)
     }
+    if self.lockStrategy != .unspecified {
+      try visitor.visitSingularEnumField(value: self.lockStrategy, fieldNumber: 4)
+    }
+    if !self.lockDecisions.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.lockDecisions, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2242,6 +2390,8 @@ nonisolated extension Lumberjack_V1_TidyRequest: SwiftProtobuf.Message, SwiftPro
     if lhs.repository != rhs.repository {return false}
     if lhs.dryRun != rhs.dryRun {return false}
     if lhs.worktree != rhs.worktree {return false}
+    if lhs.lockStrategy != rhs.lockStrategy {return false}
+    if lhs.lockDecisions != rhs.lockDecisions {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2249,7 +2399,7 @@ nonisolated extension Lumberjack_V1_TidyRequest: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Lumberjack_V1_TidyMove: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".TidyMove"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}branch\0\u{1}from\0\u{1}to\0\u{1}moved\0\u{1}error\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}branch\0\u{1}from\0\u{1}to\0\u{1}moved\0\u{1}error\0\u{1}locked\0\u{3}lock_reason\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2263,6 +2413,8 @@ nonisolated extension Lumberjack_V1_TidyMove: SwiftProtobuf.Message, SwiftProtob
       case 4: try { try decoder.decodeSingularStringField(value: &self.to) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.moved) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.error) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.locked) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.lockReason) }()
       default: break
       }
     }
@@ -2287,6 +2439,12 @@ nonisolated extension Lumberjack_V1_TidyMove: SwiftProtobuf.Message, SwiftProtob
     if !self.error.isEmpty {
       try visitor.visitSingularStringField(value: self.error, fieldNumber: 6)
     }
+    if self.locked != false {
+      try visitor.visitSingularBoolField(value: self.locked, fieldNumber: 7)
+    }
+    if !self.lockReason.isEmpty {
+      try visitor.visitSingularStringField(value: self.lockReason, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2297,6 +2455,8 @@ nonisolated extension Lumberjack_V1_TidyMove: SwiftProtobuf.Message, SwiftProtob
     if lhs.to != rhs.to {return false}
     if lhs.moved != rhs.moved {return false}
     if lhs.error != rhs.error {return false}
+    if lhs.locked != rhs.locked {return false}
+    if lhs.lockReason != rhs.lockReason {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

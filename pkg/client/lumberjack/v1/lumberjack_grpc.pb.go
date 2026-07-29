@@ -94,7 +94,9 @@ type LumberjackServiceClient interface {
 	Sync(ctx context.Context, in *SyncRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SyncResponse], error)
 	// Tidy moves tracked worktrees that sit outside their idiomatic location
 	// (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
-	// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+	// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`. A
+	// worktree git has locked is handled per the request's LockStrategy, since
+	// `git worktree move` refuses to move one.
 	Tidy(ctx context.Context, in *TidyRequest, opts ...grpc.CallOption) (*TidyResponse, error)
 	// Watch opens a long-lived stream of worktree/repository change events. On
 	// subscribe it first emits one SNAPSHOT event per tracked repository (each
@@ -341,7 +343,9 @@ type LumberjackServiceServer interface {
 	Sync(*SyncRequest, grpc.ServerStreamingServer[SyncResponse]) error
 	// Tidy moves tracked worktrees that sit outside their idiomatic location
 	// (worktree_parent_dir/<dir_prefix>-<branch slug>) back into it —
-	// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`.
+	// `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR]`. A
+	// worktree git has locked is handled per the request's LockStrategy, since
+	// `git worktree move` refuses to move one.
 	Tidy(context.Context, *TidyRequest) (*TidyResponse, error)
 	// Watch opens a long-lived stream of worktree/repository change events. On
 	// subscribe it first emits one SNAPSHOT event per tracked repository (each
