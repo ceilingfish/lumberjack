@@ -2,14 +2,16 @@
 # (scripts/coverage.sh) and the Swift coverage mechanism.
 #
 # One glob pattern per line. Blank lines and "#" comments are ignored.
-# Patterns with no "/" match a file's base name at any depth; patterns with
-# a "/" match the full path relative to the repository root, where "**"
-# matches zero or more path segments. Every entry must carry a justifying
-# comment (see issue #6).
+# A leading "/" anchors the pattern to the repository root; patterns with no
+# "/" match a file's base name at any depth; patterns with an interior "/"
+# match the full path relative to the repository root, where "**" matches zero
+# or more path segments. Every entry must carry a justifying comment (see
+# issue #6).
 
 # Three statements, a deliberate one-liner delegating to cmd.Execute().
-# Kept trivial by convention; testing it tests Cobra.
-main.go
+# Kept trivial by convention; testing it tests Cobra. Anchored to the root so
+# it does not also exempt every other main.go in the repository.
+/main.go
 
 # Zero coverable statements: a package comment and a single go:embed
 # variable.

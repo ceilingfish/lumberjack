@@ -33,52 +33,52 @@ func main() {
 
 func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 3 {
-		fmt.Fprintln(stderr, "usage: covcheck <profile> <threshold> <exclusions-file>")
+		_, _ = fmt.Fprintln(stderr, "usage: covcheck <profile> <threshold> <exclusions-file>")
 		return 2
 	}
 	profilePath, thresholdArg, exclusionsPath := args[0], args[1], args[2]
 
 	threshold, err := strconv.ParseFloat(thresholdArg, 64)
 	if err != nil {
-		fmt.Fprintf(stderr, "covcheck: invalid threshold %q: %v\n", thresholdArg, err)
+		_, _ = fmt.Fprintf(stderr, "covcheck: invalid threshold %q: %v\n", thresholdArg, err)
 		return 2
 	}
 
 	modulePath, moduleRoot, err := moduleInfo()
 	if err != nil {
-		fmt.Fprintf(stderr, "covcheck: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "covcheck: %v\n", err)
 		return 2
 	}
 
 	packages, err := listPackages(moduleRoot)
 	if err != nil {
-		fmt.Fprintf(stderr, "covcheck: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "covcheck: %v\n", err)
 		return 2
 	}
 
 	profileFile, err := os.Open(profilePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "covcheck: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "covcheck: %v\n", err)
 		return 2
 	}
-	defer profileFile.Close()
+	defer func() { _ = profileFile.Close() }()
 
 	profile, err := covcheck.ParseProfile(profileFile, modulePath)
 	if err != nil {
-		fmt.Fprintf(stderr, "covcheck: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "covcheck: %v\n", err)
 		return 2
 	}
 
 	exclusionsFile, err := os.Open(exclusionsPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "covcheck: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "covcheck: %v\n", err)
 		return 2
 	}
-	defer exclusionsFile.Close()
+	defer func() { _ = exclusionsFile.Close() }()
 
 	exclusions, err := covcheck.ParseExclusions(exclusionsFile)
 	if err != nil {
-		fmt.Fprintf(stderr, "covcheck: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "covcheck: %v\n", err)
 		return 2
 	}
 
@@ -96,24 +96,24 @@ func report(stdout, stderr io.Writer, results []covcheck.Result, global, thresho
 		}
 		switch {
 		case r.NoTests:
-			fmt.Fprintf(stdout, "  0.0%%  %s  (no test files)\n", r.Dir)
+			_, _ = fmt.Fprintf(stdout, "  0.0%%  %s  (no test files)\n", r.Dir)
 		default:
-			fmt.Fprintf(stdout, "%5.1f%%  %s\n", r.Percent, r.Dir)
+			_, _ = fmt.Fprintf(stdout, "%5.1f%%  %s\n", r.Percent, r.Dir)
 		}
 		if !r.Pass {
 			failing = append(failing, r)
 		}
 	}
-	fmt.Fprintln(stdout, "-------")
-	fmt.Fprintf(stdout, "%5.1f%%  TOTAL (informational; the gate is per-package)\n", global)
+	_, _ = fmt.Fprintln(stdout, "-------")
+	_, _ = fmt.Fprintf(stdout, "%5.1f%%  TOTAL (informational; the gate is per-package)\n", global)
 
 	if len(failing) > 0 {
-		fmt.Fprintf(stderr, "FAIL: %d package(s) below the %g%% per-package floor:\n", len(failing), threshold)
+		_, _ = fmt.Fprintf(stderr, "FAIL: %d package(s) below the %g%% per-package floor:\n", len(failing), threshold)
 		for _, r := range failing {
 			if r.NoTests {
-				fmt.Fprintf(stderr, "  %s: no test files\n", r.Dir)
+				_, _ = fmt.Fprintf(stderr, "  %s: no test files\n", r.Dir)
 			} else {
-				fmt.Fprintf(stderr, "  %s: %.1f%%\n", r.Dir, r.Percent)
+				_, _ = fmt.Fprintf(stderr, "  %s: %.1f%%\n", r.Dir, r.Percent)
 			}
 		}
 		return 1

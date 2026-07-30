@@ -12,6 +12,12 @@ func TestMatchGlob(t *testing.T) {
 	}{
 		{"main.go", "main.go", true},
 		{"main.go", "cmd/main.go", true}, // no "/": basename match, at any depth
+		// A leading "/" anchors to the repository root. The exclusion list uses
+		// "/main.go" so the root one-liner is exempt while a main.go carrying
+		// real logic (the coverage gate's own) still counts toward the floor.
+		{"/main.go", "main.go", true},
+		{"/main.go", "cmd/main.go", false},
+		{"/main.go", "scripts/coveragegate/main.go", false},
 		{"MenuBarView.swift", "macos/Sources/LumberjackMenuBar/MenuBarView.swift", true},
 		{"internal/database/migrations/embed.go", "internal/database/migrations/embed.go", true},
 		{"internal/database/migrations/embed.go", "internal/database/embed.go", false},

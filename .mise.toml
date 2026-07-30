@@ -74,9 +74,14 @@ run = "buf lint"
 description = "Check protobuf for breaking changes against main"
 run = "buf breaking --against '.git#branch=main'"
 
+# The floor is per package, not a global average, and it ratchets: it sits at
+# the current passing floor (pkg/client, the least-covered package) and each
+# coverage child of issue #6 raises it as that package is brought up to
+# standard, until 95% can be committed last. The gate must never land on main
+# in a state that fails there.
 [tasks.coverage]
-description = "Run tests with per-file coverage; fail if total is below 80%"
-run = "scripts/coverage.sh 80"
+description = "Run tests with per-package coverage; fail if any package is below 48%"
+run = "scripts/coverage.sh 48"
 
 # Restores the agent skills pinned in skills-lock.json (see https://skills.sh).
 # Run after cloning to install project skills such as go-code-review.

@@ -10,6 +10,91 @@ import (
 	"github.com/ceilingfish/lumberjack/scripts/covcheck"
 )
 
+// fixtureModule writes a throwaway Go module containing one package with a
+// coverable statement and, optionally, a test file for it. Exercising run()
+// against a fixture rather than this repository keeps the end-to-end test
+// independent of whatever the repository's own coverage happens to be today.
+func fixtureModule(t *testing.T, withTest bool) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	write := func(name, content string) {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write("go.mod", "module example.com/fixture\n\ngo 1.26\n")
+	write("thing/thing.go", "package thing\n\nfunc Double(n int) int { return n * 2 }\n")
+	if withTest {
+		write("thing/thing_test.go",
+			"package thing\n\nimport \"testing\"\n\nfunc TestDouble(t *testing.T) {\n\tif Double(2) != 4 {\n\t\tt.Fail()\n\t}\n}\n")
+	}
+	write("coverage-exclude.txt", "# nothing excluded in the fixture\n")
+	return dir
+}
+
+// A package with real code but no test file must fail the gate, whatever the
+// profile says — that absence is precisely what the gate exists to catch.
+func TestRunFailsOnPackageWithNoTests(t *testing.T) {
+	dir := fixtureModule(t, false)
+	t.Chdir(dir)
+
+	profile := filepath.Join(t.TempDir(), "empty.out")
+	if err := os.WriteFile(profile, []byte("mode: atomic\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{profile, "0", filepath.Join(dir, "coverage-exclude.txt")}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "thing") || !strings.Contains(stderr.String(), "no test files") {
+		t.Errorf("expected the untested package reported as failing, got:\n%s", stderr.String())
+	}
+}
+
+// The same package, once it has a test and a profile covering it, passes and
+// reports its percentage.
+func TestRunPassesWithCoveredPackage(t *testing.T) {
+	dir := fixtureModule(t, true)
+	t.Chdir(dir)
+
+	profile := filepath.Join(t.TempDir(), "full.out")
+	const content = "mode: atomic\nexample.com/fixture/thing/thing.go:3.32,3.51 1 1\n"
+	if err := os.WriteFile(profile, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{profile, "100", filepath.Join(dir, "coverage-exclude.txt")}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "100.0%") {
+		t.Errorf("expected the covered package at 100.0%%, got:\n%s", stdout.String())
+	}
+}
+
+// A malformed threshold is a usage error, distinct from a coverage failure.
+func TestRunRejectsBadArguments(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"only-one-arg"}, &stdout, &stderr); code != 2 {
+		t.Errorf("wrong argument count: exit code = %d, want 2", code)
+	}
+	if code := run([]string{"p", "not-a-number", "e"}, &stdout, &stderr); code != 2 {
+		t.Errorf("bad threshold: exit code = %d, want 2", code)
+	}
+}
+
 func TestReportPassAndFail(t *testing.T) {
 	results := []covcheck.Result{
 		{Dir: ".", Excluded: true, Pass: true},
@@ -51,49 +136,5 @@ func TestReportAllPass(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("expected no stderr output, got %q", stderr.String())
-	}
-}
-
-// TestRunAgainstRealRepo exercises run() end to end against this actual
-// repository: real `go list` package discovery and the real committed
-// exclusion list, with a fabricated near-empty coverage profile. At
-// threshold 0, every package with tests passes trivially regardless of the
-// profile's contents, so this isolates and proves the one gate that must
-// hold independent of any profile: a package with real, non-excluded code
-// but zero test files fails the run.
-func TestRunAgainstRealRepo(t *testing.T) {
-	repoRoot, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); err != nil {
-		t.Skipf("could not locate repo root at %s: %v", repoRoot, err)
-	}
-
-	profile := filepath.Join(t.TempDir(), "empty.out")
-	if err := os.WriteFile(profile, []byte("mode: atomic\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	exclusions := filepath.Join(repoRoot, "coverage-exclude.txt")
-	if _, err := os.Stat(exclusions); err != nil {
-		t.Fatalf("expected committed exclusion list at %s: %v", exclusions, err)
-	}
-
-	wd, _ := os.Getwd()
-	defer os.Chdir(wd)
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatal(err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := run([]string{profile, "0", exclusions}, &stdout, &stderr)
-
-	if code != 1 {
-		t.Fatalf("expected the gate to fail because of a zero-test package, got exit %d\nstdout:\n%s\nstderr:\n%s",
-			code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stderr.String(), "database/schema") {
-		t.Errorf("expected internal/database/schema (no test files) to be reported failing, got:\n%s", stderr.String())
 	}
 }

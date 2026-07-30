@@ -48,8 +48,8 @@ type Result struct {
 	Pass       bool
 }
 
-// profileEntry is one parsed line of a go coverage profile.
-type profileEntry struct {
+// ProfileEntry is one parsed line of a go coverage profile.
+type ProfileEntry struct {
 	file  string // relative to module root, forward slashes
 	stmts int
 	count int
@@ -61,8 +61,8 @@ var profileLineRE = regexp.MustCompile(`^(.+):(\d+\.\d+),(\d+\.\d+) (\d+) (\d+)$
 // `go test -coverprofile`) and returns its entries with file paths made
 // relative to modulePath (the Go module's import path, e.g.
 // "github.com/ceilingfish/lumberjack").
-func ParseProfile(r io.Reader, modulePath string) ([]profileEntry, error) {
-	var entries []profileEntry
+func ParseProfile(r io.Reader, modulePath string) ([]ProfileEntry, error) {
+	var entries []ProfileEntry
 	scanner := bufio.NewScanner(r)
 	prefix := modulePath + "/"
 	for scanner.Scan() {
@@ -83,7 +83,7 @@ func ParseProfile(r io.Reader, modulePath string) ([]profileEntry, error) {
 			return nil, fmt.Errorf("covcheck: bad hit count in %q: %w", line, err)
 		}
 		file := strings.TrimPrefix(m[1], prefix)
-		entries = append(entries, profileEntry{file: file, stmts: stmts, count: count})
+		entries = append(entries, ProfileEntry{file: file, stmts: stmts, count: count})
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
@@ -92,12 +92,19 @@ func ParseProfile(r io.Reader, modulePath string) ([]profileEntry, error) {
 }
 
 // MatchGlob reports whether relPath (a slash-separated path relative to the
-// repository root) matches pattern. Patterns without a "/" match against the
-// file's base name at any depth (e.g. "MenuBarView.swift" or "main.go").
-// Patterns with a "/" are matched against the full relative path, segment by
-// segment, where a "**" segment matches zero or more path segments (e.g.
-// "**/*.pb.go").
+// repository root) matches pattern.
+//
+// A leading "/" anchors the pattern to the repository root, so "/main.go"
+// excludes only the root one-liner and not, say, scripts/coveragegate/main.go.
+// Patterns without a "/" match against the file's base name at any depth (e.g.
+// "MenuBarView.swift"), which is the right default for a name that means the
+// same thing wherever it appears. Patterns with an interior "/" are matched
+// against the full relative path, segment by segment, where a "**" segment
+// matches zero or more path segments (e.g. "**/*.pb.go").
 func MatchGlob(pattern, relPath string) bool {
+	if anchored, ok := strings.CutPrefix(pattern, "/"); ok {
+		return anchored == relPath
+	}
 	if !strings.Contains(pattern, "/") {
 		ok, _ := filepath.Match(pattern, filepath.Base(relPath))
 		return ok
@@ -156,7 +163,7 @@ func excluded(patterns []string, relPath string) bool {
 // set (typically from `go list`), and a list of exclusion glob patterns.
 // It returns the results (one per non-excluded package) and the global
 // total percentage across all non-excluded statements.
-func Gate(packages []Package, profile []profileEntry, exclusions []string) (results []Result, globalPercent float64) {
+func Gate(packages []Package, profile []ProfileEntry, exclusions []string) (results []Result, globalPercent float64) {
 	// Sum statements/coverage per package directory from the profile,
 	// skipping excluded files.
 	type agg struct {
@@ -200,11 +207,11 @@ func Gate(packages []Package, profile []profileEntry, exclusions []string) (resu
 			continue
 		}
 		if pkg.TestFileCount == 0 {
-			// Real code, no test files: reported and gated at 0% rather
-			// than being silently absent from the profile. Whether that
-			// fails the run is still governed by the threshold, like any
-			// other package — this is what lets the gate ratchet from 0
-			// upward as zero-test packages gain their first test.
+			// Real code, no test files: reported at 0% rather than being
+			// silently absent from the profile. This always fails the run,
+			// independently of the threshold (see ApplyThreshold) — a
+			// package with no tests at all is the condition the gate exists
+			// to catch, so no floor, not even 0, may excuse it.
 			results = append(results, Result{Dir: pkg.Dir, NoTests: true, Percent: 0})
 			continue
 		}

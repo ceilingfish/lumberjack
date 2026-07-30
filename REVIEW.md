@@ -73,6 +73,30 @@ Run the coverage task and ensure all new code meets the coverage standard. Comma
 mise run coverage
 ```
 
+**The floor is per package, not a global average**, so a well-covered package
+cannot mask an untested one. Every package must independently meet the
+threshold; the run lists every package below it, not just the first. A package
+containing code but no test files **fails** — packages with no tests are absent
+from Go's coverage profile entirely, and that absence is exactly what the gate
+exists to catch.
+
+The threshold is the script's single positional argument, so it can be
+ratcheted upward as packages are brought up to standard:
+
+```sh
+scripts/coverage.sh 48    # what `mise run coverage` runs today
+```
+
+It sits at the current passing floor rather than the 95% target, and each
+coverage child of issue #6 raises it as its package lands. **Never commit a
+threshold that fails on `main`.**
+
+Files listed in [`coverage-exclude.txt`](coverage-exclude.txt) count toward
+neither numerator nor denominator. Add an entry only with a comment justifying
+it, and prefer making code testable over exempting it. A leading `/` anchors a
+pattern to the repository root, a pattern with no `/` matches a base name at
+any depth, and `**` matches zero or more path segments.
+
 ## 5. Stylistic review
 
 Once all the checks above pass, carry out the stylistic review using both
