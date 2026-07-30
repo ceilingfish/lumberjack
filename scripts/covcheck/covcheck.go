@@ -23,9 +23,6 @@ import (
 // independently of the coverage profile (typically via `go list`) so a
 // package cannot escape the gate by omission from the profile.
 type Package struct {
-	// ImportPath is the package's import path, e.g.
-	// "github.com/ceilingfish/lumberjack/internal/present".
-	ImportPath string
 	// Dir is the package's directory relative to the module root, using
 	// forward slashes, e.g. "internal/present". The module root package
 	// itself is ".".
@@ -103,7 +100,7 @@ func ParseProfile(r io.Reader, modulePath string) ([]ProfileEntry, error) {
 // matches zero or more path segments (e.g. "**/*.pb.go").
 func MatchGlob(pattern, relPath string) bool {
 	if anchored, ok := strings.CutPrefix(pattern, "/"); ok {
-		return anchored == relPath
+		return doubleStarMatch(strings.Split(anchored, "/"), strings.Split(relPath, "/"))
 	}
 	if !strings.Contains(pattern, "/") {
 		ok, _ := filepath.Match(pattern, filepath.Base(relPath))
@@ -239,13 +236,19 @@ func Gate(packages []Package, profile []ProfileEntry, exclusions []string) (resu
 	return results, globalPercent
 }
 
-// ApplyThreshold sets Pass on every gated (non-excluded) result according to
-// threshold, leaving already-decided results (excluded, no-tests) alone.
+// ApplyThreshold sets Pass on every result according to threshold. An excluded
+// package always passes (it has nothing coverable left to gate) and a package
+// with no test files always fails, whatever the threshold — so both are decided
+// here explicitly rather than left to Result's zero value.
 func ApplyThreshold(results []Result, threshold float64) {
 	for i := range results {
-		if results[i].Excluded || results[i].NoTests {
-			continue
+		switch {
+		case results[i].Excluded:
+			results[i].Pass = true
+		case results[i].NoTests:
+			results[i].Pass = false
+		default:
+			results[i].Pass = results[i].Percent >= threshold
 		}
-		results[i].Pass = results[i].Percent >= threshold
 	}
 }

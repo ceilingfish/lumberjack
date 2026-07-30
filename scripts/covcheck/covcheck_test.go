@@ -18,6 +18,11 @@ func TestMatchGlob(t *testing.T) {
 		{"/main.go", "main.go", true},
 		{"/main.go", "cmd/main.go", false},
 		{"/main.go", "scripts/coveragegate/main.go", false},
+		// Anchoring composes with glob syntax rather than replacing it, so an
+		// anchored pattern carrying a wildcard still matches.
+		{"/*.go", "main.go", true},
+		{"/*.go", "cmd/main.go", false},
+		{"/**/*.pb.go", "pkg/client/v1/lumberjack.pb.go", true},
 		{"MenuBarView.swift", "macos/Sources/LumberjackMenuBar/MenuBarView.swift", true},
 		{"internal/database/migrations/embed.go", "internal/database/migrations/embed.go", true},
 		{"internal/database/migrations/embed.go", "internal/database/embed.go", false},
@@ -96,10 +101,10 @@ github.com/example/mod/bad/bad.go:4.1,10.2 16 0
 	}
 
 	packages := []Package{
-		{ImportPath: module, Dir: ".", GoFiles: []string{"main.go"}, TestFileCount: 0},
-		{ImportPath: module + "/good", Dir: "good", GoFiles: []string{"good.go"}, TestFileCount: 1},
-		{ImportPath: module + "/bad", Dir: "bad", GoFiles: []string{"bad.go"}, TestFileCount: 1},
-		{ImportPath: module + "/untested", Dir: "untested", GoFiles: []string{"predicate.go"}, TestFileCount: 0},
+		{Dir: ".", GoFiles: []string{"main.go"}, TestFileCount: 0},
+		{Dir: "good", GoFiles: []string{"good.go"}, TestFileCount: 1},
+		{Dir: "bad", GoFiles: []string{"bad.go"}, TestFileCount: 1},
+		{Dir: "untested", GoFiles: []string{"predicate.go"}, TestFileCount: 0},
 	}
 
 	exclusions := []string{"main.go"} // root package's only file is excluded
@@ -140,7 +145,7 @@ github.com/example/mod/good/good.go:1.1,3.2 4 4
 `
 	entries, _ := ParseProfile(strings.NewReader(profile), module)
 	packages := []Package{
-		{ImportPath: module + "/good", Dir: "good", GoFiles: []string{"good.go"}, TestFileCount: 1},
+		{Dir: "good", GoFiles: []string{"good.go"}, TestFileCount: 1},
 	}
 	results, _ := Gate(packages, entries, nil)
 	ApplyThreshold(results, 80)

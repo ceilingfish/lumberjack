@@ -20,7 +20,6 @@ import (
 
 // listPackage mirrors the subset of `go list -json` output covcheck needs.
 type listPackage struct {
-	ImportPath   string
 	Dir          string
 	GoFiles      []string
 	TestGoFiles  []string
@@ -177,7 +176,6 @@ func listPackages(moduleRoot string) ([]covcheck.Package, error) {
 			return nil, fmt.Errorf("relativizing %q: %w", lp.Dir, err)
 		}
 		packages = append(packages, covcheck.Package{
-			ImportPath:    lp.ImportPath,
 			Dir:           filepath.ToSlash(relDir),
 			GoFiles:       lp.GoFiles,
 			TestFileCount: len(lp.TestGoFiles) + len(lp.XTestGoFiles),
