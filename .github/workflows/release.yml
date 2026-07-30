@@ -26,9 +26,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-      - run: mise run format-check
-      - run: mise run lint
-      - run: mise run test
+      - run: mise run cli:format-check
+      - run: mise run cli:lint
+      - run: mise run osx:format-check
+      - run: mise run osx:lint
+      # `coverage` depends on cli:test and osx:test, so both suites run here.
       - run: mise run coverage
 
   release-please:
