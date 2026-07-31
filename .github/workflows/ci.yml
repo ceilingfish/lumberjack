@@ -1,0 +1,62 @@
+name: CI
+
+# Gates pull requests on the same checks the release path runs (checks.yml),
+# plus the checks that only make sense against a base ref: SQL linting and the
+# protobuf lint/compatibility pair. See issue #10.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      sql: ${{ steps.filter.outputs.sql }}
+      proto: ${{ steps.filter.outputs.proto }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          files=$(git diff --name-only "$BASE_SHA" HEAD)
+          grep -q '\.sql$'   <<<"$files" && echo "sql=true"   >>"$GITHUB_OUTPUT" || true
+          grep -q '\.proto$' <<<"$files" && echo "proto=true" >>"$GITHUB_OUTPUT" || true
+
+  sql-checks:
+    needs: changes
+    if: needs.changes.outputs.sql == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: mise run lint-sql
+
+  # `lint-proto-breaking` compares against `.git#branch=main`, so it needs the
+  # full history and a local `main` ref — the default shallow, single-branch
+  # checkout resolves neither.
+  proto-checks:
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/heads/main
+      - uses: jdx/mise-action@v2
+      - run: mise run format-check-proto
+      - run: mise run lint-proto
+      - run: mise run lint-proto-breaking

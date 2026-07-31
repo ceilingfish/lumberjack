@@ -5,10 +5,9 @@ name: Release
 # component and this workflow (on the resulting push to main) builds and
 # publishes its artifacts. See issue #11.
 #
-# This workflow also carries the checks the pull-request CI pipeline runs
-# (issues #6 and #10): if either lands first, the check steps below should be
-# replaced with a `workflow_call` into the shared workflow they define rather
-# than duplicated.
+# The checks themselves live in checks.yml, shared with the pull-request
+# pipeline (ci.yml), so a release is never cut from a main that would have
+# failed CI.
 on:
   push:
     branches: [main]
@@ -18,61 +17,11 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Re-runs the checks pull-request CI runs, so a release is never cut from a
-  # main that would have failed CI. Split by language so only the Swift half
-  # needs a macOS runner.
-  cli-checks:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
-      - run: mise run cli:format-check
-      - run: mise run cli:lint
-      - run: mise run cli:test
-      - run: mise run cli:lcov
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coverage-go
-          path: coverage-go.lcov
-
-  osx-checks:
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
-      - run: mise run osx:format-check
-      - run: mise run osx:lint
-      - run: mise run osx:test
-      - run: mise run osx:lcov
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coverage-swift
-          path: coverage-swift.lcov
-
-  # The gate covers both codebases, so it needs both halves on one machine. It
-  # is reported but not depended on: the per-package floor currently fails, and
-  # a release is gated on the tests passing, not on the floor being met.
-  coverage:
-    needs: [cli-checks, osx-checks]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: jdx/mise-action@v2
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: coverage-*
-          merge-multiple: true
-      - run: mise run coverage:gate-test
-      - run: mise run coverage:check
-      # Uploaded on failure too — that is when you need the report.
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-merged
-          path: coverage.lcov
+  checks:
+    uses: ./.github/workflows/checks.yml
 
   release-please:
-    needs: [cli-checks, osx-checks]
+    needs: [checks]
     runs-on: ubuntu-latest
     outputs:
       cli_release_created: ${{ steps.release.outputs.release_created }}
