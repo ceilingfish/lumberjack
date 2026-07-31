@@ -22,7 +22,7 @@ func TestPromptLockStrategy(t *testing.T) {
 		keys []string
 		want lumberjackv1.LockStrategy
 	}{
-		{name: "enter unlocks", keys: []string{enter}, want: lumberjackv1.LockStrategy_LOCK_STRATEGY_UNLOCK},
+		{name: "enter unlocks", keys: []string{enterKey}, want: lumberjackv1.LockStrategy_LOCK_STRATEGY_UNLOCK},
 		{name: "s skips", keys: []string{"s"}, want: lumberjackv1.LockStrategy_LOCK_STRATEGY_SKIP},
 		{name: "d deletes the lock", keys: []string{"d"}, want: lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE},
 		{name: "n aborts", keys: []string{"n"}, want: lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT},
@@ -50,7 +50,7 @@ func TestPromptLockStrategy(t *testing.T) {
 
 func TestPromptLockStrategyWithoutALockReason(t *testing.T) {
 	onATerminal(t)
-	scriptTerminal(t, enter)
+	scriptTerminal(t, enterKey)
 	cmd, question := pickerCmd(t)
 
 	if _, err := promptLockStrategy(cmd, "/elsewhere/foo", ""); err != nil {

@@ -206,7 +206,7 @@ func TestRunInstallWithoutAResolvableHomeDirectory(t *testing.T) {
 	if err := runInstall(&out, installOptions{cliOnly: true}); err == nil {
 		t.Error("expected runInstall to fail with no home directory to default the bin dir to")
 	}
-	if err := runUninstall(&out, uninstallOptions{daemonOnly: false, cliOnly: true}); err == nil {
+	if err := runUninstall(&out, uninstallOptions{cliOnly: true}); err == nil {
 		t.Error("expected runUninstall to fail with no home directory to default the bin dir to")
 	}
 }
@@ -275,7 +275,7 @@ func TestRunUninstallSurfacesAFailedRemoval(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	err := runUninstall(&out, uninstallOptions{binDir: notADir, daemonOnly: false})
+	err := runUninstall(&out, uninstallOptions{binDir: notADir})
 	if err == nil || !strings.Contains(err.Error(), "removing") {
 		t.Errorf("err = %v, want the failed removal", err)
 	}

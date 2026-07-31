@@ -38,9 +38,9 @@ func failTerminal(t *testing.T, err error) {
 }
 
 const (
-	up    = "\x1b[A"
-	down  = "\x1b[B"
-	enter = "\r"
+	upKey    = "\x1b[A"
+	downKey  = "\x1b[B"
+	enterKey = "\r"
 )
 
 func pickerCmd(t *testing.T) (*cobra.Command, *bytes.Buffer) {
@@ -60,13 +60,13 @@ func TestPickLogin(t *testing.T) {
 		current string
 		want    string
 	}{
-		{name: "enter takes the preselected login", keys: []string{"\r"}, current: "work", want: "work"},
-		{name: "absent current starts at the first login", keys: []string{"\r"}, current: "ghost", want: "personal"},
-		{name: "down moves to the next login", keys: []string{down, enter}, want: "work"},
-		{name: "down stops at the last login", keys: []string{down, down, down, enter}, want: "client"},
-		{name: "up moves back", keys: []string{down, down, up, enter}, want: "work"},
-		{name: "up stops at the first login", keys: []string{up, up, enter}, want: "personal"},
-		{name: "an unrecognised key is ignored", keys: []string{"x", down, enter}, want: "work"},
+		{name: "enterKey takes the preselected login", keys: []string{enterKey}, current: "work", want: "work"},
+		{name: "absent current starts at the first login", keys: []string{enterKey}, current: "ghost", want: "personal"},
+		{name: "downKey moves to the next login", keys: []string{downKey, enterKey}, want: "work"},
+		{name: "downKey stops at the last login", keys: []string{downKey, downKey, downKey, enterKey}, want: "client"},
+		{name: "upKey moves back", keys: []string{downKey, downKey, upKey, enterKey}, want: "work"},
+		{name: "upKey stops at the first login", keys: []string{upKey, upKey, enterKey}, want: "personal"},
+		{name: "an unrecognised key is ignored", keys: []string{"x", downKey, enterKey}, want: "work"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -93,7 +93,7 @@ func TestPickLogin(t *testing.T) {
 }
 
 func TestPickLoginHighlightsTheSelection(t *testing.T) {
-	scriptTerminal(t, enter)
+	scriptTerminal(t, enterKey)
 	cmd, menu := pickerCmd(t)
 
 	if _, err := pickLogin(cmd, []string{"personal", "work"}, "work"); err != nil {

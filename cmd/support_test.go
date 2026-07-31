@@ -64,7 +64,6 @@ type coverStub struct {
 	repo          *lumberjackv1.Repository
 	worktrees     []*lumberjackv1.Worktree
 	logins        []string
-	current       string
 	deleteRepo    *lumberjackv1.DeleteRepositoryResponse
 	deleteWT      []*lumberjackv1.DeleteWorktreeResponse
 	addWT         *lumberjackv1.AddWorktreeResponse
@@ -78,7 +77,6 @@ type coverStub struct {
 	block         time.Duration
 
 	deleteWTCalls int
-	consentSet    bool
 }
 
 func (s *coverStub) wait(ctx context.Context) error {
@@ -117,7 +115,7 @@ func (s *coverStub) ListLogins(ctx context.Context, _ *lumberjackv1.ListLoginsRe
 	if err := s.wait(ctx); err != nil {
 		return nil, err
 	}
-	return &lumberjackv1.ListLoginsResponse{Logins: s.logins, Current: s.current}, nil
+	return &lumberjackv1.ListLoginsResponse{Logins: s.logins}, nil
 }
 
 func (s *coverStub) SetLogin(ctx context.Context, req *lumberjackv1.SetLoginRequest) (*lumberjackv1.SetLoginResponse, error) {
@@ -194,7 +192,6 @@ func (s *coverStub) SetSetupConsent(ctx context.Context, req *lumberjackv1.SetSe
 	if s.setConsentErr != nil {
 		return nil, s.setConsentErr
 	}
-	s.consentSet = true
 	return &lumberjackv1.SetSetupConsentResponse{Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()}}, nil
 }
 

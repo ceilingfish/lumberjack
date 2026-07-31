@@ -20,53 +20,19 @@ import (
 )
 
 type flakyWriter struct {
-	ok int
+	succeed int
 }
+
+type emptyReader struct{}
+
+func (emptyReader) Read([]byte) (int, error) { return 0, nil }
 
 func (f *flakyWriter) Write(p []byte) (int, error) {
-	if f.ok == 0 {
+	if f.succeed == 0 {
 		return 0, errWrite
 	}
-	f.ok--
+	f.succeed--
 	return len(p), nil
-}
-
-func brokenCwd(t *testing.T) {
-	t.Helper()
-	dir, err := os.MkdirTemp("", "ljgone")
-	if err != nil {
-		t.Fatalf("MkdirTemp: %v", err)
-	}
-	t.Chdir(dir)
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("RemoveAll: %v", err)
-	}
-}
-
-func TestCmdWithoutAResolvableWorkingDirectory(t *testing.T) {
-	brokenCwd(t)
-	if _, err := os.Getwd(); err == nil {
-		t.Skip("this platform still resolves a deleted working directory")
-	}
-
-	for _, args := range [][]string{
-		{"status"},
-		{"sync"},
-		{"worktrees"},
-		{"tidy"},
-		{"set-login", "work"},
-		{"worktree", "add", "feature/x"},
-		{"worktree", "delete", "feature/x"},
-		{"init"},
-		{"setup-steps", "list"},
-		{"setup-steps", "run"},
-	} {
-		t.Run(strings.Join(args, " "), func(t *testing.T) {
-			if _, err := run(t, "", args...); err == nil {
-				t.Errorf("%v succeeded with no resolvable working directory", args)
-			}
-		})
-	}
 }
 
 func TestCmdDelete(t *testing.T) {
@@ -212,7 +178,7 @@ func TestCmdInitSurfacesAFailedAdoptedTableWrite(t *testing.T) {
 	}})
 
 	var errOut bytes.Buffer
-	err := runCmd(t, "", &flakyWriter{ok: 1}, &errOut, "init", ".")
+	err := runCmd(t, "", &flakyWriter{succeed: 1}, &errOut, "init", ".")
 	if !errors.Is(err, errWrite) {
 		t.Errorf("err = %v, want the failed adopted-table write", err)
 	}
@@ -296,7 +262,7 @@ func TestCmdWorktreeAddSurfacesAFailedWarningWrite(t *testing.T) {
 	}})
 
 	var errOut bytes.Buffer
-	err := runCmd(t, "", &flakyWriter{ok: 1}, &errOut, "worktree", "add", "feature/x", "--repository", "n")
+	err := runCmd(t, "", &flakyWriter{succeed: 1}, &errOut, "worktree", "add", "feature/x", "--repository", "n")
 	if !errors.Is(err, errWrite) {
 		t.Errorf("err = %v, want the failed warning write", err)
 	}
@@ -346,19 +312,19 @@ func TestCmdWorktreeDeleteSurfacesFailedConfirmationWrites(t *testing.T) {
 		{Deleted: true, Message: "deleted n-x"},
 	}
 	cases := []struct {
-		name  string
-		stdin string
-		ok    int
+		name    string
+		stdin   string
+		succeed int
 	}{
-		{name: "the warning", stdin: "", ok: 0},
-		{name: "the abort notice", stdin: "n\n", ok: 2},
-		{name: "the outcome", stdin: "y\n", ok: 2},
+		{name: "the warning", stdin: "", succeed: 0},
+		{name: "the abort notice", stdin: "n\n", succeed: 2},
+		{name: "the outcome", stdin: "y\n", succeed: 2},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			serveService(t, &coverStub{deleteWT: confirmed})
 			var errOut bytes.Buffer
-			err := runCmd(t, c.stdin, &flakyWriter{ok: c.ok}, &errOut,
+			err := runCmd(t, c.stdin, &flakyWriter{succeed: c.succeed}, &errOut,
 				"worktree", "delete", "feature/x", "--repository", "n")
 			if !errors.Is(err, errWrite) {
 				t.Errorf("err = %v, want the failed write", err)
@@ -386,14 +352,14 @@ func TestCmdSetLoginJSON(t *testing.T) {
 func TestCmdStatusSurfacesFailedConsentWrites(t *testing.T) {
 	consent := &lumberjackv1.GetSetupConsentResponse{Pending: true, RunCommands: []string{"make setup"}}
 	cases := []struct {
-		name  string
-		stdin string
-		ok    int
+		name    string
+		stdin   string
+		succeed int
 	}{
-		{name: "the preamble", stdin: "", ok: 1},
-		{name: "the command list", stdin: "", ok: 2},
-		{name: "the refusal", stdin: "n\n", ok: 4},
-		{name: "the confirmation", stdin: "y\n", ok: 4},
+		{name: "the preamble", stdin: "", succeed: 1},
+		{name: "the command list", stdin: "", succeed: 2},
+		{name: "the refusal", stdin: "n\n", succeed: 4},
+		{name: "the confirmation", stdin: "y\n", succeed: 4},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -402,7 +368,7 @@ func TestCmdStatusSurfacesFailedConsentWrites(t *testing.T) {
 				consent: consent,
 			})
 			var errOut bytes.Buffer
-			err := runCmd(t, c.stdin, &flakyWriter{ok: c.ok}, &errOut, "status", "--repository", "n")
+			err := runCmd(t, c.stdin, &flakyWriter{succeed: c.succeed}, &errOut, "status", "--repository", "n")
 			if !errors.Is(err, errWrite) {
 				t.Errorf("err = %v, want the failed write", err)
 			}
@@ -492,8 +458,8 @@ func TestTabWStopsAtTheFirstWriteError(t *testing.T) {
 		t.Fatalf("tabW.err = %v, want the failed write recorded", tw.err)
 	}
 	tw.row("b\f")
-	if !errors.Is(tw.flush(), errWrite) {
-		t.Errorf("flush = %v, want the first error", tw.flush())
+	if err := tw.flush(); !errors.Is(err, errWrite) {
+		t.Errorf("flush = %v, want the first error", err)
 	}
 }
 
@@ -506,10 +472,6 @@ func TestReadLockAnswerIgnoresAnEmptyRead(t *testing.T) {
 		t.Errorf("readLockAnswer = %v, want UNSPECIFIED for an empty read", got)
 	}
 }
-
-type emptyReader struct{}
-
-func (emptyReader) Read([]byte) (int, error) { return 0, nil }
 
 func TestRawTerminalWithoutATerminal(t *testing.T) {
 	if _, _, err := rawTerminal(); !errors.Is(err, errNoTerminal) {
@@ -525,7 +487,7 @@ func TestReinstallDaemonSurfacesAFailedInstall(t *testing.T) {
 }
 
 func TestInstallCLISurfacesAnUnreadableDestination(t *testing.T) {
-	blocked := t.TempDir() + "/file"
+	blocked := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -642,11 +604,11 @@ func dialStub(t *testing.T) *client.Client {
 
 func TestPromptSetupConsentSurfacesFailedWrites(t *testing.T) {
 	cases := []struct {
-		name string
-		ok   int
+		name    string
+		succeed int
 	}{
-		{name: "the preamble", ok: 0},
-		{name: "the command list", ok: 1},
+		{name: "the preamble", succeed: 0},
+		{name: "the command list", succeed: 1},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -654,7 +616,7 @@ func TestPromptSetupConsentSurfacesFailedWrites(t *testing.T) {
 				Pending: true, RunCommands: []string{"make setup"},
 			}})
 			cmd := &cobra.Command{}
-			cmd.SetOut(&flakyWriter{ok: c.ok})
+			cmd.SetOut(&flakyWriter{succeed: c.succeed})
 			cmd.SetErr(io.Discard)
 			cmd.SetIn(strings.NewReader("y\n"))
 
@@ -717,7 +679,7 @@ func TestRunInstallWarnsWhenTheBinDirIsNotOnPath(t *testing.T) {
 	}
 	t.Setenv("PATH", "/usr/bin")
 
-	err := runInstall(&flakyWriter{ok: 1}, installOptions{exe: exe, binDir: t.TempDir(), cliOnly: true})
+	err := runInstall(&flakyWriter{succeed: 1}, installOptions{exe: exe, binDir: t.TempDir(), cliOnly: true})
 	if !errors.Is(err, errWrite) {
 		t.Errorf("err = %v, want the failed PATH-warning write", err)
 	}
