@@ -15,6 +15,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/ceilingfish/lumberjack/internal/ghauth"
 )
 
 // EnvCLIPath overrides the gh executable location; otherwise gh is found on
@@ -71,6 +73,7 @@ type PR struct {
 func (c *Client) exec(ctx context.Context, dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, c.bin, args...)
 	cmd.Dir = dir
+	cmd.Env = ghauth.Env(ctx, os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -235,6 +238,17 @@ func (c *Client) ListLogins(ctx context.Context, host string) ([]string, error) 
 		}
 	}
 	return logins, nil
+}
+
+func (c *Client) Token(ctx context.Context, host, login string) (string, error) {
+	out, err := c.run(ctx, "", "auth", "token", "--hostname", host, "--user", login)
+	if err != nil {
+		return "", err
+	}
+	if out == "" {
+		return "", fmt.Errorf("gh has no token for account %q on %s", login, host)
+	}
+	return out, nil
 }
 
 // SwitchAccount makes login the active gh account for host

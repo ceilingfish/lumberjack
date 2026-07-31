@@ -8,6 +8,11 @@ linters:
     - misspell
     - errorlint
     - bodyclose
+  exclusions:
+    rules:
+      - linters:
+          - revive
+        text: "^(exported|package-comments):"
 
 formatters:
   enable:

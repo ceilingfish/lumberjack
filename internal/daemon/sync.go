@@ -13,6 +13,7 @@ import (
 
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
+	"github.com/ceilingfish/lumberjack/internal/ghauth"
 	"github.com/ceilingfish/lumberjack/internal/github"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
@@ -65,7 +66,7 @@ type GHOps interface {
 	// changes it. Together they let the daemon operate on a repo under the
 	// account it was registered with and restore the prior account afterwards.
 	ActiveLogin(ctx context.Context, host string) (string, error)
-	SwitchAccount(ctx context.Context, host, login string) error
+	Token(ctx context.Context, host, login string) (string, error)
 	// ListLogins reports every gh account authenticated for a host — the logins
 	// set-login accepts and the picker offers.
 	ListLogins(ctx context.Context, host string) ([]string, error)
@@ -86,10 +87,10 @@ type Service struct {
 	git GitOps
 	gh  GHOps
 	now func() time.Time
-	// mu serialises worktree mutations so the hourly loop and an on-demand
-	// Sync/Delete RPC can never operate on the trees at the same time. The
-	// daemon is the single writer; this keeps that guarantee within it too.
-	mu sync.Mutex
+
+	global    sync.RWMutex
+	repoLocks sync.Map
+
 	// events fans out worktree/sync changes to Watch subscribers. Publishing
 	// is a side effect of a mutation that already happened under mu — it never
 	// creates new state of its own, so the daemon remains the single writer.
@@ -164,43 +165,43 @@ func repoInfo(repo *schema.Repository) github.RepoInfo {
 	return github.RepoInfo{Owner: repo.GithubOwner, Name: repo.GithubName, Host: repo.Host}
 }
 
-// withRepoLogin runs fn with gh's active account switched to the one the
-// repository was registered under, restoring the previously-active account
-// afterwards. Both git (via gh's credential helper) and gh calls inherit the
-// active account, so any operation on a repo must run under its own login.
-//
-// Repos tracked before login capture (empty Login) run fn unchanged. gh's
-// active account is process-global, so callers must hold s.mu.
-func (s *Service) withRepoLogin(ctx context.Context, repo *schema.Repository, fn func() error) error {
+func (s *Service) lockRepository(id int64) func() {
+	s.global.RLock()
+	v, _ := s.repoLocks.LoadOrStore(id, &sync.Mutex{})
+	m, ok := v.(*sync.Mutex)
+	if !ok {
+		s.global.RUnlock()
+		panic("daemon: repository lock of unexpected type")
+	}
+	m.Lock()
+	return func() {
+		m.Unlock()
+		s.global.RUnlock()
+	}
+}
+
+func (s *Service) lockAllRepositories() func() {
+	s.global.Lock()
+	return s.global.Unlock
+}
+
+func (s *Service) withRepoLogin(
+	ctx context.Context, repo *schema.Repository, fn func(context.Context) error,
+) error {
 	return s.withLogin(ctx, repo.Host, repo.Login, fn)
 }
 
-// withLogin runs fn with gh's active account switched to login for host,
-// restoring the previously-active account afterwards. An empty login (or one
-// already active) runs fn without switching. gh's active account is
-// process-global, so callers must hold s.mu.
-func (s *Service) withLogin(ctx context.Context, host, login string, fn func() error) (err error) {
+func (s *Service) withLogin(
+	ctx context.Context, host, login string, fn func(context.Context) error,
+) error {
 	if login == "" {
-		return fn()
+		return fn(ctx)
 	}
-	current, aerr := s.gh.ActiveLogin(ctx, host)
-	if aerr != nil {
-		return fmt.Errorf("checking active GitHub account: %w", aerr)
+	token, err := s.gh.Token(ctx, host, login)
+	if err != nil {
+		return fmt.Errorf("resolving GitHub token for account %q: %w", login, err)
 	}
-	if current == login {
-		return fn()
-	}
-	if serr := s.gh.SwitchAccount(ctx, host, login); serr != nil {
-		return fmt.Errorf("switching to GitHub account %q: %w", login, serr)
-	}
-	defer func() {
-		// Restore the account that was active before. A restore failure must not
-		// mask fn's own error, but is surfaced when fn otherwise succeeded.
-		if serr := s.gh.SwitchAccount(ctx, host, current); serr != nil && err == nil {
-			err = fmt.Errorf("restoring GitHub account %q: %w", current, serr)
-		}
-	}()
-	return fn()
+	return fn(ghauth.WithToken(ctx, host, token))
 }
 
 // fetchOpenPRs fetches remote refs and returns the open PRs indexed by number.
@@ -225,11 +226,10 @@ func (s *Service) fetchOpenPRs(ctx context.Context, repo *schema.Repository) (ma
 func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([]WorktreeView, error) {
 	// Serialise with worktree mutations: gh account switching is process-global,
 	// so a concurrent sync must not change the active account mid-read.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
 	var views []WorktreeView
-	err := s.withRepoLogin(ctx, repo, func() error {
+	err := s.withRepoLogin(ctx, repo, func(ctx context.Context) error {
 		openByNum, err := s.fetchOpenPRs(ctx, repo)
 		if err != nil {
 			return err
@@ -266,10 +266,9 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 // updates the repository's last-sync fields. Per-PR failures are collected and
 // returned as a combined error without aborting the whole sync.
 func (s *Service) SyncRepository(ctx context.Context, repo *schema.Repository, progress progressFn) (created, removed int, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
-	err = s.withRepoLogin(ctx, repo, func() error {
+	err = s.withRepoLogin(ctx, repo, func(ctx context.Context) error {
 		var serr error
 		created, removed, serr = s.syncRepositoryLocked(ctx, repo, progress)
 		return serr

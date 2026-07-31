@@ -118,8 +118,7 @@ func (s *Service) TidyRepository(ctx context.Context, repo *schema.Repository, o
 	// is in the middle of claiming. No withRepoLogin here, unlike sync and
 	// delete — moving a worktree is purely local, touching neither the remote
 	// nor gh.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
 	stored, err := s.db.ListWorktrees(ctx, repo.ID)
 	if err != nil {
@@ -210,8 +209,7 @@ func (o TidyOptions) CanAbortOnLock() bool {
 // Not worth it: the window is small, the failure is loud, and abort is a safety
 // valve rather than a transaction.
 func (s *Service) TidyAbortCheck(ctx context.Context, repo *schema.Repository, opts TidyOptions) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
 	stored, err := s.db.ListWorktrees(ctx, repo.ID)
 	if err != nil {
