@@ -545,7 +545,6 @@ struct MenuBarView: View {
             return (Palette.destructive, Palette.destructive, Palette.destructiveTint, Palette.destructiveBorder, label)
         }
     }
-
 }
 
 /// One worktree's row: status dot, branch name, PR link, subtitle, and — on

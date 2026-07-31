@@ -28,12 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private let state: AppState
 
-    override init() {
-        self.state = AppState()
-        super.init()
-    }
-
-    init(state: AppState) {
+    init(state: AppState = AppState()) {
         self.state = state
         super.init()
     }
