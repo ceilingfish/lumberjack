@@ -79,9 +79,43 @@ Run the coverage task and ensure all new code meets the coverage standard. Comma
 mise run coverage
 ```
 
-Coverage is the one gate the two codebases share. It runs no tests itself: it
-depends on `cli:test` and `osx:test` and reads the coverage data they leave
-behind, so a coverage run always reflects both.
+**The floor is per package, not a global average**, so a well-covered package
+cannot mask an untested one. Every package must independently meet the
+threshold; the run lists every package below it, not just the first. A package
+containing code but no test files **fails** — packages with no tests are absent
+from Go's coverage profile entirely, and that absence is exactly what the gate
+exists to catch.
+
+It covers both codebases, with the Swift app treated as a package
+(`macos/Sources/LumberjackMenuBar`) alongside the Go ones. Both halves reach
+the gate as lcov, produced by `cli:lcov` and `osx:lcov`; the per-language
+subtotals and merged total the run prints are information only, not the gate.
+
+The threshold is the gate's `-Threshold` argument, so it can be ratcheted
+upward as packages are brought up to standard:
+
+```sh
+pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 80   # what `mise run coverage` runs today
+```
+
+It sits below the 95% target, and each coverage child of issue #6 raises it as
+its package lands. **The floor currently fails on `main`**, and that is
+deliberate: releases are gated on the tests passing, not on the floor being
+met, so the `coverage` job in
+[the release workflow](.github/workflows/release.yml) reports the gate without
+blocking `release-please`. Do not lower the threshold to make a change pass;
+raise the coverage of what you touched instead.
+
+Files listed in [`coverage-exclude.txt`](coverage-exclude.txt) count toward
+neither numerator nor denominator. Add an entry only with a comment justifying
+it, and prefer making code testable over exempting it. A leading `/` anchors a
+pattern to the repository root, a pattern with no `/` matches a base name at
+any depth, and `**` matches zero or more path segments.
+
+The gate's own logic is tested — run `mise run coverage:gate-test` (Pester)
+when changing it. Those tests are required, but **the PowerShell tooling itself
+is not measured for coverage**: only the Go and Swift halves are gated, and no
+`.ps1` file should appear as a package or in `coverage.lcov`.
 
 ## 5. Stylistic review
 

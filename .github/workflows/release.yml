@@ -49,20 +49,20 @@ jobs:
           name: coverage-swift
           path: coverage-swift.lcov
 
-  # The gate is on both codebases merged, so it needs both halves on one
-  # machine. Runs on Linux: merging is bash and awk, no toolchain involved.
+  # The gate covers both codebases, so it needs both halves on one machine. It
+  # is reported but not depended on: the per-package floor currently fails, and
+  # a release is gated on the tests passing, not on the floor being met.
   coverage:
     needs: [cli-checks, osx-checks]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
-        with:
-          install: false # no toolchains needed, just mise itself
       - uses: actions/download-artifact@v4
         with:
           pattern: coverage-*
           merge-multiple: true
+      - run: mise run coverage:gate-test
       - run: mise run coverage:check
       # Uploaded on failure too — that is when you need the report.
       - if: always()
@@ -72,11 +72,11 @@ jobs:
           path: coverage.lcov
 
   release-please:
-    needs: [cli-checks, osx-checks, coverage]
+    needs: [cli-checks, osx-checks]
     runs-on: ubuntu-latest
     outputs:
-      cli_release_created: ${{ steps.release.outputs['.--release_created'] }}
-      cli_tag_name: ${{ steps.release.outputs['.--tag_name'] }}
+      cli_release_created: ${{ steps.release.outputs.release_created }}
+      cli_tag_name: ${{ steps.release.outputs.tag_name }}
       macos_release_created: ${{ steps.release.outputs['macos--release_created'] }}
       macos_tag_name: ${{ steps.release.outputs['macos--tag_name'] }}
       macos_version: ${{ steps.release.outputs['macos--version'] }}
@@ -88,11 +88,12 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   # Merging the CLI's Release PR tagged this push `vX.Y.Z` — build and
-  # publish darwin/arm64 and darwin/amd64 binaries for it.
+  # publish darwin/arm64 and darwin/amd64 binaries for it. The CLI is pure Go
+  # (sqlite via modernc, no cgo), so both cross-compile on a Linux runner.
   release-cli:
     needs: release-please
     if: ${{ needs.release-please.outputs.cli_release_created == 'true' }}
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     env:
       TAG: ${{ needs.release-please.outputs.cli_tag_name }}
     steps:
@@ -105,7 +106,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           for arch in arm64 amd64; do
-            GOOS=darwin GOARCH="$arch" go build \
+            CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
               -ldflags "-X github.com/ceilingfish/lumberjack/cmd.version=${TAG}" \
               -o "dist/lumberjack-darwin-$arch" .
           done

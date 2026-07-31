@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Convert the Go coverage profile from `cli:test` into lcov, for merging with
-# the Swift half (scripts/osx-lcov.sh) in scripts/coverage.sh.
+# the Swift half (scripts/osx-lcov.sh) in scripts/coverage-gate.ps1.
 #
 # The Go profile counts statements per block, lcov counts lines: each block's
 # count is applied to every line it spans, highest wins where blocks overlap.
