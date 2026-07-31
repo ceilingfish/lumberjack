@@ -20,9 +20,10 @@ type DeleteResult struct {
 
 // DeleteWorktree removes the worktree identified by ref within repo. When the
 // worktree holds work that would be lost (uncommitted changes or local-only
-// commits) and force is false, it returns RequiresConfirmation=true without
-// deleting, so the CLI can warn the user; a second call with force=true then
-// performs the deletion (see DeleteWorktreeRequest.force in the proto).
+// commits), or its checked-out branch is not its PR's, and force is false, it
+// returns RequiresConfirmation=true without deleting, so the CLI can warn the
+// user; a second call with force=true then performs the deletion (see
+// DeleteWorktreeRequest.force in the proto).
 func (s *Service) DeleteWorktree(ctx context.Context, repo *schema.Repository, ref string, force bool) (DeleteResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -61,7 +62,7 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 			state = worktree.PRMerged
 		}
 	}
-	st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, state)
+	st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(*wt), state)
 	if err != nil {
 		return DeleteResult{}, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, err)
 	}
@@ -94,12 +95,21 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 
 // confirmMessage renders the warning shown before a forced delete.
 func confirmMessage(st worktree.Status) string {
+	var atRisk string
 	switch {
 	case st.Dirty && st.LocalOnlyCommits > 0:
-		return fmt.Sprintf("worktree has uncommitted changes and %d local-only commit(s) that will be lost", st.LocalOnlyCommits)
+		atRisk = fmt.Sprintf("worktree has uncommitted changes and %d local-only commit(s) that will be lost", st.LocalOnlyCommits)
 	case st.Dirty:
-		return "worktree has uncommitted changes that will be lost"
-	default:
-		return fmt.Sprintf("worktree has %d local-only commit(s) that will be lost", st.LocalOnlyCommits)
+		atRisk = "worktree has uncommitted changes that will be lost"
+	case st.LocalOnlyCommits > 0:
+		atRisk = fmt.Sprintf("worktree has %d local-only commit(s) that will be lost", st.LocalOnlyCommits)
 	}
+	if !st.BranchDisparity {
+		return atRisk
+	}
+	disparity := fmt.Sprintf("is checked out on %s rather than its PR branch", st.CheckedOutBranch)
+	if atRisk == "" {
+		return "worktree " + disparity
+	}
+	return atRisk + ", and " + disparity
 }

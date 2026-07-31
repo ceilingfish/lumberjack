@@ -25,6 +25,8 @@ Once this has been established then lumberjack should store the context of this 
 
 A background daemon process should query this database on an hourly basis and check for open PRs. Any PRs that are open should have their branches downloaded and checked out as described above. Any branches that are currently checked out but their PRs have been merged or closed should be removed. If a worktree has changes locally that are not in the merged branch, then it shouldn't be deleted, these should be considered in need of reconciliation.
 
+A worktree directory that has been taken to a different branch from the one its PR is on is a **branch disparity**, and is flagged and protected exactly like a worktree with uncommitted changes: it needs reconciliation, it is never cleaned up automatically, and deleting it asks for confirmation first. Because git allows a branch in only one working tree, a PR whose branch is already checked out somewhere else — the repository's own checkout, or another worktree with a disparity — gets no worktree of its own; the sync reports it as retained instead of failing to create one on every pass. Once the disparity is resolved, or the worktree holding the branch is deleted, the next sync checks the branch out as usual.
+
 ## Architecture: client / server split
 
 Lumberjack runs as two cooperating processes:
