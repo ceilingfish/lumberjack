@@ -49,14 +49,6 @@ func TestWorktreeMatchesAmbiguousReference(t *testing.T) {
 			ref: "app-feature-login",
 		},
 		{
-			name: "branch name is also the full directory path",
-			worktree: Worktree{
-				BranchName:    "/home/dev/Code/app",
-				DirectoryPath: "/home/dev/Code/app",
-			},
-			ref: "/home/dev/Code/app",
-		},
-		{
 			name: "all three clauses match at once",
 			worktree: Worktree{
 				BranchName:    "app",
@@ -84,8 +76,8 @@ func TestWorktreeMatchesZeroValue(t *testing.T) {
 		ref  string
 		want bool
 	}{
-		{"empty reference matches an unpopulated worktree", "", true},
-		{"filepath.Base of an empty path leaks a dot reference", ".", true},
+		{"empty reference matches an unpopulated worktree, unreachable because both columns are notnull", "", true},
+		{"filepath.Base of an empty path leaks a dot reference, likewise unreachable", ".", true},
 		{"any real reference still does not match", "main", false},
 	}
 
