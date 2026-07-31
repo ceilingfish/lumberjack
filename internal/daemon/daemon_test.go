@@ -110,7 +110,10 @@ func TestDaemonStartStop(t *testing.T) {
 type fakeShutdowner struct{ called chan struct{} }
 
 func (f *fakeShutdowner) Shutdown(...fx.ShutdownOption) error {
-	f.called <- struct{}{}
+	select {
+	case f.called <- struct{}{}:
+	default:
+	}
 	return nil
 }
 
