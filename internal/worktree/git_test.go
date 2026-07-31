@@ -32,6 +32,8 @@ func runGit(t *testing.T, dir string, args ...string) {
 // the wrapper, the working checkout path, and a fetch of origin already done.
 func setupRepos(t *testing.T) (*Git, string) {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	main := filepath.Join(root, "main")
