@@ -18,23 +18,61 @@ permissions:
   pull-requests: write
 
 jobs:
-  # Re-runs the same checks pull-request CI runs, so a release is never cut
-  # from a main that would have failed CI. A check failure here must prevent
-  # both the Release PR refresh and any artifact publish below.
-  checks:
-    runs-on: macos-14
+  # Re-runs the checks pull-request CI runs, so a release is never cut from a
+  # main that would have failed CI. Split by language so only the Swift half
+  # needs a macOS runner.
+  cli-checks:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: jdx/mise-action@v2
       - run: mise run cli:format-check
       - run: mise run cli:lint
+      - run: mise run cli:test
+      - run: mise run cli:lcov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-go
+          path: coverage-go.lcov
+
+  osx-checks:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
       - run: mise run osx:format-check
       - run: mise run osx:lint
-      # `coverage` depends on cli:test and osx:test, so both suites run here.
-      - run: mise run coverage
+      - run: mise run osx:test
+      - run: mise run osx:lcov
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-swift
+          path: coverage-swift.lcov
+
+  # The gate is on both codebases merged, so it needs both halves on one
+  # machine. Runs on Linux: merging is bash and awk, no toolchain involved.
+  coverage:
+    needs: [cli-checks, osx-checks]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+        with:
+          install: false # no toolchains needed, just mise itself
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+      - run: mise run coverage:check
+      # Uploaded on failure too — that is when you need the report.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-merged
+          path: coverage.lcov
 
   release-please:
-    needs: checks
+    needs: [cli-checks, osx-checks, coverage]
     runs-on: ubuntu-latest
     outputs:
       cli_release_created: ${{ steps.release.outputs['.--release_created'] }}

@@ -45,7 +45,7 @@ run = "go run . completion"
 # the profiles `cli:test` and `osx:test` leave behind.
 
 [tasks."cli:test"]
-description = "Run the Go test suite, writing the coverage profile `coverage` reads"
+description = "Run the Go test suite, writing the coverage profile `cli:lcov` reads"
 run = "go test -covermode=atomic -coverprofile=coverage.out ./..."
 
 [tasks."cli:format"]
@@ -65,7 +65,7 @@ run = "golangci-lint run"
 # swift-format ships with the Swift 6 toolchain the app already requires (see
 # macos/README.md), so linting and formatting Swift adds no new dependency.
 [tasks."osx:test"]
-description = "Run the Swift test suite, emitting the coverage data `coverage` reads"
+description = "Run the Swift test suite, emitting the coverage data `osx:lcov` reads"
 run = "scripts/osx-test.sh"
 
 [tasks."osx:format"]
@@ -108,15 +108,25 @@ run = "buf lint"
 description = "Check protobuf for breaking changes against main"
 run = "buf breaking --against '.git#branch=main'"
 
-# The single point at which the two codebases meet. It runs no tests itself:
-# `cli:test` and `osx:test` produce the coverage data and this reads both.
-[tasks.coverage]
-description = "Check coverage from the cli:test and osx:test profiles against the floor"
-depends = ["cli:test", "osx:test"]
-run = "scripts/coverage.sh 80"
+[tasks."cli:lcov"]
+description = "Convert the cli:test Go profile to lcov"
+wait_for = ["cli:test"]
+run = "scripts/go-lcov.sh"
 
-# Restores the agent skills pinned in skills-lock.json (see https://skills.sh).
-# Run after cloning to install project skills such as go-code-review.
+[tasks."osx:lcov"]
+description = "Export the osx:test Swift coverage to lcov"
+wait_for = ["osx:test"]
+run = "scripts/osx-lcov.sh"
+
+[tasks."coverage:check"]
+description = "Merge the Go and Swift lcov reports and check the merged total against the floor"
+wait_for = ["cli:lcov", "osx:lcov"]
+run = "scripts/coverage.sh 80 coverage-go.lcov coverage-swift.lcov"
+
+[tasks.coverage]
+description = "Run both suites and check their merged coverage against the floor"
+depends = ["cli:test", "osx:test", "cli:lcov", "osx:lcov", "coverage:check"]
+
 [tasks.skills]
 description = "Install agent skills pinned in skills-lock.json"
 run = "npx --yes skills experimental_install"
