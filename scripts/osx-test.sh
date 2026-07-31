@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Run the Swift test suite with coverage enabled, leaving the profile data for
-# `scripts/coverage.sh` to read (see the `coverage` mise task).
+# `scripts/osx-lcov.sh` to read (see the `coverage` mise task).
 #
 # swift-testing's Testing.framework ships with a full Xcode, not with the
 # Command Line Tools. A machine with both installed but `xcode-select` pointed

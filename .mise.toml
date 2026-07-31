@@ -8,6 +8,7 @@ uv = "0.9.28"
 "pipx:sqlfluff" = "3.4.2"
 buf = "1.71.0"
 "github:gastownhall/beads" = "latest"
+powershell = "7.6.4"
 # node provides npx, used by the `skills` task to install agent skills.
 node = "24.10.0"
 
@@ -119,13 +120,17 @@ wait_for = ["osx:test"]
 run = "scripts/osx-lcov.sh"
 
 [tasks."coverage:check"]
-description = "Merge the Go and Swift lcov reports and check the merged total against the floor"
+description = "Merge the Go and Swift lcov reports; fail if any package is below 80%"
 wait_for = ["cli:lcov", "osx:lcov"]
-run = "scripts/coverage.sh 80 coverage-go.lcov coverage-swift.lcov"
+run = "pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 80"
 
 [tasks.coverage]
-description = "Run both suites and check their merged coverage against the floor"
+description = "Run both suites and check every package against the per-package floor"
 depends = ["cli:test", "osx:test", "cli:lcov", "osx:lcov", "coverage:check"]
+
+[tasks."coverage:gate-test"]
+description = "Run the Pester tests for the coverage gate"
+run = "pwsh -NoProfile -File scripts/coverage-gate-test.ps1"
 
 [tasks.skills]
 description = "Install agent skills pinned in skills-lock.json"
