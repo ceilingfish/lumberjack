@@ -139,14 +139,13 @@ func TestShowFileSurfacesGitStderr(t *testing.T) {
 }
 
 func TestShowFileMissingPathVariants(t *testing.T) {
-	for _, tc := range []struct {
-		name, script string
-	}{
-		{"path absent from the ref", `echo "fatal: path 'cfg.yml' does not exist in 'origin/main'" >&2; exit 128`},
-		{"path untracked at the ref", `echo "fatal: path 'cfg.yml' exists on disk, but not in 'origin/main'" >&2; exit 128`},
+	for _, stderr := range []string{
+		"fatal: path 'cfg.yml' does not exist in 'origin/main'",
+		"fatal: path 'cfg.yml' exists on disk, but not in 'origin/main'",
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			data, found, err := stubGit(t, tc.script).ShowFile(context.Background(), t.TempDir(), "origin/main", "cfg.yml")
+		t.Run(stderr, func(t *testing.T) {
+			g := stubGit(t, `echo "`+stderr+`" >&2; exit 128`)
+			data, found, err := g.ShowFile(context.Background(), t.TempDir(), "origin/main", "cfg.yml")
 			if err != nil {
 				t.Fatalf("ShowFile: %v", err)
 			}

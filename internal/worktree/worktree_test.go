@@ -167,8 +167,6 @@ func TestReconcileMissingDir(t *testing.T) {
 	}
 }
 
-// fakeProber stands in for *Git so the reconciliation decisions can be tested
-// without building a repository for each combination.
 type fakeProber struct {
 	dirty     bool
 	localOnly int64
@@ -184,8 +182,6 @@ func (f fakeProber) LocalOnlyCommits(context.Context, string) (int64, error) {
 	return f.localOnly, f.countErr
 }
 
-// fakeWorktreeDir is the least a directory needs for Reconcile to probe it: it
-// exists and holds a .git entry.
 func fakeWorktreeDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -261,8 +257,8 @@ func TestReconcileDecisions(t *testing.T) {
 	}
 }
 
-// A probe failure must surface rather than resolve to a plausible-looking
-// status: a worktree wrongly reported clean is one the daemon would delete.
+var errProbe = errors.New("git exploded")
+
 func TestReconcileProbeErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -287,10 +283,6 @@ func TestReconcileProbeErrors(t *testing.T) {
 	}
 }
 
-var errProbe = errors.New("git exploded")
-
-// A path that is a file, not a directory, is not a worktree — it reconciles as
-// Missing so tracking can be pruned.
 func TestReconcileNotADirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
@@ -306,8 +298,6 @@ func TestReconcileNotADirectory(t *testing.T) {
 	}
 }
 
-// A stat failure that is not "does not exist" must not masquerade as a prunable
-// worktree — that would silently drop tracking for a tree that is still there.
 func TestReconcileStatError(t *testing.T) {
 	notADir := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(notADir, []byte("x\n"), 0o600); err != nil {
