@@ -33,3 +33,66 @@ func TestWorktreeMatches(t *testing.T) {
 		})
 	}
 }
+
+func TestWorktreeMatchesAmbiguousReference(t *testing.T) {
+	tests := []struct {
+		name     string
+		worktree Worktree
+		ref      string
+	}{
+		{
+			name: "branch name is also the directory base name",
+			worktree: Worktree{
+				BranchName:    "app-feature-login",
+				DirectoryPath: "/home/dev/Code/app-feature-login",
+			},
+			ref: "app-feature-login",
+		},
+		{
+			name: "branch name is also the full directory path",
+			worktree: Worktree{
+				BranchName:    "/home/dev/Code/app",
+				DirectoryPath: "/home/dev/Code/app",
+			},
+			ref: "/home/dev/Code/app",
+		},
+		{
+			name: "directory is at the filesystem root, so path and base name coincide",
+			worktree: Worktree{
+				BranchName:    "feature/login",
+				DirectoryPath: "/app",
+			},
+			ref: "/app",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.worktree.Matches(tt.ref) {
+				t.Errorf("Matches(%q) = false, want true", tt.ref)
+			}
+		})
+	}
+}
+
+func TestWorktreeMatchesZeroValue(t *testing.T) {
+	var w Worktree
+
+	tests := []struct {
+		name string
+		ref  string
+		want bool
+	}{
+		{"empty reference matches an unpopulated worktree", "", true},
+		{"filepath.Base of an empty path leaks a dot reference", ".", true},
+		{"any real reference still does not match", "main", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := w.Matches(tt.ref); got != tt.want {
+				t.Errorf("Matches(%q) = %v, want %v", tt.ref, got, tt.want)
+			}
+		})
+	}
+}
