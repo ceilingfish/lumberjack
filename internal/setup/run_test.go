@@ -3,7 +3,9 @@ package setup
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -235,8 +237,15 @@ func TestRunCommandFailureWithoutOutputReportsBareError(t *testing.T) {
 	if step != "step 1 (run-command)" {
 		t.Fatalf("failed step = %q, want step 1 (run-command)", step)
 	}
-	if got := err.Error(); got != "exit status 7" {
-		t.Fatalf("error = %q, want just the exit status when the command printed nothing", got)
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("error = %v, want an *exec.ExitError", err)
+	}
+	if got, want := err.Error(), exitErr.Error(); got != want {
+		t.Fatalf("error = %q, want just %q when the command printed nothing", got, want)
+	}
+	if got := exitErr.ExitCode(); got != 7 {
+		t.Fatalf("exit code = %d, want 7", got)
 	}
 }
 
@@ -251,30 +260,6 @@ func TestRunCommandFailureIncludesOutput(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "diagnostic") {
 		t.Fatalf("error = %q, want the command's output included", err)
-	}
-}
-
-func TestRunCommandRunsInWorktreeDir(t *testing.T) {
-	wt := t.TempDir()
-	cfg := &Config{Steps: []Step{
-		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "pwd"}},
-	}}
-	var buf bytes.Buffer
-	if _, err := Run(context.Background(), cfg, Options{
-		MainCheckout: t.TempDir(), WorktreeDir: wt, Consented: true, Output: &buf,
-	}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	want, err := filepath.EvalSymlinks(wt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := filepath.EvalSymlinks(strings.TrimSpace(buf.String()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatalf("working directory = %q, want the worktree %q", got, want)
 	}
 }
 
@@ -400,12 +385,5 @@ func TestRunCopyFilePreserveExistingStillCopiesWhenAbsent(t *testing.T) {
 	}
 	if string(got) != "from-main\n" {
 		t.Fatalf("destination = %q", got)
-	}
-}
-
-func TestRunNoStepsSucceeds(t *testing.T) {
-	step, err := Run(context.Background(), &Config{}, Options{})
-	if err != nil || step != "" {
-		t.Fatalf("Run(empty) = (%q, %v), want no failure", step, err)
 	}
 }

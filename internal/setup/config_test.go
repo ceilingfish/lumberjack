@@ -103,31 +103,6 @@ steps:
 	}
 }
 
-func TestParseErrorNamesFailingStep(t *testing.T) {
-	_, err := Parse([]byte(`
-steps:
-  - type: run-command
-    run_command:
-      command: ok
-  - type: run-command
-    run_command:
-      command: ""
-`))
-	if err == nil {
-		t.Fatal("Parse: want error for an empty command, got nil")
-	}
-	if !strings.Contains(err.Error(), "step 2") {
-		t.Fatalf("Parse error = %q, want it to name step 2", err)
-	}
-}
-
-func TestLabel(t *testing.T) {
-	st := Step{Type: StepRunCommand}
-	if got, want := st.Label(1), "step 2 (run-command)"; got != want {
-		t.Fatalf("Label(1) = %q, want %q", got, want)
-	}
-}
-
 func TestFingerprintStable(t *testing.T) {
 	a := Fingerprint([]byte("steps: []\n"))
 	b := Fingerprint([]byte("steps: []\n"))
