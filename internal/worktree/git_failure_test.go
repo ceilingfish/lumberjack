@@ -257,3 +257,29 @@ func TestResolveBinaryNotOnPath(t *testing.T) {
 		t.Errorf("error %q should name the binary and the override variable", err)
 	}
 }
+
+func TestCurrentBranch(t *testing.T) {
+	for _, tc := range []struct {
+		name, script, want, wantErr string
+	}{
+		{name: "on a branch", script: `echo feature/foo`, want: "feature/foo"},
+		{name: "detached HEAD", script: `echo HEAD`, want: ""},
+		{name: "git fails", script: `echo "fatal: not a git repository" >&2; exit 128`, wantErr: "fatal: not a git repository"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := stubGit(t, tc.script).CurrentBranch(context.Background(), t.TempDir())
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("CurrentBranch error = %v, want one containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CurrentBranch: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("CurrentBranch = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
