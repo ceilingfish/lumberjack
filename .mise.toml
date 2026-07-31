@@ -120,9 +120,9 @@ wait_for = ["osx:test"]
 run = "scripts/osx-lcov.sh"
 
 [tasks."coverage:check"]
-description = "Merge the Go and Swift lcov reports; fail if any package is below 80%"
+description = "Merge the Go and Swift lcov reports; fail if any package is below 95%"
 wait_for = ["cli:lcov", "osx:lcov"]
-run = "pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 80"
+run = "pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 95"
 
 [tasks.coverage]
 description = "Run both suites and check every package against the per-package floor"
