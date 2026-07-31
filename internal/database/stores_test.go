@@ -377,7 +377,9 @@ func TestSetWorktreeDirectory(t *testing.T) {
 	wt := &schema.Worktree{
 		RepositoryID: repo.ID, BranchName: "feature/x", DirectoryPath: "/parent/a-x",
 	}
-	_ = c.CreateWorktree(ctx, wt)
+	if err := c.CreateWorktree(ctx, wt); err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
 
 	if err := c.SetWorktreeDirectory(ctx, wt.ID, "/parent/a-feature-x"); err != nil {
 		t.Fatalf("SetWorktreeDirectory: %v", err)
@@ -403,9 +405,14 @@ func TestSetWorktreeSetupError(t *testing.T) {
 	wt := &schema.Worktree{
 		RepositoryID: repo.ID, BranchName: "feature/x", DirectoryPath: "/parent/a-x",
 	}
-	_ = c.CreateWorktree(ctx, wt)
+	if err := c.CreateWorktree(ctx, wt); err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
 
-	list, _ := c.ListWorktrees(ctx, repo.ID)
+	list, err := c.ListWorktrees(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
 	if list[0].SetupError != nil {
 		t.Fatalf("expected no setup error initially, got %v", list[0].SetupError)
 	}

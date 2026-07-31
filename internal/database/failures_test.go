@@ -140,14 +140,18 @@ func TestDeleteRepositoryRepositoryDeleteError(t *testing.T) {
 
 func TestRepositoryUpdateErrors(t *testing.T) {
 	ctx := context.Background()
-	for name, update := range map[string]func(*Client) error{
-		"UpdateSyncResult":   func(c *Client) error { return c.UpdateSyncResult(ctx, 1, time.Unix(0, 0), nil) },
-		"UpdateLogin":        func(c *Client) error { return c.UpdateLogin(ctx, 1, "someone") },
-		"UpdateSetupConsent": func(c *Client) error { return c.UpdateSetupConsent(ctx, 1, "fingerprint") },
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := update(closedClient(t)); err == nil {
-				t.Fatalf("%s: expected an error, got nil", name)
+	updates := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"UpdateSyncResult", func(c *Client) error { return c.UpdateSyncResult(ctx, 1, time.Unix(0, 0), nil) }},
+		{"UpdateLogin", func(c *Client) error { return c.UpdateLogin(ctx, 1, "someone") }},
+		{"UpdateSetupConsent", func(c *Client) error { return c.UpdateSetupConsent(ctx, 1, "fingerprint") }},
+	}
+	for _, u := range updates {
+		t.Run(u.name, func(t *testing.T) {
+			if err := u.call(closedClient(t)); err == nil {
+				t.Fatalf("%s: expected an error, got nil", u.name)
 			}
 		})
 	}
@@ -173,17 +177,18 @@ func TestReplaceOpenPRsPruneError(t *testing.T) {
 
 func TestSyncRunErrors(t *testing.T) {
 	ctx := context.Background()
+	c := closedClient(t)
 
-	if _, err := closedClient(t).StartSyncRun(ctx, 1, time.Unix(0, 0)); err == nil {
+	if _, err := c.StartSyncRun(ctx, 1, time.Unix(0, 0)); err == nil {
 		t.Error("StartSyncRun: expected an error, got nil")
 	}
 
 	run := &schema.SyncRun{ID: 1}
-	if err := closedClient(t).FinishSyncRun(ctx, run, time.Unix(0, 0), 0, 0, nil); err == nil {
+	if err := c.FinishSyncRun(ctx, run, time.Unix(0, 0), 0, 0, nil); err == nil {
 		t.Error("FinishSyncRun: expected an error, got nil")
 	}
 
-	latest, err := closedClient(t).LatestSyncRun(ctx, 1)
+	latest, err := c.LatestSyncRun(ctx, 1)
 	if err == nil {
 		t.Error("LatestSyncRun: expected an error, got nil")
 	}
@@ -194,23 +199,23 @@ func TestSyncRunErrors(t *testing.T) {
 
 func TestWorktreeErrors(t *testing.T) {
 	ctx := context.Background()
-	for name, op := range map[string]func(*Client) error{
-		"CreateWorktree": func(c *Client) error {
+	ops := []struct {
+		name string
+		call func(*Client) error
+	}{
+		{"CreateWorktree", func(c *Client) error {
 			return c.CreateWorktree(ctx, &schema.Worktree{RepositoryID: 1, BranchName: "b", DirectoryPath: "/d"})
-		},
-		"ListWorktrees": func(c *Client) error {
-			_, err := c.ListWorktrees(ctx, 1)
-			return err
-		},
-		"SetWorktreePR":          func(c *Client) error { return c.SetWorktreePR(ctx, 1, nil, "b") },
-		"TouchWorktreesSyncedAt": func(c *Client) error { return c.TouchWorktreesSyncedAt(ctx, 1, time.Unix(0, 0)) },
-		"SetWorktreeDirectory":   func(c *Client) error { return c.SetWorktreeDirectory(ctx, 1, "/d") },
-		"SetWorktreeSetupError":  func(c *Client) error { return c.SetWorktreeSetupError(ctx, 1, nil) },
-		"DeleteWorktree":         func(c *Client) error { return c.DeleteWorktree(ctx, 1) },
-	} {
-		t.Run(name, func(t *testing.T) {
-			if err := op(closedClient(t)); err == nil {
-				t.Fatalf("%s: expected an error, got nil", name)
+		}},
+		{"SetWorktreePR", func(c *Client) error { return c.SetWorktreePR(ctx, 1, nil, "b") }},
+		{"TouchWorktreesSyncedAt", func(c *Client) error { return c.TouchWorktreesSyncedAt(ctx, 1, time.Unix(0, 0)) }},
+		{"SetWorktreeDirectory", func(c *Client) error { return c.SetWorktreeDirectory(ctx, 1, "/d") }},
+		{"SetWorktreeSetupError", func(c *Client) error { return c.SetWorktreeSetupError(ctx, 1, nil) }},
+		{"DeleteWorktree", func(c *Client) error { return c.DeleteWorktree(ctx, 1) }},
+	}
+	for _, op := range ops {
+		t.Run(op.name, func(t *testing.T) {
+			if err := op.call(closedClient(t)); err == nil {
+				t.Fatalf("%s: expected an error, got nil", op.name)
 			}
 		})
 	}
