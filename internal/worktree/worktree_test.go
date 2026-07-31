@@ -2,8 +2,10 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -162,5 +164,164 @@ func TestReconcileMissingDir(t *testing.T) {
 	}
 	if !st.Missing {
 		t.Errorf("expected Missing for absent dir: %+v", st)
+	}
+}
+
+// fakeProber stands in for *Git so the reconciliation decisions can be tested
+// without building a repository for each combination.
+type fakeProber struct {
+	dirty     bool
+	localOnly int64
+	dirtyErr  error
+	countErr  error
+}
+
+func (f fakeProber) IsDirty(context.Context, string) (bool, error) {
+	return f.dirty, f.dirtyErr
+}
+
+func (f fakeProber) LocalOnlyCommits(context.Context, string) (int64, error) {
+	return f.localOnly, f.countErr
+}
+
+// fakeWorktreeDir is the least a directory needs for Reconcile to probe it: it
+// exists and holds a .git entry.
+func fakeWorktreeDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: /elsewhere\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestReconcileDecisions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		probe fakeProber
+		pr    PRState
+		want  Status
+	}{
+		{
+			name: "clean with no PR is in sync",
+			pr:   PRNone,
+			want: Status{},
+		},
+		{
+			name:  "dirty with no PR is never a removal candidate",
+			probe: fakeProber{dirty: true},
+			pr:    PRNone,
+			want: Status{
+				Dirty:               true,
+				NeedsReconciliation: true,
+				Note:                "needs reconciliation: uncommitted changes",
+			},
+		},
+		{
+			name:  "unpushed commits on an open PR",
+			probe: fakeProber{localOnly: 3},
+			pr:    PROpen,
+			want: Status{
+				LocalOnlyCommits:    3,
+				NeedsReconciliation: true,
+				Note:                "needs reconciliation: 3 local-only commit(s)",
+			},
+		},
+		{
+			name:  "orphaned with both kinds of unsaved work",
+			probe: fakeProber{dirty: true, localOnly: 2},
+			pr:    PRGone,
+			want: Status{
+				Dirty:               true,
+				LocalOnlyCommits:    2,
+				NeedsReconciliation: true,
+				Orphaned:            true,
+				Note:                "orphaned: PR closed but uncommitted changes and 2 local-only commit(s)",
+			},
+		},
+		{
+			name:  "merged discards the local-only count",
+			probe: fakeProber{localOnly: 5},
+			pr:    PRMerged,
+			want: Status{
+				Merged: true,
+				Note:   "PR merged; safe to remove",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), tc.pr)
+			if err != nil {
+				t.Fatalf("Reconcile: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("Reconcile = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A probe failure must surface rather than resolve to a plausible-looking
+// status: a worktree wrongly reported clean is one the daemon would delete.
+func TestReconcileProbeErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		probe   fakeProber
+		wantErr string
+	}{
+		{"dirty check fails", fakeProber{dirtyErr: errProbe}, "checking dirty state"},
+		{"commit count fails", fakeProber{countErr: errProbe}, "counting local-only commits"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), PROpen)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Reconcile error = %v, want one containing %q", err, tc.wantErr)
+			}
+			if !errors.Is(err, errProbe) {
+				t.Errorf("Reconcile error %v does not wrap the probe failure", err)
+			}
+			if st != (Status{}) {
+				t.Errorf("Reconcile = %+v on failure, want the zero Status", st)
+			}
+		})
+	}
+}
+
+var errProbe = errors.New("git exploded")
+
+// A path that is a file, not a directory, is not a worktree — it reconciles as
+// Missing so tracking can be pruned.
+func TestReconcileNotADirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(path, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Reconcile(context.Background(), fakeProber{}, path, PROpen)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !st.Missing || st.Note != "worktree path is not a directory" {
+		t.Errorf("Reconcile = %+v, want Missing", st)
+	}
+}
+
+// A stat failure that is not "does not exist" must not masquerade as a prunable
+// worktree — that would silently drop tracking for a tree that is still there.
+func TestReconcileStatError(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notADir, []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Reconcile(context.Background(), fakeProber{}, filepath.Join(notADir, "under-a-file"), PROpen)
+	if err == nil {
+		t.Fatal("Reconcile: expected an error")
+	}
+	if !strings.Contains(err.Error(), "stat worktree directory") {
+		t.Errorf("error %q does not say what failed", err)
+	}
+	if st.Missing {
+		t.Error("a stat failure was reported as a missing worktree")
 	}
 }
