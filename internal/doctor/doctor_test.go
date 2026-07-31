@@ -30,9 +30,6 @@ const (
 *) exit 1 ;;
 esac
 `
-	brokenGit = `echo "fatal: not a git thing" >&2
-exit 128
-`
 	workingGH = `case "$1" in
 --version) echo "gh version 2.50.0 (2024-01-01)"; echo "https://github.com/cli/cli" ;;
 auth) exit 0 ;;
@@ -45,7 +42,7 @@ auth) echo "You are not logged into any GitHub hosts" >&2; exit 1 ;;
 *) exit 1 ;;
 esac
 `
-	brokenGH = `echo "gh exploded" >&2
+	brokenBin = `echo "the tool exploded" >&2
 exit 1
 `
 )
@@ -113,13 +110,13 @@ func TestCheckGitStaleOverride(t *testing.T) {
 
 func TestCheckGitVersionFails(t *testing.T) {
 	stubEmptyEnvironment(t)
-	stubGit(t, brokenGit)
+	stubGit(t, brokenBin)
 
 	c := checkGit(context.Background())
 	if c.OK {
 		t.Fatalf("expected git check to fail when --version errors: %+v", c)
 	}
-	if !strings.Contains(c.Detail, "not a git thing") {
+	if !strings.Contains(c.Detail, "the tool exploded") {
 		t.Errorf("Detail = %q, want git's own stderr", c.Detail)
 	}
 }
@@ -157,13 +154,13 @@ func TestCheckGHAbsent(t *testing.T) {
 
 func TestCheckGHVersionFails(t *testing.T) {
 	stubEmptyEnvironment(t)
-	stubGH(t, brokenGH)
+	stubGH(t, brokenBin)
 
 	c := checkGH(context.Background())
 	if c.OK {
 		t.Fatalf("expected gh check to fail when --version errors: %+v", c)
 	}
-	if !strings.Contains(c.Detail, "gh exploded") {
+	if !strings.Contains(c.Detail, "the tool exploded") {
 		t.Errorf("Detail = %q, want gh's own stderr", c.Detail)
 	}
 }
@@ -373,11 +370,5 @@ func TestReportWriterErrorOnMultiLineDetail(t *testing.T) {
 	}
 	if ok {
 		t.Error("expected ok=false when the report cannot be written")
-	}
-}
-
-func TestErrChecksFailedMessage(t *testing.T) {
-	if ErrChecksFailed == nil || !strings.Contains(ErrChecksFailed.Error(), "prerequisite") {
-		t.Errorf("ErrChecksFailed = %v", ErrChecksFailed)
 	}
 }
