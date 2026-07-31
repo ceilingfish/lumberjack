@@ -54,7 +54,7 @@ func runUninstall(out io.Writer, opts uninstallOptions) error {
 	}
 
 	if !opts.cliOnly {
-		svc, err := newService("", "")
+		svc, err := newLifecycle("", "")
 		if err != nil {
 			return err
 		}

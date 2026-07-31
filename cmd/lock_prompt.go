@@ -68,14 +68,12 @@ func promptLockStrategy(cmd *cobra.Command, path, reason string) (lumberjackv1.L
 	if !interactiveTerminal() {
 		return 0, errors.New("no interactive terminal to ask about a locked worktree; pass --lock-strategy")
 	}
-	fd := int(os.Stdin.Fd())
-	out := cmd.ErrOrStderr()
-
-	oldState, err := term.MakeRaw(fd)
+	in, restore, err := rawTerminal()
 	if err != nil {
-		return 0, fmt.Errorf("entering raw terminal mode: %w", err)
+		return 0, err
 	}
-	defer func() { _ = term.Restore(fd, oldState) }()
+	defer restore()
+	out := cmd.ErrOrStderr()
 
 	locked := path
 	if reason != "" {
@@ -87,7 +85,7 @@ func promptLockStrategy(cmd *cobra.Command, path, reason string) (lumberjackv1.L
 			"[d] delete the lock  [n] abort\r\n", locked)
 
 	for {
-		s, err := readLockAnswer(os.Stdin)
+		s, err := readLockAnswer(in)
 		if err != nil {
 			return 0, err
 		}

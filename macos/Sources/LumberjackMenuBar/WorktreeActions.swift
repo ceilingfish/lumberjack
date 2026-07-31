@@ -31,8 +31,10 @@ enum WorktreeActions {
     static var terminalIcon: NSImage? { icon(for: terminalURL) }
     static var vscodeIcon: NSImage? { icon(for: vscodeURL) }
 
+    static var launchOverride: ((String, URL) -> Void)?
+
     static func openInFinder(_ path: String) {
-        NSWorkspace.shared.open(URL(fileURLWithPath: path))
+        open(path, with: finderURL)
     }
 
     static func openInTerminal(_ path: String) {
@@ -45,6 +47,10 @@ enum WorktreeActions {
 
     private static func open(_ path: String, with app: URL?) {
         guard let app else { return }
+        if let launchOverride {
+            launchOverride(path, app)
+            return
+        }
         NSWorkspace.shared.open(
             [URL(fileURLWithPath: path)],
             withApplicationAt: app,

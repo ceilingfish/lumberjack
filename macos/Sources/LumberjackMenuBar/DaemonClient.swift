@@ -3,6 +3,14 @@ import GRPC
 import NIOCore
 import NIOPosix
 
+protocol DaemonConnection: Sendable {
+    func health() async throws -> Lumberjack_V1_HealthResponse
+    func listRepositories() async throws -> [Lumberjack_V1_Repository]
+    func listWorktrees(repository: String) async throws -> [Lumberjack_V1_Worktree]
+    func sync(repository: String) async throws
+    func close() async
+}
+
 /// A connected handle to the Lumberjack daemon, over its Unix domain socket
 /// (see SocketPath.swift). Uses `GRPCChannelPool`, which keeps a connection
 /// warm and transparently reconnects — the piece that lets the menu bar app
@@ -11,7 +19,9 @@ import NIOPosix
 /// Only ever created, used, and closed from `AppState`'s `@MainActor` context;
 /// `@unchecked` because gRPC's generated client types aren't marked `Sendable`
 /// even though nothing here is actually shared across isolation domains.
-final class DaemonClient: @unchecked Sendable {
+final class DaemonClient: DaemonConnection, @unchecked Sendable {
+    static let healthTimeout: TimeAmount = .seconds(2)
+
     private let group: EventLoopGroup
     private let channel: GRPCChannel
     let service: Lumberjack_V1_LumberjackServiceAsyncClient
@@ -35,10 +45,10 @@ final class DaemonClient: @unchecked Sendable {
     /// Health mirrors what the CLI does before any other call: a cheap probe
     /// for "is the daemon up at all", with a short deadline so a stopped
     /// daemon fails fast instead of hanging the UI.
-    func health(timeout: TimeAmount = .seconds(2)) async throws -> Lumberjack_V1_HealthResponse {
+    func health() async throws -> Lumberjack_V1_HealthResponse {
         try await service.health(
             Lumberjack_V1_HealthRequest(),
-            callOptions: CallOptions(timeLimit: .timeout(timeout))
+            callOptions: CallOptions(timeLimit: .timeout(Self.healthTimeout))
         )
     }
 

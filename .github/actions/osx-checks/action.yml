@@ -1,0 +1,19 @@
+name: macOS checks
+description: Format, lint and test the Swift menu-bar app, and publish its lcov report
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@v2
+    - run: mise run osx:format-check
+      shell: bash
+    - run: mise run osx:lint
+      shell: bash
+    - run: mise run osx:test
+      shell: bash
+    - run: mise run osx:lcov
+      shell: bash
+    - uses: actions/upload-artifact@v4
+      with:
+        name: coverage-swift
+        path: coverage-swift.lcov

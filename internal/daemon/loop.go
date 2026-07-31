@@ -27,7 +27,9 @@ func runSyncLoop(lc fx.Lifecycle, svc *Service, db *database.Client) {
 		OnStart: func(context.Context) error {
 			go func() {
 				defer close(done)
-				syncLoop(ctx, svc, db)
+				ticker := time.NewTicker(SyncInterval)
+				defer ticker.Stop()
+				syncLoop(ctx, svc, db, ticker.C)
 			}()
 			return nil
 		},
@@ -42,19 +44,16 @@ func runSyncLoop(lc fx.Lifecycle, svc *Service, db *database.Client) {
 	})
 }
 
-// syncLoop reconciles all repositories immediately, then every SyncInterval,
-// until ctx is cancelled. Per-repository errors are logged and never stop the
-// loop — a transient GitHub or network failure must not wedge the daemon.
-func syncLoop(ctx context.Context, svc *Service, db *database.Client) {
-	ticker := time.NewTicker(SyncInterval)
-	defer ticker.Stop()
-
+// syncLoop reconciles all repositories immediately, then on every tick, until
+// ctx is cancelled. Per-repository errors are logged and never stop the loop —
+// a transient GitHub or network failure must not wedge the daemon.
+func syncLoop(ctx context.Context, svc *Service, db *database.Client, tick <-chan time.Time) {
 	syncAll(ctx, svc, db)
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-tick:
 			syncAll(ctx, svc, db)
 		}
 	}

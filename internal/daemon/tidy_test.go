@@ -697,3 +697,37 @@ func TestTidyRepositoryAbortFailsWhenLocksCannotBeRead(t *testing.T) {
 		t.Errorf("git moves=%v, want none", h.git.moves)
 	}
 }
+
+func TestTidyRepositoryReportsBothAFailedMoveAndAFailedRelock(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	from := filepath.Join(h.parent, "elsewhere", "foo")
+	h.lockedWorktree(t, repo, "feature/foo", from, "in use")
+	h.git.moveErr = map[string]error{from: errors.New("git said no")}
+	h.git.lockErr = map[string]error{from: errors.New("git said no again")}
+
+	moves, err := h.svc.TidyRepository(context.Background(), repo,
+		TidyOptions{LockStrategy: LockUnlock})
+	if err != nil {
+		t.Fatalf("TidyRepository: %v", err)
+	}
+	if len(moves) != 1 || moves[0].Moved {
+		t.Fatalf("moves=%+v, want one entry reporting a move that did not happen", moves)
+	}
+	if !strings.Contains(moves[0].Err, "git said no") ||
+		!strings.Contains(moves[0].Err, "re-locking") {
+		t.Errorf("err=%q, want both the move failure and the re-lock failure", moves[0].Err)
+	}
+}
+
+func TestTidyAbortCheckReportsAnUnlistableWorktreeSet(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.track(t, repo, "feature/foo", filepath.Join(h.parent, "elsewhere", "foo"))
+	h.git.listErr = errors.New("fatal: not a git repository")
+
+	err := h.svc.TidyAbortCheck(context.Background(), repo, TidyOptions{LockStrategy: LockAbort})
+	if err == nil {
+		t.Error("expected an error when git cannot list worktrees")
+	}
+}
