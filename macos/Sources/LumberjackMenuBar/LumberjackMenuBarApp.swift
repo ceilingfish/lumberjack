@@ -26,7 +26,17 @@ struct LumberjackMenuBarApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private let popover = NSPopover()
-    private let state = AppState()
+    private let state: AppState
+
+    override init() {
+        self.state = AppState()
+        super.init()
+    }
+
+    init(state: AppState) {
+        self.state = state
+        super.init()
+    }
 
     /// Key under which our menu-bar slot is remembered. Unique to us, so the
     /// stored position can't be confused with another app's.
