@@ -35,9 +35,12 @@ const (
 type Status struct {
 	// Dirty is true when the working tree has uncommitted changes.
 	Dirty bool
-	// LocalOnlyCommits counts commits present locally but on no remote — work
-	// that would be lost if the worktree were removed. It is forced to zero for
-	// a merged PR, whose commits are safely on the base branch.
+	// LocalOnlyCommits counts commits present locally, on no remote, and
+	// committed by this user — work that would be lost if the worktree were
+	// removed. The committer test excludes commits stranded by someone else
+	// force-pushing the branch, which were never this user's work to lose. It is
+	// forced to zero for a merged PR, whose commits are safely on the base
+	// branch.
 	LocalOnlyCommits int64
 	// Merged is true when the source PR was merged; its commits are on the base
 	// branch, so the worktree is a safe-remove candidate even though its branch

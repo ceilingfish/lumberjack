@@ -304,15 +304,42 @@ func (g *Git) IsDirty(ctx context.Context, dir string) (bool, error) {
 	return out != "", nil
 }
 
-// LocalOnlyCommits counts commits reachable from the worktree's HEAD but from
-// no remote-tracking branch — i.e. local work that exists nowhere on the
-// remote. It is the "commits you would lose" figure used both to decide
-// whether an orphaned worktree needs reconciliation and to warn on delete.
+// LocalOnlyCommits counts commits reachable from the worktree's HEAD, reachable
+// from no remote-tracking branch, and committed by this repository's own git
+// identity — i.e. local work that exists nowhere on the remote. It is the
+// "commits you would lose" figure used both to decide whether an orphaned
+// worktree needs reconciliation and to warn on delete.
+//
+// The committer filter is what stops someone else's rewritten history reading
+// as your unpushed work. When a colleague rebases or force-pushes a shared
+// branch, `git fetch --prune` moves the remote-tracking ref onto the new commits
+// and leaves your local branch holding the old ones, which are then reachable
+// from HEAD and from no remote — indistinguishable, to an unfiltered count, from
+// work about to be lost. Rewriting a commit rewrites its committer, so those
+// orphans stay attributed to whoever rewrote them while anything you commit,
+// amend, rebase, cherry-pick or `git am` locally carries your identity and still
+// counts.
+//
+// The residual blind spot is a commit genuinely at risk yet committed by someone
+// else — merging in a colleague's branch that was never pushed. That
+// under-reports, so treat the count as evidence of local work rather than proof
+// of its absence. With no user.email configured the count falls back to
+// unfiltered, over-reporting being the safe direction for a figure that gates
+// deletion.
 //
 // The caller must Fetch first so remote-tracking refs are current; otherwise
 // commits already pushed can be miscounted as local-only.
 func (g *Git) LocalOnlyCommits(ctx context.Context, dir string) (int64, error) {
-	out, err := g.run(ctx, dir, "rev-list", "--count", "HEAD", "--not", "--remotes")
+	args := []string{"rev-list", "--count"}
+	if email, err := g.run(ctx, dir, "config", "--get", "user.email"); err == nil && email != "" {
+		// --fixed-strings so metacharacters common in addresses ('.', '+') cannot
+		// widen the match, and the angle brackets pin it to the whole address so
+		// it cannot match one that merely ends with it.
+		args = append(args, "--fixed-strings", "--committer=<"+email+">")
+	}
+	args = append(args, "HEAD", "--not", "--remotes")
+
+	out, err := g.run(ctx, dir, args...)
 	if err != nil {
 		return 0, err
 	}
