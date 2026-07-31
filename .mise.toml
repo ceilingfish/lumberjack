@@ -101,6 +101,10 @@ run = "buf generate"
 description = "Auto-fix protobuf formatting with buf"
 run = "buf format -w proto"
 
+[tasks.format-check-proto]
+description = "Check protobuf formatting with buf; fails on a diff without writing"
+run = "buf format -d --exit-code proto"
+
 [tasks.lint-proto]
 description = "Lint protobuf definitions with buf"
 run = "buf lint"
