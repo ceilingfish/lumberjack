@@ -292,60 +292,72 @@ func fakeWorktreeDir(t *testing.T) string {
 
 func TestReconcileDecisions(t *testing.T) {
 	for _, tc := range []struct {
-		name  string
-		probe fakeProber
-		pr    PRState
-		want  Status
+		name     string
+		probe    fakeProber
+		prBranch string
+		pr       PRState
+		want     Status
 	}{
 		{
-			name: "clean with no PR is in sync",
-			pr:   PRNone,
-			want: Status{},
+			name:  "clean with no PR is in sync",
+			probe: fakeProber{branch: "feature/foo"},
+			pr:    PRNone,
+			want:  Status{CheckedOutBranch: "feature/foo"},
 		},
 		{
-			name:  "dirty with no PR is never a removal candidate",
-			probe: fakeProber{dirty: true},
-			pr:    PRNone,
+			name:     "dirty with no PR is never a removal candidate",
+			probe:    fakeProber{dirty: true, branch: "feature/foo"},
+			prBranch: "feature/foo",
+			pr:       PRNone,
 			want: Status{
 				Dirty:               true,
+				CheckedOutBranch:    "feature/foo",
 				NeedsReconciliation: true,
 				Note:                "needs reconciliation: uncommitted changes",
 			},
 		},
 		{
-			name:  "unpushed commits on an open PR",
-			probe: fakeProber{localOnly: 3},
-			pr:    PROpen,
+			name:     "unpushed commits on an open PR",
+			probe:    fakeProber{localOnly: 3, branch: "feature/foo"},
+			prBranch: "feature/foo",
+			pr:       PROpen,
 			want: Status{
 				LocalOnlyCommits:    3,
+				CheckedOutBranch:    "feature/foo",
 				NeedsReconciliation: true,
 				Note:                "needs reconciliation: 3 local-only commit(s)",
 			},
 		},
 		{
-			name:  "orphaned with both kinds of unsaved work",
-			probe: fakeProber{dirty: true, localOnly: 2},
-			pr:    PRGone,
+			name:     "orphaned with every kind of unsaved work at once",
+			probe:    fakeProber{dirty: true, localOnly: 2, branch: "feature/elsewhere"},
+			prBranch: "feature/foo",
+			pr:       PRGone,
 			want: Status{
 				Dirty:               true,
 				LocalOnlyCommits:    2,
+				CheckedOutBranch:    "feature/elsewhere",
+				BranchDisparity:     true,
 				NeedsReconciliation: true,
 				Orphaned:            true,
-				Note:                "orphaned: PR closed but uncommitted changes and 2 local-only commit(s)",
+				Note: "orphaned: PR closed but uncommitted changes and 2 local-only commit(s) and " +
+					"disparity between local branch feature/elsewhere and PR branch feature/foo",
 			},
 		},
 		{
-			name:  "merged discards the local-only count",
-			probe: fakeProber{localOnly: 5},
-			pr:    PRMerged,
+			name:     "merged discards the local-only count",
+			probe:    fakeProber{localOnly: 5, branch: "feature/foo"},
+			prBranch: "feature/foo",
+			pr:       PRMerged,
 			want: Status{
-				Merged: true,
-				Note:   "PR merged; safe to remove",
+				Merged:           true,
+				CheckedOutBranch: "feature/foo",
+				Note:             "PR merged; safe to remove",
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), tc.probe.branch, tc.pr)
+			got, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), tc.prBranch, tc.pr)
 			if err != nil {
 				t.Fatalf("Reconcile: %v", err)
 			}
