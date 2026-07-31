@@ -53,9 +53,9 @@ func helperClient(t *testing.T, mode string) *Client {
 	return c
 }
 
-func fakeBinary(t *testing.T, dir, name string) string {
+func fakeBinary(t *testing.T, dir string) string {
 	t.Helper()
-	p := filepath.Join(dir, name)
+	p := filepath.Join(dir, "gh")
 	if err := os.WriteFile(p, nil, 0o755); err != nil {
 		t.Fatalf("writing fake binary: %v", err)
 	}
@@ -74,7 +74,7 @@ func fakeClient(fn func(args ...string) (string, error)) *Client {
 }
 
 func TestNewClientEnvOverride(t *testing.T) {
-	binPath := fakeBinary(t, t.TempDir(), "gh")
+	binPath := fakeBinary(t, t.TempDir())
 	t.Setenv(EnvCLIPath, binPath)
 	c, err := NewClient()
 	if err != nil {
@@ -90,7 +90,7 @@ func TestNewClientEnvOverride(t *testing.T) {
 
 func TestNewClientFindsGhOnPath(t *testing.T) {
 	dir := t.TempDir()
-	want := fakeBinary(t, dir, "gh")
+	want := fakeBinary(t, dir)
 	t.Setenv(EnvCLIPath, "")
 	t.Setenv("PATH", dir)
 	c, err := NewClient()
