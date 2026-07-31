@@ -21,32 +21,24 @@ import (
 // (which stats the directory) works, while dirt and local-commit state are
 // answered from in-memory maps keyed by directory.
 type fakeGit struct {
-	dirty map[string]bool
-	// dirtyErr fails IsDirty for one directory, so worktree.Reconcile fails for
-	// exactly that worktree.
+	dirty     map[string]bool
 	dirtyErr  map[string]error
 	localOnly map[string]int64
 	addErr    map[string]error // keyed by branch
-	// removeErr fails RemoveWorktree for one directory, keyed by directory.
 	removeErr map[string]error
 	// newBranches records, per branch, the base AddWorktreeNewBranch created it
 	// from; newBranchErr forces that fallback to fail, keyed by branch.
-	newBranches  map[string]string
-	newBranchErr map[string]error
-	fetchErr     error
-	// fetchErrByPath fails Fetch for one repository only, so a test can make a
-	// single repository's sync fail while its siblings succeed.
+	newBranches    map[string]string
+	newBranchErr   map[string]error
+	fetchErr       error
 	fetchErrByPath map[string]error
-	// fetchBlock, when non-nil, holds every Fetch until it is closed, so a test
-	// can keep a sync in flight while it exercises shutdown. It must be set
-	// before the sync starts.
-	fetchBlock chan struct{}
-	pullErr    error    // forces Pull to fail
-	pulled     []string // repo paths Pull was called on, for assertions
-	remotes    string
-	remoteErr  error
-	remoteURL  string
-	urlErr     error
+	fetchBlock     chan struct{}
+	pullErr        error    // forces Pull to fail
+	pulled         []string // repo paths Pull was called on, for assertions
+	remotes        string
+	remoteErr      error
+	remoteURL      string
+	urlErr         error
 	// worktrees is what ListWorktrees reports — the worktrees git already has
 	// registered (used to exercise adoption of hand-checked-out directories).
 	// listErr forces the listing to fail.
@@ -251,11 +243,9 @@ type fakeGH struct {
 	userErr   error
 	// active is the account gh reports as currently signed in; switchErr forces
 	// SwitchAccount to fail. switches records each (host, login) switch made.
-	active    string
-	activeErr error
-	switchErr error
-	// switchErrByLogin fails the switch to one account only, so a test can let
-	// the switch to a repository's login succeed and the restore afterwards fail.
+	active           string
+	activeErr        error
+	switchErr        error
 	switchErrByLogin map[string]error
 	switches         [][2]string
 	// logins is what ListLogins reports for any host; loginsErr forces it to
@@ -349,8 +339,6 @@ func (h *harness) repo(t *testing.T) *schema.Repository {
 	return h.namedRepo(t, "n")
 }
 
-// namedRepo inserts and returns a tracked repository whose checkout folder (and
-// therefore worktree prefix) is name, so a test can track more than one.
 func (h *harness) namedRepo(t *testing.T, name string) *schema.Repository {
 	t.Helper()
 	r := &schema.Repository{
@@ -556,7 +544,6 @@ func TestGithubRepoSlug(t *testing.T) {
 		{"https://gitlab.com/someone/thing.git", "", false},
 		{"git@gitlab.com:someone/thing.git", "", false},
 		{"not a url", "", false},
-		// A GitHub host with no owner/name pair is not a repository remote.
 		{"https://github.com/ceilingfish", "", false},
 		{"https://github.com/", "", false},
 	}
@@ -1475,7 +1462,6 @@ func TestInitRepositoryReportsAnUnlistableWorktreeSet(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when git cannot list worktrees")
 	}
-	// The repository row is still returned: it was created before adoption ran.
 	if repo == nil || len(adopted) != 0 {
 		t.Errorf("repo=%v adopted=%v, want the repo and no adoptions", repo, adopted)
 	}
@@ -1545,9 +1531,6 @@ func TestSyncReportsAnUnreachableActiveAccount(t *testing.T) {
 	}
 }
 
-// TestSyncSurfacesAFailedAccountRestore covers the account switch being put
-// back: the sync itself succeeds, so the failure to restore the previously
-// active account is what the caller must hear about.
 func TestSyncSurfacesAFailedAccountRestore(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
@@ -1584,7 +1567,6 @@ func TestSyncCollectsAWorktreeListingFailureAndStillCreates(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "listing existing worktrees") {
 		t.Errorf("err = %v, want the listing failure collected", err)
 	}
-	// The listing is only used for adoption, so creation still happened.
 	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
 	if len(wts) != 1 {
 		t.Errorf("worktrees = %d, want 1 created despite the listing failure", len(wts))
@@ -1597,7 +1579,6 @@ func TestSyncCollectsAPRStateLookupFailure(t *testing.T) {
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
 	h.seedSync(t, repo)
 
-	// The PR closes, and gh cannot say whether it merged.
 	h.gh.prs = nil
 	h.gh.mergedErr = errors.New("gh: API rate limit exceeded")
 
@@ -1654,7 +1635,6 @@ func TestSyncCollectsAWorktreeRemovalFailure(t *testing.T) {
 	if removed != 0 {
 		t.Errorf("removed = %d, want 0", removed)
 	}
-	// Still tracked: dropping the row would hide a worktree that is still there.
 	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 1 {
 		t.Errorf("worktrees = %d, want the row kept", len(wts))
 	}
@@ -1673,8 +1653,6 @@ func TestSyncPullSkippedWhenTheCheckoutCannotBeInspected(t *testing.T) {
 	}
 }
 
-// TestSyncPullFailureDoesNotFailTheSync covers the pull being a convenience:
-// a checkout that cannot fast-forward must not fail reconciliation.
 func TestSyncPullFailureDoesNotFailTheSync(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)

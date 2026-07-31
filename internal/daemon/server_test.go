@@ -635,8 +635,6 @@ func TestServerTidyAbortAcrossReposMovesNothingAnywhere(t *testing.T) {
 	}
 }
 
-// failingWatchStream lets `allow` sends through — signalling each on sent — and
-// fails every send after that, so a test can fail the snapshot or a later delta.
 type failingWatchStream struct {
 	grpc.ServerStream
 	ctx   context.Context
@@ -656,10 +654,6 @@ func (f *failingWatchStream) Send(*lumberjackv1.WatchResponse) error {
 }
 func (f *failingWatchStream) Context() context.Context { return f.ctx }
 
-// blockingWatchStream holds its first Send until release is closed — signalling
-// on entered that it is stalled — so a test can pile events up behind the
-// subscriber's buffer while the stream cannot drain. Later sends pass straight
-// through.
 type blockingWatchStream struct {
 	grpc.ServerStream
 	ctx     context.Context
@@ -713,9 +707,6 @@ func TestServerListRepositoriesDatabaseFailureIsInternal(t *testing.T) {
 	}
 }
 
-// TestServerListRepositoriesSurvivesUnreadableSetupConfig covers the decoration
-// being best-effort: a repository whose trusted config cannot be read must
-// still be listed.
 func TestServerListRepositoriesSurvivesUnreadableSetupConfig(t *testing.T) {
 	h := newHarness(t)
 	srv := newServer(h)
@@ -983,13 +974,11 @@ func TestServerWatchStopsOnSendFailure(t *testing.T) {
 	repo := h.repo(t)
 	sendErr := errors.New("client hung up")
 
-	// The snapshot itself failing ends the stream.
 	stream := &failingWatchStream{ctx: context.Background(), sent: make(chan struct{}, 1), err: sendErr}
 	if err := srv.Watch(&lumberjackv1.WatchRequest{}, stream); !errors.Is(err, sendErr) {
 		t.Errorf("snapshot failure: Watch = %v, want the send error", err)
 	}
 
-	// A later delta failing ends it too, after the snapshot went out.
 	stream = &failingWatchStream{
 		ctx: context.Background(), allow: 1, sent: make(chan struct{}, 1), err: sendErr,
 	}
@@ -1007,9 +996,6 @@ func TestServerWatchStopsOnSendFailure(t *testing.T) {
 	}
 }
 
-// TestServerWatchDisconnectsASubscriberThatFellBehind covers the bounded
-// subscriber buffer: a client too slow to keep up is disconnected with
-// ResourceExhausted rather than stalling the daemon.
 func TestServerWatchDisconnectsASubscriberThatFellBehind(t *testing.T) {
 	h := newHarness(t)
 	srv := newServer(h)
@@ -1023,8 +1009,6 @@ func TestServerWatchDisconnectsASubscriberThatFellBehind(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- srv.Watch(&lumberjackv1.WatchRequest{}, stream) }()
 
-	// Wait until the stream is stalled inside the snapshot send, then overrun the
-	// subscriber's buffer while it cannot drain.
 	<-stream.entered
 	for i := 0; i <= subscriberBuffer; i++ {
 		h.svc.events.Publish(Event{Type: EventSyncStarted, Repository: repo})
@@ -1079,7 +1063,6 @@ func TestToLockDecisions(t *testing.T) {
 	if got := toLockDecisions(nil); got != nil {
 		t.Errorf("toLockDecisions(nil) = %v, want nil", got)
 	}
-	// A repeated path means the client resent its decision: the later one wins.
 	got := toLockDecisions([]*lumberjackv1.LockDecision{
 		{WorktreePath: "/a", Strategy: lumberjackv1.LockStrategy_LOCK_STRATEGY_SKIP},
 		{WorktreePath: "/a", Strategy: lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE},

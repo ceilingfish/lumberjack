@@ -12,15 +12,11 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/github"
 )
 
-// recordingLifecycle captures the hooks a constructor appends so a test can run
-// them directly, without booting an fx app.
 type recordingLifecycle struct{ hooks []fx.Hook }
 
 func (l *recordingLifecycle) Append(h fx.Hook) { l.hooks = append(l.hooks, h) }
 
-// awaitEvent waits for the next event of the given type, failing the test if
-// none arrives or the subscriber is dropped.
-func awaitEvent(t *testing.T, events <-chan Event, want EventType) Event {
+func awaitEvent(t *testing.T, events <-chan Event, want EventType) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
 	for {
@@ -30,7 +26,7 @@ func awaitEvent(t *testing.T, events <-chan Event, want EventType) Event {
 				t.Fatalf("subscriber closed before a %v event arrived", want)
 			}
 			if ev.Type == want {
-				return ev
+				return
 			}
 		case <-deadline:
 			t.Fatalf("timed out waiting for a %v event", want)
@@ -38,8 +34,6 @@ func awaitEvent(t *testing.T, events <-chan Event, want EventType) Event {
 	}
 }
 
-// startLoop runs syncLoop in the background, returning the tick channel that
-// drives it. The loop is cancelled and awaited on cleanup, so no test leaks it.
 func startLoop(t *testing.T, h *harness) chan time.Time {
 	t.Helper()
 	tick := make(chan time.Time)
@@ -60,6 +54,18 @@ func startLoop(t *testing.T, h *harness) chan time.Time {
 	return tick
 }
 
+func lastSyncStatus(t *testing.T, h *harness, repo *schema.Repository) string {
+	t.Helper()
+	stored, err := h.db.FindRepository(context.Background(), repo.LocalPath)
+	if err != nil {
+		t.Fatalf("FindRepository: %v", err)
+	}
+	if stored.LastSyncStatus == nil {
+		t.Fatal("last_sync_status was never recorded")
+	}
+	return *stored.LastSyncStatus
+}
+
 func TestSyncLoopSyncsImmediatelyThenOnEachTick(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
@@ -76,8 +82,6 @@ func TestSyncLoopSyncsImmediatelyThenOnEachTick(t *testing.T) {
 		t.Fatalf("first pass: worktrees=%d err=%v, want 1", len(wts), err)
 	}
 
-	// A second PR appears; the next tick must pick it up without the loop being
-	// restarted.
 	h.gh.prs = append(h.gh.prs, github.PR{Number: 2, HeadBranch: "feature/b"})
 	tick <- time.Time{}
 	awaitEvent(t, events, EventSyncFinished)
@@ -100,12 +104,9 @@ func TestSyncLoopFailingRepositoryDoesNotStopTheRunOrTheLoop(t *testing.T) {
 
 	tick := startLoop(t, h)
 
-	// Both repositories are synced in the same pass; the broken one first is not
-	// guaranteed, so wait for as many completions as there are repositories.
 	awaitEvent(t, events, EventSyncFinished)
 	awaitEvent(t, events, EventSyncFinished)
 
-	// The healthy repository still got its worktree despite its sibling failing.
 	wts, err := h.db.ListWorktrees(context.Background(), healthy.ID)
 	if err != nil || len(wts) != 1 {
 		t.Fatalf("healthy repo: worktrees=%d err=%v, want 1", len(wts), err)
@@ -114,7 +115,6 @@ func TestSyncLoopFailingRepositoryDoesNotStopTheRunOrTheLoop(t *testing.T) {
 		t.Errorf("broken repo last_sync_status = %q, want %q", got, schema.SyncStatusError)
 	}
 
-	// The failure must not have wedged the loop: the next tick still fires.
 	h.gh.prs = append(h.gh.prs, github.PR{Number: 2, HeadBranch: "feature/b"})
 	tick <- time.Time{}
 	awaitEvent(t, events, EventSyncFinished)
@@ -124,19 +124,6 @@ func TestSyncLoopFailingRepositoryDoesNotStopTheRunOrTheLoop(t *testing.T) {
 	if err != nil || len(wts) != 2 {
 		t.Fatalf("healthy repo after tick: worktrees=%d err=%v, want 2", len(wts), err)
 	}
-}
-
-// lastSyncStatus reads a repository's persisted last-sync status.
-func lastSyncStatus(t *testing.T, h *harness, repo *schema.Repository) string {
-	t.Helper()
-	stored, err := h.db.FindRepository(context.Background(), repo.LocalPath)
-	if err != nil {
-		t.Fatalf("FindRepository: %v", err)
-	}
-	if stored.LastSyncStatus == nil {
-		t.Fatal("last_sync_status was never recorded")
-	}
-	return *stored.LastSyncStatus
 }
 
 func TestSyncAllGivesUpWhenRepositoriesCannotBeListed(t *testing.T) {
@@ -184,7 +171,6 @@ func TestRunSyncLoopStopWaitsForTheInFlightSync(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	// Releasing the sync lets the loop unwind, and only then does OnStop return.
 	close(h.git.fetchBlock)
 	select {
 	case err := <-stopped:

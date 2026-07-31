@@ -415,7 +415,6 @@ func TestGetSetupConsentNoConfigNotPending(t *testing.T) {
 }
 
 func TestApplySetupError(t *testing.T) {
-	// No recorded failure leaves the status alone.
 	clean := worktree.Status{}
 	applySetupError(&clean, nil)
 	empty := ""
@@ -425,14 +424,12 @@ func TestApplySetupError(t *testing.T) {
 	}
 
 	msg := "copy-file failed: permission denied"
-	// With no git-derived note, the setup failure becomes the note.
 	only := worktree.Status{}
 	applySetupError(&only, &msg)
 	if !only.NeedsReconciliation || only.Note != "setup failed: "+msg {
 		t.Errorf("status = %+v, want the setup failure as the note", only)
 	}
 
-	// With one already, the setup failure is appended rather than replacing it.
 	both := worktree.Status{NeedsReconciliation: true, Note: "uncommitted changes"}
 	applySetupError(&both, &msg)
 	if both.Note != "uncommitted changes; setup failed: "+msg {
@@ -452,7 +449,6 @@ func TestSetupStepsReportAnUnreadableConfig(t *testing.T) {
 	if !strings.Contains(res.SetupError, setup.ConfigFileName) {
 		t.Errorf("SetupError = %q, want it to name the config it could not load", res.SetupError)
 	}
-	// The worktree is kept regardless: setup failures are surfaced, not fatal.
 	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 1 {
 		t.Errorf("worktrees = %d, want the worktree kept", len(wts))
 	}

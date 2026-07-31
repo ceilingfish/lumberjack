@@ -698,8 +698,6 @@ func TestTidyRepositoryAbortFailsWhenLocksCannotBeRead(t *testing.T) {
 	}
 }
 
-// A move that failed and whose lock could not be put back reports both: the
-// worktree stayed put, and the lock the user asked to keep is gone.
 func TestTidyRepositoryReportsBothAFailedMoveAndAFailedRelock(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
@@ -728,8 +726,6 @@ func TestTidyAbortCheckReportsAnUnlistableWorktreeSet(t *testing.T) {
 	h.track(t, repo, "feature/foo", filepath.Join(h.parent, "elsewhere", "foo"))
 	h.git.listErr = errors.New("fatal: not a git repository")
 
-	// Abort asks to be protected from moving anything while a worktree is
-	// locked, and "we could not tell" is not "nothing is locked".
 	err := h.svc.TidyAbortCheck(context.Background(), repo, TidyOptions{LockStrategy: LockAbort})
 	if err == nil {
 		t.Error("expected an error when git cannot list worktrees")

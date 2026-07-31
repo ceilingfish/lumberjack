@@ -110,14 +110,12 @@ func TestWritePIDFileRecordsThenRemovesThePID(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("pid file still present after OnStop: %v", err)
 	}
-	// Stopping again is not an error: the file being gone is the normal case.
 	if err := hook.OnStop(context.Background()); err != nil {
 		t.Errorf("second OnStop: %v", err)
 	}
 }
 
 func TestWritePIDFileSurfacesFilesystemFailures(t *testing.T) {
-	// A regular file where ~/.lumberjack must go: the directory cannot be made.
 	blocked := filepath.Join(t.TempDir(), "home")
 	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
@@ -131,8 +129,6 @@ func TestWritePIDFileSurfacesFilesystemFailures(t *testing.T) {
 		t.Error("expected OnStart to fail when the pid dir cannot be created")
 	}
 
-	// A non-empty directory where the pid file must go: it can neither be
-	// written on start nor removed on stop.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	path, err := PIDFilePath()
@@ -152,16 +148,11 @@ func TestWritePIDFileSurfacesFilesystemFailures(t *testing.T) {
 	if err := lc.hooks[0].OnStop(context.Background()); err == nil {
 		t.Error("expected OnStop to fail when the pid file cannot be removed")
 	}
-	// The same directory makes the file unreadable, which ReadPID must report
-	// rather than mistake for "no daemon running".
 	if _, _, err := ReadPID(); err == nil {
 		t.Error("expected ReadPID to fail on an unreadable pid file")
 	}
 }
 
-// TestReadPIDStaleFileFromKilledProcess covers what `daemon status` has to
-// reason about: a pid file left behind by a daemon that was killed rather than
-// shut down. The pid is recorded but its process is gone.
 func TestReadPIDStaleFileFromKilledProcess(t *testing.T) {
 	if _, err := exec.LookPath("sleep"); err != nil {
 		t.Skip("sleep not available")

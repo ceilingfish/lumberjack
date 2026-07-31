@@ -107,17 +107,13 @@ func TestDaemonStartStop(t *testing.T) {
 	}
 }
 
-// fakeShutdowner records that a serve failure asked fx to shut the app down.
-type fakeShutdowner struct{ called chan []fx.ShutdownOption }
+type fakeShutdowner struct{ called chan struct{} }
 
-func (f *fakeShutdowner) Shutdown(opts ...fx.ShutdownOption) error {
-	f.called <- opts
+func (f *fakeShutdowner) Shutdown(...fx.ShutdownOption) error {
+	f.called <- struct{}{}
 	return nil
 }
 
-// bindableSocketPath returns a socket path short enough to bind: t.TempDir()
-// includes the test's name, which for these tests exceeds the platform's
-// sun_path limit.
 func bindableSocketPath(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "lj")
@@ -145,7 +141,6 @@ func TestListenFailures(t *testing.T) {
 		t.Error("expected an error when the socket dir cannot be created")
 	}
 
-	// A non-empty directory where the socket belongs cannot be cleared away.
 	occupied := filepath.Join(t.TempDir(), "daemon.sock")
 	if err := os.MkdirAll(filepath.Join(occupied, "child"), 0o700); err != nil {
 		t.Fatal(err)
@@ -154,7 +149,6 @@ func TestListenFailures(t *testing.T) {
 		t.Error("expected an error when a stale socket cannot be removed")
 	}
 
-	// A path longer than the platform's sun_path limit cannot be bound.
 	if _, err := listen(filepath.Join(t.TempDir(), strings.Repeat("s", 120)+".sock")); err == nil {
 		t.Error("expected an error binding an over-long socket path")
 	}
@@ -205,7 +199,7 @@ func TestRunServerServesThenCleansUpTheSocket(t *testing.T) {
 	path := bindableSocketPath(t)
 	srv := grpc.NewServer()
 	lc := &recordingLifecycle{}
-	if err := runServer(lc, srv, Config{SocketPath: path}, &fakeShutdowner{called: make(chan []fx.ShutdownOption, 1)}); err != nil {
+	if err := runServer(lc, srv, Config{SocketPath: path}, &fakeShutdowner{called: make(chan struct{}, 1)}); err != nil {
 		t.Fatalf("runServer: %v", err)
 	}
 	if err := lc.hooks[0].OnStart(context.Background()); err != nil {
@@ -237,13 +231,10 @@ func TestRunServerListenFailureFailsTheStart(t *testing.T) {
 	}
 }
 
-// TestRunServerServeFailureShutsTheAppDown covers the daemon exiting non-zero
-// instead of hanging when Serve gives up: a server already stopped refuses to
-// serve, which must reach fx's Shutdowner.
 func TestRunServerServeFailureShutsTheAppDown(t *testing.T) {
 	srv := grpc.NewServer()
 	srv.Stop()
-	sd := &fakeShutdowner{called: make(chan []fx.ShutdownOption, 1)}
+	sd := &fakeShutdowner{called: make(chan struct{}, 1)}
 	lc := &recordingLifecycle{}
 	cfg := Config{SocketPath: bindableSocketPath(t)}
 	if err := runServer(lc, srv, cfg, sd); err != nil {

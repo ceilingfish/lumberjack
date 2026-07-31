@@ -86,8 +86,6 @@ func TestToProtoWatchResponsePerEventType(t *testing.T) {
 		t.Errorf("change not carried: %+v", changed.GetChange())
 	}
 
-	// EventWorktreeChanged with no Change (a malformed publish) must still map to
-	// a well-formed response rather than panicking.
 	if got := toProtoWatchResponse(Event{Type: EventWorktreeChanged, Repository: repo}); got.GetChange() != nil {
 		t.Errorf("change with no payload = %+v", got.GetChange())
 	}
