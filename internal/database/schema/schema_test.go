@@ -57,19 +57,20 @@ func TestWorktreeMatchesAmbiguousReference(t *testing.T) {
 			ref: "/home/dev/Code/app",
 		},
 		{
-			name: "directory is at the filesystem root, so path and base name coincide",
+			name: "all three clauses match at once",
 			worktree: Worktree{
-				BranchName:    "feature/login",
-				DirectoryPath: "/app",
+				BranchName:    "app",
+				DirectoryPath: "app",
 			},
-			ref: "/app",
+			ref: "app",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if !tt.worktree.Matches(tt.ref) {
-				t.Errorf("Matches(%q) = false, want true", tt.ref)
+				t.Errorf("Worktree{BranchName: %q, DirectoryPath: %q}.Matches(%q) = false, want true",
+					tt.worktree.BranchName, tt.worktree.DirectoryPath, tt.ref)
 			}
 		})
 	}
