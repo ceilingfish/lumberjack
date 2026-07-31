@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,8 @@ func runGit(t *testing.T, dir string, args ...string) {
 // the wrapper, the working checkout path, and a fetch of origin already done.
 func setupRepos(t *testing.T) (*Git, string) {
 	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	main := filepath.Join(root, "main")
@@ -345,10 +348,10 @@ func TestMoveWorktreeBuriesIntoAnExistingDestination(t *testing.T) {
 	}
 }
 
-// lockedRef finds the listed worktree whose directory ends in base. Basenames
+// worktreeRef finds the listed worktree whose directory ends in base. Basenames
 // are compared for the reason TestMoveWorktree gives: git reports the resolved
 // /private/var path on macOS, not the /var symlink the test built.
-func lockedRef(t *testing.T, g *Git, repoPath, base string) Ref {
+func worktreeRef(t *testing.T, g *Git, repoPath, base string) Ref {
 	t.Helper()
 	refs, err := g.ListWorktrees(context.Background(), repoPath)
 	if err != nil {
@@ -378,7 +381,7 @@ func TestLockUnlockWorktree(t *testing.T) {
 		t.Fatalf("LockWorktree: %v", err)
 	}
 
-	ref := lockedRef(t, g, main, "foo")
+	ref := worktreeRef(t, g, main, "foo")
 	if !ref.Locked || ref.LockReason != "keeping this one" {
 		t.Errorf("ref = %+v, want locked with the reason it was given", ref)
 	}
@@ -391,7 +394,7 @@ func TestLockUnlockWorktree(t *testing.T) {
 	if err := g.UnlockWorktree(ctx, main, from); err != nil {
 		t.Fatalf("UnlockWorktree: %v", err)
 	}
-	if ref := lockedRef(t, g, main, "foo"); ref.Locked {
+	if ref := worktreeRef(t, g, main, "foo"); ref.Locked {
 		t.Errorf("ref = %+v, want unlocked", ref)
 	}
 	if err := g.MoveWorktree(ctx, main, from, to); err != nil {
@@ -402,7 +405,7 @@ func TestLockUnlockWorktree(t *testing.T) {
 	if err := g.LockWorktree(ctx, main, to, ""); err != nil {
 		t.Fatalf("LockWorktree without a reason: %v", err)
 	}
-	if ref := lockedRef(t, g, main, "main-foo"); !ref.Locked || ref.LockReason != "" {
+	if ref := worktreeRef(t, g, main, "main-foo"); !ref.Locked || ref.LockReason != "" {
 		t.Errorf("ref = %+v, want locked with no reason", ref)
 	}
 }
@@ -429,5 +432,126 @@ func TestUnquoteCStyleLockReason(t *testing.T) {
 				t.Errorf("unquoteCStyle(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAddWorktreeFallsBackToAnExistingLocalBranch(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	runGit(t, main, "branch", "local-only")
+
+	dir := filepath.Join(filepath.Dir(main), "wt-local")
+	if err := g.AddWorktree(ctx, main, dir, "origin", "local-only"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if got := worktreeRef(t, g, main, "wt-local").Branch; got != "local-only" {
+		t.Errorf("branch = %q, want local-only", got)
+	}
+}
+
+func TestAddWorktreeReportsTheTrackingError(t *testing.T) {
+	g, main := setupRepos(t)
+
+	dir := filepath.Join(filepath.Dir(main), "wt-nope")
+	err := g.AddWorktree(context.Background(), main, dir, "origin", "no-such-branch")
+	if err == nil {
+		t.Fatal("AddWorktree: expected an error for a branch that exists nowhere")
+	}
+	if !strings.Contains(err.Error(), "origin/no-such-branch") {
+		t.Errorf("error %q is not the tracking failure", err)
+	}
+}
+
+func TestAddWorktreeExistingTargetDirectory(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	empty := filepath.Join(filepath.Dir(main), "wt-empty")
+	if err := os.MkdirAll(empty, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddWorktree(ctx, main, empty, "origin", "feature/foo"); err != nil {
+		t.Fatalf("AddWorktree into an existing empty directory: %v", err)
+	}
+
+	occupied := filepath.Join(filepath.Dir(main), "wt-occupied")
+	if err := os.MkdirAll(occupied, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(occupied, "stray.txt"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.AddWorktree(ctx, main, occupied, "origin", "feature/foo"); err == nil {
+		t.Error("AddWorktree into a non-empty directory succeeded, want it refused")
+	}
+}
+
+func TestAddWorktreeNewBranch(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	if err := g.Fetch(ctx, main, "origin"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	dir := filepath.Join(filepath.Dir(main), "wt-new")
+	if err := g.AddWorktreeNewBranch(ctx, main, dir, "origin/main", "feature/brand-new"); err != nil {
+		t.Fatalf("AddWorktreeNewBranch: %v", err)
+	}
+	if got := worktreeRef(t, g, main, "wt-new").Branch; got != "feature/brand-new" {
+		t.Errorf("branch = %q, want feature/brand-new", got)
+	}
+
+	again := filepath.Join(filepath.Dir(main), "wt-new-again")
+	if err := g.AddWorktreeNewBranch(ctx, main, again, "origin/main", "feature/brand-new"); err == nil {
+		t.Error("AddWorktreeNewBranch on an existing branch succeeded, want it refused")
+	}
+}
+
+func TestRemoveWorktreeDirtyAndAlreadyGone(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	dirty := filepath.Join(filepath.Dir(main), "wt-dirty")
+	if err := g.AddWorktree(ctx, main, dirty, "origin", "feature/foo"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dirty, "foo.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.RemoveWorktree(ctx, main, dirty, false); err == nil {
+		t.Error("RemoveWorktree without force removed a dirty tree, want it refused")
+	}
+	if err := g.RemoveWorktree(ctx, main, dirty, true); err != nil {
+		t.Fatalf("RemoveWorktree with force: %v", err)
+	}
+
+	gone := filepath.Join(filepath.Dir(main), "wt-gone")
+	runGit(t, main, "worktree", "add", "--detach", gone)
+	if err := os.RemoveAll(gone); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.RemoveWorktree(ctx, main, gone, false); err != nil {
+		t.Fatalf("RemoveWorktree on a directory already deleted by hand: %v", err)
+	}
+}
+
+func TestPullFastForwards(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	dir := filepath.Join(filepath.Dir(main), "wt-foo")
+	if err := g.AddWorktree(ctx, main, dir, "origin", "feature/foo"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	runGit(t, dir, "reset", "--hard", "HEAD~1")
+	if _, err := os.Stat(filepath.Join(dir, "foo.txt")); !os.IsNotExist(err) {
+		t.Fatalf("worktree is not behind its upstream, stat err = %v", err)
+	}
+
+	if err := g.Pull(ctx, dir); err != nil {
+		t.Fatalf("Pull: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "foo.txt")); err != nil {
+		t.Errorf("Pull did not fast-forward the worktree: %v", err)
 	}
 }
