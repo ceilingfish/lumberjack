@@ -193,7 +193,7 @@ func TestAdoptedWorktreeRunsSetupSteps(t *testing.T) {
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/x"}}
 
 	existing := filepath.Join(h.parent, "hand-checkout")
-	if err := os.MkdirAll(existing, 0o755); err != nil {
+	if err := mkWorktreeDir(existing); err != nil {
 		t.Fatal(err)
 	}
 	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/x"}}
@@ -219,7 +219,7 @@ func TestAdoptedOrphanRunsSetupStepsOnceOnly(t *testing.T) {
 	copyEnvConfig(t, h, repo)
 
 	existing := filepath.Join(h.parent, "orphan")
-	if err := os.MkdirAll(existing, 0o755); err != nil {
+	if err := mkWorktreeDir(existing); err != nil {
 		t.Fatal(err)
 	}
 	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/orphan"}}
@@ -252,7 +252,7 @@ func TestAdoptionDoesNotOverwriteExistingFiles(t *testing.T) {
 	copyEnvConfig(t, h, repo)
 
 	existing := filepath.Join(h.parent, "hand-tuned")
-	if err := os.MkdirAll(existing, 0o755); err != nil {
+	if err := mkWorktreeDir(existing); err != nil {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(existing, ".env")
@@ -293,7 +293,7 @@ steps:
 	}
 
 	existing := filepath.Join(h.parent, "will-fail")
-	if err := os.MkdirAll(existing, 0o755); err != nil {
+	if err := mkWorktreeDir(existing); err != nil {
 		t.Fatal(err)
 	}
 	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/fails"}}
