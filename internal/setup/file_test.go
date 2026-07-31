@@ -3,6 +3,7 @@ package setup
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -47,6 +48,68 @@ func TestLoadIfPresentMissingFile(t *testing.T) {
 	}
 	if found || cfg != nil {
 		t.Fatalf("loadIfPresent = (%v, %v), want (nil, false) for a missing file", cfg, found)
+	}
+}
+
+func TestLoadIfPresentEmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(configPath(dir), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, found, err := loadIfPresent(configPath(dir))
+	if err != nil {
+		t.Fatalf("loadIfPresent: %v", err)
+	}
+	if !found {
+		t.Fatal("loadIfPresent: an empty file is present, not missing")
+	}
+	if len(cfg.Steps) != 0 {
+		t.Fatalf("got %d steps from an empty file, want 0", len(cfg.Steps))
+	}
+}
+
+func TestLoadIfPresentMalformedFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(configPath(dir), []byte("steps:\n  - type: symlink\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, found, err := loadIfPresent(configPath(dir))
+	if err == nil {
+		t.Fatal("loadIfPresent: want an error for a malformed config, got nil")
+	}
+	if found {
+		t.Error("loadIfPresent: want found=false alongside the error")
+	}
+	if !strings.Contains(err.Error(), "unknown step type") {
+		t.Errorf("error = %q, want it to explain what was malformed", err)
+	}
+}
+
+func TestLoadIfPresentUnreadableFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(configPath(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := loadIfPresent(configPath(dir))
+	if err == nil {
+		t.Fatal("loadIfPresent: want an error when the config cannot be read, got nil")
+	}
+	if !strings.Contains(err.Error(), configPath(dir)) {
+		t.Errorf("error = %q, want it to name the unreadable path", err)
+	}
+}
+
+func TestSaveWriteFailure(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(configPath(dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := Save(dir, &Config{})
+	if err == nil {
+		t.Fatal("Save: want an error when the config path is not writable, got nil")
+	}
+	if !strings.Contains(err.Error(), "writing "+ConfigFileName) {
+		t.Errorf("error = %q, want it to say writing failed", err)
 	}
 }
 

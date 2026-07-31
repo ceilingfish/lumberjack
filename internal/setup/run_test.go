@@ -1,9 +1,11 @@
 package setup
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -182,5 +184,228 @@ func TestRunCopyFilePreservesExistingSymlink(t *testing.T) {
 		if fi.Mode()&os.ModeSymlink == 0 {
 			t.Errorf("%s is no longer a symlink; the copy replaced it", name)
 		}
+	}
+}
+
+func TestRunCommandStreamsToOutput(t *testing.T) {
+	wt := t.TempDir()
+	cfg := &Config{Steps: []Step{
+		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "echo streamed"}},
+	}}
+	var buf bytes.Buffer
+	if step, err := Run(context.Background(), cfg, Options{
+		MainCheckout: wt, WorktreeDir: wt, Consented: true, Output: &buf,
+	}); err != nil {
+		t.Fatalf("Run: %v (step %s)", err, step)
+	}
+	if !strings.Contains(buf.String(), "streamed") {
+		t.Fatalf("Output = %q, want the command's output streamed to it", buf.String())
+	}
+}
+
+func TestRunCommandStreamingFailureReportsStep(t *testing.T) {
+	wt := t.TempDir()
+	cfg := &Config{Steps: []Step{
+		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "echo boom >&2; exit 3"}},
+	}}
+	var buf bytes.Buffer
+	step, err := Run(context.Background(), cfg, Options{
+		MainCheckout: wt, WorktreeDir: wt, Consented: true, Output: &buf,
+	})
+	if err == nil {
+		t.Fatal("Run: want an error from a failing command, got nil")
+	}
+	if step != "step 1 (run-command)" {
+		t.Fatalf("failed step = %q, want step 1 (run-command)", step)
+	}
+	if !strings.Contains(buf.String(), "boom") {
+		t.Fatalf("Output = %q, want the failing command's stderr", buf.String())
+	}
+}
+
+func TestRunCommandFailureWithoutOutputReportsBareError(t *testing.T) {
+	wt := t.TempDir()
+	cfg := &Config{Steps: []Step{
+		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "exit 7"}},
+	}}
+	step, err := Run(context.Background(), cfg, Options{MainCheckout: wt, WorktreeDir: wt, Consented: true})
+	if err == nil {
+		t.Fatal("Run: want an error from a failing command, got nil")
+	}
+	if step != "step 1 (run-command)" {
+		t.Fatalf("failed step = %q, want step 1 (run-command)", step)
+	}
+	if got := err.Error(); got != "exit status 7" {
+		t.Fatalf("error = %q, want just the exit status when the command printed nothing", got)
+	}
+}
+
+func TestRunCommandFailureIncludesOutput(t *testing.T) {
+	wt := t.TempDir()
+	cfg := &Config{Steps: []Step{
+		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "echo diagnostic; exit 1"}},
+	}}
+	_, err := Run(context.Background(), cfg, Options{MainCheckout: wt, WorktreeDir: wt, Consented: true})
+	if err == nil {
+		t.Fatal("Run: want an error, got nil")
+	}
+	if !strings.Contains(err.Error(), "diagnostic") {
+		t.Fatalf("error = %q, want the command's output included", err)
+	}
+}
+
+func TestRunCommandRunsInWorktreeDir(t *testing.T) {
+	wt := t.TempDir()
+	cfg := &Config{Steps: []Step{
+		{Type: StepRunCommand, RunCommand: &RunCommand{Command: "pwd"}},
+	}}
+	var buf bytes.Buffer
+	if _, err := Run(context.Background(), cfg, Options{
+		MainCheckout: t.TempDir(), WorktreeDir: wt, Consented: true, Output: &buf,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := filepath.EvalSymlinks(strings.TrimSpace(buf.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("working directory = %q, want the worktree %q", got, want)
+	}
+}
+
+func TestRunCopyFileUnreadableSource(t *testing.T) {
+	main, wt := t.TempDir(), t.TempDir()
+	if err := os.Mkdir(filepath.Join(main, "adir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: "adir", Destination: "dest"}},
+	}}
+	step, err := Run(context.Background(), cfg, Options{MainCheckout: main, WorktreeDir: wt})
+	if err == nil {
+		t.Fatal("Run: want an error when the source cannot be read, got nil")
+	}
+	if step != "step 1 (copy-file)" {
+		t.Fatalf("failed step = %q", step)
+	}
+	if !strings.Contains(err.Error(), "reading adir") {
+		t.Fatalf("error = %q, want it to name the unreadable source", err)
+	}
+}
+
+func TestRunCopyFileDestinationDirectoryCollision(t *testing.T) {
+	main, wt := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, ".env"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "blocker"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: "blocker/.env"}},
+	}}
+	_, err := Run(context.Background(), cfg, Options{MainCheckout: main, WorktreeDir: wt})
+	if err == nil {
+		t.Fatal("Run: want an error when the destination directory cannot be created, got nil")
+	}
+	if !strings.Contains(err.Error(), "creating destination directory") {
+		t.Fatalf("error = %q, want it to say the destination directory could not be created", err)
+	}
+}
+
+func TestRunCopyFileUnwritableDestination(t *testing.T) {
+	main, wt := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, ".env"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(wt, ".env"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: ".env"}},
+	}}
+	_, err := Run(context.Background(), cfg, Options{MainCheckout: main, WorktreeDir: wt})
+	if err == nil {
+		t.Fatal("Run: want an error when the destination cannot be written, got nil")
+	}
+	if !strings.Contains(err.Error(), "writing .env") {
+		t.Fatalf("error = %q, want it to name the destination it could not write", err)
+	}
+}
+
+func TestRunCopyFilePreservesSourceMode(t *testing.T) {
+	main, wt := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, "hook.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: "hook.sh", Destination: "hook.sh"}},
+	}}
+	if _, err := Run(context.Background(), cfg, Options{MainCheckout: main, WorktreeDir: wt}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	fi, err := os.Stat(filepath.Join(wt, "hook.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fi.Mode().Perm(); got != 0o755 {
+		t.Fatalf("copied mode = %o, want 755", got)
+	}
+}
+
+func TestRunCopyFileOverwritesWithoutPreserveExisting(t *testing.T) {
+	main, wt := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, ".env"), []byte("from-main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".env"), []byte("stale\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: ".env"}},
+	}}
+	if _, err := Run(context.Background(), cfg, Options{MainCheckout: main, WorktreeDir: wt}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(wt, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "from-main\n" {
+		t.Fatalf("destination = %q, want it overwritten from the main checkout", got)
+	}
+}
+
+func TestRunCopyFilePreserveExistingStillCopiesWhenAbsent(t *testing.T) {
+	main, wt := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(main, ".env"), []byte("from-main\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &Config{Steps: []Step{
+		{Type: StepCopyFile, CopyFile: &CopyFile{Source: ".env", Destination: ".env"}},
+	}}
+	if _, err := Run(context.Background(), cfg, Options{
+		MainCheckout: main, WorktreeDir: wt, PreserveExisting: true,
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(wt, ".env"))
+	if err != nil {
+		t.Fatalf("PreserveExisting skipped a copy with nothing at the destination: %v", err)
+	}
+	if string(got) != "from-main\n" {
+		t.Fatalf("destination = %q", got)
+	}
+}
+
+func TestRunNoStepsSucceeds(t *testing.T) {
+	step, err := Run(context.Background(), &Config{}, Options{})
+	if err != nil || step != "" {
+		t.Fatalf("Run(empty) = (%q, %v), want no failure", step, err)
 	}
 }
