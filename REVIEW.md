@@ -18,11 +18,16 @@ in [AGENTS.md](AGENTS.md). In particular:
 
 ## 2. Format & lint
 
-Run the formatter and linter, and resolve any issues:
+The two codebases are formatted and linted separately — `cli:*` for the Go
+CLI/daemon, `osx:*` for the Swift menu-bar app. Run the pair for whichever the
+branch touches, and resolve any issues:
 
 ```sh
-mise run format
-mise run lint
+mise run cli:format    # Go
+mise run cli:lint
+
+mise run osx:format    # Swift, under macos/
+mise run osx:lint
 ```
 
 If the current branch changes any SQL files, also run the SQL formatter and
@@ -62,7 +67,8 @@ alongside the `.proto` change.
 Run the test suite and ensure **all tests pass**:
 
 ```sh
-mise run test
+mise run cli:test    # Go
+mise run osx:test    # Swift, under macos/
 ```
 
 ## 4. Coverage
@@ -72,6 +78,10 @@ Run the coverage task and ensure all new code meets the coverage standard. Comma
 ```sh
 mise run coverage
 ```
+
+Coverage is the one gate the two codebases share. It runs no tests itself: it
+depends on `cli:test` and `osx:test` and reads the coverage data they leave
+behind, so a coverage run always reflects both.
 
 ## 5. Stylistic review
 

@@ -419,7 +419,10 @@ struct MenuBarView: View {
             Spacer()
 
             Button {
-                withAnimation(.easeOut(duration: 0.12)) { quitOpen = true; reposOpen = false }
+                withAnimation(.easeOut(duration: 0.12)) {
+                    quitOpen = true
+                    reposOpen = false
+                }
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
@@ -806,10 +809,10 @@ private enum Palette {
     static let destructiveTint = Color(hex: 0xfdf7f7)
 }
 
-private extension Color {
+extension Color {
     /// Builds a colour from a 24-bit `0xRRGGBB` literal — lets the palette read
     /// the same hex values the design spec uses.
-    init(hex: UInt32) {
+    fileprivate init(hex: UInt32) {
         self.init(
             .sRGB,
             red: Double((hex >> 16) & 0xff) / 255,
