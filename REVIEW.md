@@ -113,7 +113,9 @@ pattern to the repository root, a pattern with no `/` matches a base name at
 any depth, and `**` matches zero or more path segments.
 
 The gate's own logic is tested — run `mise run coverage:gate-test` (Pester)
-when changing it.
+when changing it. Those tests are required, but **the PowerShell tooling itself
+is not measured for coverage**: only the Go and Swift halves are gated, and no
+`.ps1` file should appear as a package or in `coverage.lcov`.
 
 ## 5. Stylistic review
 
