@@ -263,8 +263,10 @@ func TestReconcileMissingDir(t *testing.T) {
 type fakeProber struct {
 	dirty     bool
 	localOnly int64
+	branch    string
 	dirtyErr  error
 	countErr  error
+	branchErr error
 }
 
 func (f fakeProber) IsDirty(context.Context, string) (bool, error) {
@@ -273,6 +275,10 @@ func (f fakeProber) IsDirty(context.Context, string) (bool, error) {
 
 func (f fakeProber) LocalOnlyCommits(context.Context, string) (int64, error) {
 	return f.localOnly, f.countErr
+}
+
+func (f fakeProber) CurrentBranch(context.Context, string) (string, error) {
+	return f.branch, f.branchErr
 }
 
 func fakeWorktreeDir(t *testing.T) string {
@@ -339,7 +345,7 @@ func TestReconcileDecisions(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), tc.pr)
+			got, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), tc.probe.branch, tc.pr)
 			if err != nil {
 				t.Fatalf("Reconcile: %v", err)
 			}
@@ -360,9 +366,10 @@ func TestReconcileProbeErrors(t *testing.T) {
 	}{
 		{"dirty check fails", fakeProber{dirtyErr: errProbe}, "checking dirty state"},
 		{"commit count fails", fakeProber{countErr: errProbe}, "counting local-only commits"},
+		{"branch read fails", fakeProber{branchErr: errProbe}, "reading checked-out branch"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			st, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), PROpen)
+			st, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), "", PROpen)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("Reconcile error = %v, want one containing %q", err, tc.wantErr)
 			}
@@ -382,7 +389,7 @@ func TestReconcileNotADirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := Reconcile(context.Background(), fakeProber{}, path, PROpen)
+	st, err := Reconcile(context.Background(), fakeProber{}, path, "", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -397,7 +404,7 @@ func TestReconcileStatError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := Reconcile(context.Background(), fakeProber{}, filepath.Join(notADir, "under-a-file"), PROpen)
+	st, err := Reconcile(context.Background(), fakeProber{}, filepath.Join(notADir, "under-a-file"), "", PROpen)
 	if err == nil {
 		t.Fatal("Reconcile: expected an error")
 	}
