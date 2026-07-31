@@ -334,8 +334,28 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 	}
 
 	var errs []error
-	created += s.createMissing(ctx, repo, openByNum, stored, progress, &errs)
-	removed += s.removeClosed(ctx, repo, openByNum, stored, progress, &errs)
+	// Every worktree git has registered, listed once and shared by both phases:
+	// it tells creation which directories can be adopted, and removal which
+	// tracked rows git no longer knows about. A listing failure is recorded but
+	// non-fatal — creation falls back to adding worktrees, and removal declines
+	// to prune anything, since an empty listing is indistinguishable from a repo
+	// whose worktrees are all gone.
+	refs, wlerr := s.git.ListWorktrees(ctx, repo.LocalPath)
+	if wlerr != nil {
+		errs = append(errs, fmt.Errorf("listing existing worktrees: %w", wlerr))
+	}
+	registered := registeredDirs(refs, wlerr == nil)
+	created += s.createMissing(ctx, repo, openByNum, stored, refs, progress, &errs)
+
+	// Re-read the tracked rows: creation links, adopts and creates, so the
+	// snapshot above is already stale — and removal must not judge a row by a PR
+	// number that was filled in moments ago.
+	stored, lerr = s.db.ListWorktrees(ctx, repo.ID)
+	if lerr != nil {
+		err = errors.Join(append(errs, lerr)...)
+		return created, removed, err
+	}
+	removed += s.removeClosed(ctx, repo, openByNum, stored, registered, progress, &errs)
 
 	err = errors.Join(errs...)
 	return created, removed, err
@@ -357,16 +377,8 @@ type reconcileState struct {
 // (linking an existing row is not counted).
 func (s *Service) createMissing(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
-	stored []schema.Worktree, progress progressFn, errs *[]error,
+	stored []schema.Worktree, refs []worktree.Ref, progress progressFn, errs *[]error,
 ) (created int) {
-	// Every worktree git has registered, listed once: it tells us both the branch
-	// actually checked out in each tracked directory and which untracked
-	// directories can be adopted. A listing failure is recorded but non-fatal —
-	// sync falls back to creation.
-	refs, lerr := s.git.ListWorktrees(ctx, repo.LocalPath)
-	if lerr != nil {
-		*errs = append(*errs, fmt.Errorf("listing existing worktrees: %w", lerr))
-	}
 	branchByDir, dirByBranch := indexRefs(refs)
 
 	havePR := make(map[int64]bool, len(stored))
@@ -643,10 +655,13 @@ func (s *Service) resolveDir(repo *schema.Repository, pr github.PR, usedDirs map
 // removeClosed removes worktrees whose PR is no longer open, retaining any
 // that still need reconciliation (dirty or holding local-only commits). Every
 // tracked worktree is a candidate regardless of who created it — removeOne only
-// removes the provably-safe ones. It returns the number removed.
+// removes the provably-safe ones. A worktree with no PR at all is left alone
+// unless it is also a ghost, which pruneGhost decides. registered is the set of
+// directories git has worktrees for, or nil when that listing failed. It returns
+// the number removed.
 func (s *Service) removeClosed(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
-	stored []schema.Worktree, progress progressFn, errs *[]error,
+	stored []schema.Worktree, registered map[string]bool, progress progressFn, errs *[]error,
 ) (removed int) {
 	for i := range stored {
 		wt := stored[i]
@@ -659,13 +674,69 @@ func (s *Service) removeClosed(
 			continue
 		}
 		if state == worktree.PRNone {
-			continue // no associated PR — not a merged/closed cleanup candidate
+			if s.pruneGhost(ctx, repo, wt, registered, progress, errs) {
+				removed++
+			}
+			continue
 		}
 		if s.removeOne(ctx, repo, wt, state, progress, errs) {
 			removed++
 		}
 	}
 	return removed
+}
+
+// registeredDirs indexes the directories git has worktrees registered for. It
+// returns nil when listed is false — a failed listing must not be read as "git
+// knows about nothing", which would make every tracked worktree look like a
+// ghost.
+func registeredDirs(refs []worktree.Ref, listed bool) map[string]bool {
+	if !listed {
+		return nil
+	}
+	dirs := make(map[string]bool, len(refs))
+	for _, r := range refs {
+		dirs[r.Dir] = true
+	}
+	return dirs
+}
+
+// pruneGhost drops a tracked worktree that has neither a PR nor a worktree left
+// behind it: its directory is gone from disk, or git no longer has a worktree
+// registered there. Such a row is pure bookkeeping — there is no branch, no
+// checkout and no PR to reconcile it against, so it would otherwise stay listed
+// forever (removeClosed only ever considers rows with a PR, and adoptOrphans
+// only ever adds).
+//
+// registered is nil when the git listing failed, in which case only a genuinely
+// missing directory is pruned. Nothing is removed from disk: a ghost by
+// definition has nothing there, and a husk of ignored build artifacts is the
+// user's to keep. It returns true when the row was dropped.
+func (s *Service) pruneGhost(
+	ctx context.Context, repo *schema.Repository, wt schema.Worktree,
+	registered map[string]bool, progress progressFn, errs *[]error,
+) bool {
+	missing, why, err := worktree.Missing(wt.DirectoryPath)
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("checking %s: %w", wt.DirectoryPath, err))
+		return false
+	}
+	switch {
+	case missing:
+	case registered != nil && !registered[wt.DirectoryPath]:
+		why = "git has no worktree registered there"
+	default:
+		return false // a live worktree with no PR — tracked, not managed
+	}
+	if derr := s.db.DeleteWorktree(ctx, wt.ID); derr != nil {
+		*errs = append(*errs, derr)
+		return false
+	}
+	s.emitChange(repo, progress, WorktreeChange{
+		Branch: wt.BranchName, Action: ActionDeleted,
+		Detail: "no PR and " + why,
+	})
+	return true
 }
 
 func prBranchOf(wt schema.Worktree) string {

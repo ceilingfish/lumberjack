@@ -69,6 +69,35 @@ type Prober interface {
 	CurrentBranch(ctx context.Context, dir string) (string, error)
 }
 
+// Missing reports whether the worktree at dir is gone from disk, along with a
+// human-readable note saying how. A worktree is missing when its directory does
+// not exist, when the path is not a directory, or when the directory no longer
+// holds a .git entry.
+//
+// That last case is a husk: a worktree directory always contains a .git gitdir
+// pointer file, so its absence means the worktree was removed out-of-band and
+// only ignored build artifacts survived `git worktree remove`. Probing it with
+// git would fail ("not a git repository"), so it counts as missing — prunable
+// from tracking, with the husk left on disk for the user.
+//
+// A permission or transient I/O error is not the same as missing and is
+// returned as an error, so it can never masquerade as a prunable worktree.
+func Missing(dir string) (bool, string, error) {
+	info, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return true, "worktree directory is missing", nil
+	case err != nil:
+		return false, "", fmt.Errorf("stat worktree directory: %w", err)
+	case !info.IsDir():
+		return true, "worktree path is not a directory", nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+		return true, "directory is no longer a git worktree", nil
+	}
+	return false, "", nil
+}
+
 // Reconcile computes the live status of the worktree at dir. pr is the state of
 // the worktree's source PR (the daemon supplies this from a live gh query); it
 // distinguishes a healthy tracked worktree, an orphaned one that outlived a
@@ -77,27 +106,12 @@ type Prober interface {
 //
 // p must have fetched the repo first so remote-tracking refs are current.
 func Reconcile(ctx context.Context, p Prober, dir, prBranch string, pr PRState) (Status, error) {
-	info, err := os.Stat(dir)
-	switch {
-	case os.IsNotExist(err):
-		// Genuinely gone from disk — safe to prune from tracking.
-		return Status{Missing: true, Note: "worktree directory is missing"}, nil
-	case err != nil:
-		// A permission or transient I/O error is not the same as missing; do
-		// not let it masquerade as a prunable worktree.
-		return Status{}, fmt.Errorf("stat worktree directory: %w", err)
-	case !info.IsDir():
-		return Status{Missing: true, Note: "worktree path is not a directory"}, nil
+	missing, why, err := Missing(dir)
+	if err != nil {
+		return Status{}, err
 	}
-
-	// A worktree directory always contains a .git entry (a gitdir pointer
-	// file). Its absence means the worktree was removed out-of-band and only a
-	// husk remains — typically ignored build artifacts that survived `git
-	// worktree remove`. Probing it with git would fail ("not a git
-	// repository"), so treat it as missing: prunable from tracking, with the
-	// husk left on disk for the user.
-	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
-		return Status{Missing: true, Note: "directory is no longer a git worktree"}, nil
+	if missing {
+		return Status{Missing: true, Note: why}, nil
 	}
 
 	dirty, err := p.IsDirty(ctx, dir)

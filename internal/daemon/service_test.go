@@ -948,6 +948,9 @@ func TestSyncKeepsWorktreeWithNoPR(t *testing.T) {
 	h := newHarness(t)
 	dir := filepath.Join(h.parent, "n")
 	existing := filepath.Join(h.parent, "n-feature")
+	if err := mkWorktreeDir(existing); err != nil {
+		t.Fatal(err)
+	}
 	h.git.worktrees = []worktree.Ref{
 		{Dir: dir, Branch: "main"},
 		{Dir: existing, Branch: "feature/x"},
@@ -1107,7 +1110,7 @@ func TestSyncAdoptsExistingWorktree(t *testing.T) {
 	// The branch is already checked out by hand in a directory git knows about,
 	// so recreating it would fail with "a branch named ... already exists".
 	existing := filepath.Join(h.parent, "hand-checkout")
-	if err := os.MkdirAll(existing, 0o755); err != nil {
+	if err := mkWorktreeDir(existing); err != nil {
 		t.Fatal(err)
 	}
 	h.git.worktrees = []worktree.Ref{{Dir: existing, Branch: "feature/x"}}
@@ -1331,7 +1334,7 @@ func TestSyncAdoptsOrphanWorktreeWithNoPR(t *testing.T) {
 	h.gh.prs = nil // no open PRs at all
 
 	orphan := filepath.Join(h.parent, "hand-checkout")
-	if err := os.MkdirAll(orphan, 0o755); err != nil {
+	if err := mkWorktreeDir(orphan); err != nil {
 		t.Fatal(err)
 	}
 	h.git.worktrees = []worktree.Ref{
@@ -1376,6 +1379,215 @@ func TestSyncAdoptsOrphanWorktreeWithNoPR(t *testing.T) {
 	}
 }
 
+// A ghost is a tracked worktree with neither a PR nor a directory: the row
+// outlived a `rm -rf`. Nothing else in sync ever reaches it — removeClosed only
+// considers rows with a PR, and adoption only ever adds — so without pruning it
+// would stay listed forever.
+func TestSyncPrunesGhostWorktreeWithNoPRAndNoDirectory(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	orphan := filepath.Join(h.parent, "hand-checkout")
+	if err := mkWorktreeDir(orphan); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/orphan"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("adopting sync: %v", err)
+	}
+
+	// The user deletes the directory by hand and git forgets the worktree.
+	if err := os.RemoveAll(orphan); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = nil
+
+	var changes []WorktreeChange
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo,
+		func(c WorktreeChange) { changes = append(changes, c) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed=%d, want 1", removed)
+	}
+	if !hasAction(changes, "feature/orphan", ActionDeleted) {
+		t.Errorf("expected a deleted change for the ghost, got %v", changes)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 0 {
+		t.Errorf("expected the ghost pruned, got %d tracked worktrees", len(got))
+	}
+}
+
+// A ghost whose directory survives as a husk — build artifacts left behind by
+// `git worktree remove` — is pruned from tracking too, and the husk is left on
+// disk for the user to deal with.
+func TestSyncPrunesGhostWorktreeLeftAsHusk(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	orphan := filepath.Join(h.parent, "hand-checkout")
+	if err := mkWorktreeDir(orphan); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/orphan"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("adopting sync: %v", err)
+	}
+
+	if err := os.Remove(filepath.Join(orphan, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = nil
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed=%d, want 1", removed)
+	}
+	if _, err := os.Stat(orphan); err != nil {
+		t.Errorf("the husk must be left on disk: %v", err)
+	}
+}
+
+// A tracked worktree with no PR whose directory is still there but which git no
+// longer has registered is a ghost too: git worktree removed it out-of-band and
+// only the row (and whatever is on disk) remains.
+func TestSyncPrunesWorktreeGitNoLongerRegisters(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	orphan := filepath.Join(h.parent, "hand-checkout")
+	if err := mkWorktreeDir(orphan); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/orphan"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("adopting sync: %v", err)
+	}
+
+	// The directory (and its .git pointer) survives, but git has dropped it.
+	h.git.worktrees = nil
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed=%d, want 1", removed)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 0 {
+		t.Errorf("expected the ghost pruned, got %d tracked worktrees", len(got))
+	}
+}
+
+// A failed `git worktree list` must never be read as "git knows about nothing":
+// that would make every tracked worktree look unregistered and prune the lot.
+// Only a directory that is genuinely gone is pruned in that case.
+func TestSyncKeepsUnregisteredWorktreeWhenListingFails(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	orphan := filepath.Join(h.parent, "hand-checkout")
+	if err := mkWorktreeDir(orphan); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/orphan"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("adopting sync: %v", err)
+	}
+
+	h.git.worktrees = nil
+	h.git.listErr = errors.New("fatal: not a git repository")
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil {
+		t.Fatal("expected the listing failure to be reported")
+	}
+	if removed != 0 {
+		t.Errorf("removed=%d, want 0 (a listing failure is not evidence of a ghost)", removed)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 1 {
+		t.Errorf("expected the worktree kept, got %d tracked worktrees", len(got))
+	}
+}
+
+// A directory that cannot be stat'ed is not the same as one that is gone. The
+// whole point of pruning is that the evidence is conclusive, so an I/O error
+// must keep the worktree and be reported.
+func TestSyncKeepsGhostCandidateWhenDirectoryCannotBeStatted(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	enclosing := filepath.Join(h.parent, "enclosing")
+	orphan := filepath.Join(enclosing, "hand-checkout")
+	if err := mkWorktreeDir(orphan); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/orphan"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("adopting sync: %v", err)
+	}
+
+	if err := os.Chmod(enclosing, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(enclosing, 0o755) })
+	if _, err := os.Stat(orphan); err == nil {
+		t.Skip("stat still succeeds despite mode 000 (running as root?)")
+	}
+	h.git.worktrees = nil
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil {
+		t.Fatal("expected the stat failure to be reported")
+	}
+	if removed != 0 {
+		t.Errorf("removed=%d, want 0 (an unreadable directory is not a ghost)", removed)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 1 {
+		t.Errorf("expected the worktree kept, got %d tracked worktrees", len(got))
+	}
+}
+
+// A worktree that still has an open PR is never pruned as a ghost, even when
+// its row was linked to that PR during this very sync — removal must judge the
+// rows creation left behind, not the stale snapshot it started from.
+func TestSyncDoesNotPruneWorktreeLinkedDuringTheSameSync(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+
+	orphan := filepath.Join(h.parent, "hand-checkout")
+	if err := mkWorktreeDir(orphan); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/x"}}
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("adopting sync: %v", err)
+	}
+
+	// A PR is opened on the orphan's branch, and at the same time the directory
+	// goes missing. The open PR is what keeps the row: it is no longer a ghost.
+	h.gh.prs = []github.PR{{Number: 3, HeadBranch: "feature/x"}}
+	if err := os.RemoveAll(orphan); err != nil {
+		t.Fatal(err)
+	}
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed=%d, want 0 (the row was linked to an open PR)", removed)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 || wts[0].GithubPRNumber == nil || *wts[0].GithubPRNumber != 3 {
+		t.Errorf("expected the worktree kept and linked to PR #3, got %+v", wts)
+	}
+}
+
 // An orphan adopted with no PR is linked to a PR later opened on its branch,
 // rather than being re-adopted as a second row.
 func TestSyncLinksOrphanToLaterPR(t *testing.T) {
@@ -1383,7 +1595,7 @@ func TestSyncLinksOrphanToLaterPR(t *testing.T) {
 	repo := h.repo(t)
 
 	orphan := filepath.Join(h.parent, "hand-checkout")
-	if err := os.MkdirAll(orphan, 0o755); err != nil {
+	if err := mkWorktreeDir(orphan); err != nil {
 		t.Fatal(err)
 	}
 	h.git.worktrees = []worktree.Ref{{Dir: orphan, Branch: "feature/x"}}
