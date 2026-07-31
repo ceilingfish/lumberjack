@@ -1,8 +1,9 @@
 name: CI
 
-# Gates pull requests on the same checks the release path runs (checks.yml),
-# plus the checks that only make sense against a base ref: SQL linting and the
-# protobuf lint/compatibility pair. See issue #10.
+# Gates pull requests on the same checks the release path runs — the step
+# sequences live in .github/actions/, shared with release.yml — plus the checks
+# that only make sense against a base ref: SQL linting and the protobuf
+# lint/compatibility pair. See issue #10.
 on:
   pull_request:
 
@@ -14,8 +15,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    uses: ./.github/workflows/checks.yml
+  # Split by language so only the Swift half needs a macOS runner.
+  cli-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/cli-checks
+
+  osx-checks:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/osx-checks
+
+  # The gate covers both codebases, so it needs both halves on one machine. It
+  # reports but never blocks: the per-package floor is not met yet (see #6), so
+  # making it blocking would block every pull request. Deleting the
+  # `continue-on-error` below is the one-line change once the floor is met.
+  coverage:
+    needs: [cli-checks, osx-checks]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/coverage-gate
 
   changes:
     runs-on: ubuntu-latest

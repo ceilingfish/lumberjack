@@ -5,9 +5,9 @@ name: Release
 # component and this workflow (on the resulting push to main) builds and
 # publishes its artifacts. See issue #11.
 #
-# The checks themselves live in checks.yml, shared with the pull-request
-# pipeline (ci.yml), so a release is never cut from a main that would have
-# failed CI.
+# The check steps themselves live in .github/actions/, shared with the
+# pull-request pipeline (ci.yml), so a release is never cut from a main that
+# would have failed CI.
 on:
   push:
     branches: [main]
@@ -17,11 +17,31 @@ permissions:
   pull-requests: write
 
 jobs:
-  checks:
-    uses: ./.github/workflows/checks.yml
+  # Split by language so only the Swift half needs a macOS runner.
+  cli-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/cli-checks
+
+  osx-checks:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/osx-checks
+
+  # The gate covers both codebases, so it needs both halves on one machine. It
+  # is reported but not depended on: the per-package floor is not met yet (see
+  # #6), and a release is gated on the tests passing, not on the floor.
+  coverage:
+    needs: [cli-checks, osx-checks]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/coverage-gate
 
   release-please:
-    needs: [checks]
+    needs: [cli-checks, osx-checks]
     runs-on: ubuntu-latest
     outputs:
       cli_release_created: ${{ steps.release.outputs.release_created }}
