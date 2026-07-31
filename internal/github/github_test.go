@@ -12,7 +12,10 @@ import (
 	"testing"
 )
 
-const helperEnv = "LUMBERJACK_TEST_GH_HELPER"
+const (
+	helperEnv  = "LUMBERJACK_TEST_GH_HELPER"
+	helperFlag = "-test.run=TestGhHelperProcess"
+)
 
 func TestGhHelperProcess(t *testing.T) {
 	mode := os.Getenv(helperEnv)
@@ -41,19 +44,19 @@ func TestGhHelperProcess(t *testing.T) {
 func helperClient(t *testing.T, mode string) *Client {
 	t.Helper()
 	t.Setenv(helperEnv, mode)
-	c := &Client{bin: os.Args[0]}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	c := &Client{bin: self}
 	c.run = c.exec
 	return c
-}
-
-func helperArgs() []string {
-	return []string{"-test.run=TestGhHelperProcess"}
 }
 
 func fakeBinary(t *testing.T, dir, name string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(p, nil, 0o755); err != nil {
 		t.Fatalf("writing fake binary: %v", err)
 	}
 	return p
@@ -378,7 +381,7 @@ func TestListOpenPRsBadJSON(t *testing.T) {
 
 func TestExecTrimsStdout(t *testing.T) {
 	c := helperClient(t, "stdout")
-	out, err := c.run(context.Background(), "", helperArgs()...)
+	out, err := c.run(context.Background(), "", helperFlag)
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
@@ -390,7 +393,7 @@ func TestExecTrimsStdout(t *testing.T) {
 func TestExecRunsInDir(t *testing.T) {
 	dir := t.TempDir()
 	c := helperClient(t, "cwd")
-	out, err := c.run(context.Background(), dir, helperArgs()...)
+	out, err := c.run(context.Background(), dir, helperFlag)
 	if err != nil {
 		t.Fatalf("exec: %v", err)
 	}
@@ -409,24 +412,24 @@ func TestExecRunsInDir(t *testing.T) {
 
 func TestExecReportsStderr(t *testing.T) {
 	c := helperClient(t, "stderr")
-	out, err := c.run(context.Background(), "", helperArgs()...)
+	out, err := c.run(context.Background(), "", helperFlag)
 	if err == nil {
 		t.Fatal("expected an error from a failing gh")
 	}
 	if out != "" {
 		t.Errorf("out = %q, want empty on failure", out)
 	}
-	if !strings.Contains(err.Error(), "HTTP 404: Not Found") {
-		t.Errorf("error %q should carry gh's stderr", err)
+	if !strings.HasSuffix(err.Error(), "gh: HTTP 404: Not Found") {
+		t.Errorf("error = %q, want it to end with gh's trimmed stderr", err)
 	}
-	if !strings.Contains(err.Error(), strings.Join(helperArgs(), " ")) {
+	if !strings.Contains(err.Error(), helperFlag) {
 		t.Errorf("error %q should name the gh invocation", err)
 	}
 }
 
 func TestExecFallsBackToExitError(t *testing.T) {
 	c := helperClient(t, "silent")
-	_, err := c.run(context.Background(), "", helperArgs()...)
+	_, err := c.run(context.Background(), "", helperFlag)
 	if err == nil {
 		t.Fatal("expected an error from a failing gh")
 	}
@@ -439,7 +442,7 @@ func TestExecCancelledContext(t *testing.T) {
 	c := helperClient(t, "stdout")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := c.run(ctx, "", helperArgs()...); err == nil {
+	if _, err := c.run(ctx, "", helperFlag); err == nil {
 		t.Error("expected an error for a cancelled context")
 	}
 }
