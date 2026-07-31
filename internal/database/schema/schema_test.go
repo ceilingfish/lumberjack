@@ -36,33 +36,21 @@ func TestWorktreeMatches(t *testing.T) {
 
 func TestWorktreeMatchesAmbiguousReference(t *testing.T) {
 	tests := []struct {
-		name     string
-		worktree Worktree
-		ref      string
+		name   string
+		branch string
+		dir    string
+		ref    string
 	}{
-		{
-			name: "branch name is also the directory base name",
-			worktree: Worktree{
-				BranchName:    "app-feature-login",
-				DirectoryPath: "/home/dev/Code/app-feature-login",
-			},
-			ref: "app-feature-login",
-		},
-		{
-			name: "all three clauses match at once",
-			worktree: Worktree{
-				BranchName:    "app",
-				DirectoryPath: "app",
-			},
-			ref: "app",
-		},
+		{"branch name is also the directory base name", "app-feature-login", "/home/dev/Code/app-feature-login", "app-feature-login"},
+		{"all three clauses match at once", "app", "app", "app"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if !tt.worktree.Matches(tt.ref) {
+			w := Worktree{BranchName: tt.branch, DirectoryPath: tt.dir}
+			if !w.Matches(tt.ref) {
 				t.Errorf("Worktree{BranchName: %q, DirectoryPath: %q}.Matches(%q) = false, want true",
-					tt.worktree.BranchName, tt.worktree.DirectoryPath, tt.ref)
+					tt.branch, tt.dir, tt.ref)
 			}
 		})
 	}
