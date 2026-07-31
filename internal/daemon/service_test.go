@@ -24,6 +24,7 @@ type fakeGit struct {
 	dirty     map[string]bool
 	dirtyErr  map[string]error
 	localOnly map[string]int64
+	branches  map[string]string
 	addErr    map[string]error // keyed by branch
 	removeErr map[string]error
 	// newBranches records, per branch, the base AddWorktreeNewBranch created it
@@ -72,6 +73,7 @@ func newFakeGit() *fakeGit {
 		dirty:          map[string]bool{},
 		dirtyErr:       map[string]error{},
 		localOnly:      map[string]int64{},
+		branches:       map[string]string{},
 		addErr:         map[string]error{},
 		removeErr:      map[string]error{},
 		fetchErrByPath: map[string]error{},
@@ -122,6 +124,7 @@ func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error
 	if err := f.addErr[branch]; err != nil {
 		return err
 	}
+	f.branches[dir] = branch
 	return mkWorktreeDir(dir)
 }
 
@@ -132,6 +135,7 @@ func (f *fakeGit) AddWorktreeNewBranch(_ context.Context, _, dir, base, branch s
 		return err
 	}
 	f.newBranches[branch] = base
+	f.branches[dir] = branch
 	return mkWorktreeDir(dir)
 }
 
@@ -151,6 +155,10 @@ func (f *fakeGit) MoveWorktree(_ context.Context, _, from, to string) error {
 		return err
 	}
 	f.moves = append(f.moves, [2]string{from, to})
+	if b, ok := f.branches[from]; ok {
+		delete(f.branches, from)
+		f.branches[to] = b
+	}
 	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
 		return err
 	}
@@ -209,6 +217,18 @@ func (f *fakeGit) IsDirty(_ context.Context, dir string) (bool, error) {
 
 func (f *fakeGit) LocalOnlyCommits(_ context.Context, dir string) (int64, error) {
 	return f.localOnly[dir], nil
+}
+
+func (f *fakeGit) CurrentBranch(_ context.Context, dir string) (string, error) {
+	if b, ok := f.branches[dir]; ok {
+		return b, nil
+	}
+	for _, r := range f.worktrees {
+		if r.Dir == dir {
+			return r.Branch, nil
+		}
+	}
+	return "", nil
 }
 
 func (f *fakeGit) DefaultBranch(context.Context, string, string) (string, error) {
@@ -1115,6 +1135,194 @@ func TestSyncAdoptsExistingWorktree(t *testing.T) {
 	}
 }
 
+// A PR whose branch the main checkout has checked out cannot get a worktree —
+// git allows a branch in only one working tree — so sync reports it and carries
+// on rather than failing with "a branch named ... already exists" every loop.
+func TestSyncSkipsPROnMainCheckoutBranch(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 910, HeadBranch: "fix/x"}, {Number: 911, HeadBranch: "feature/y"}}
+	h.git.worktrees = []worktree.Ref{{Dir: repo.LocalPath, Branch: "fix/x"}}
+	// Creation must never be attempted for the main checkout's branch.
+	h.git.addErr["fix/x"] = errors.New("a branch named 'fix/x' already exists")
+
+	var changes []WorktreeChange
+	created, _, err := h.svc.SyncRepository(context.Background(), repo,
+		func(c WorktreeChange) { changes = append(changes, c) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if created != 1 {
+		t.Errorf("created=%d, want 1 (only the other PR)", created)
+	}
+	if !hasAction(changes, "fix/x", ActionRetained) {
+		t.Errorf("expected fix/x reported as retained, got %v", changes)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 || wts[0].BranchName != "feature/y" {
+		t.Fatalf("expected only feature/y tracked, got %+v", wts)
+	}
+}
+
+func (h *harness) syncedWorktree(t *testing.T, repo *schema.Repository) schema.Worktree {
+	t.Helper()
+	wts, err := h.db.ListWorktrees(context.Background(), repo.ID)
+	if err != nil {
+		t.Fatalf("ListWorktrees: %v", err)
+	}
+	if len(wts) != 1 {
+		t.Fatalf("expected 1 tracked worktree, got %d", len(wts))
+	}
+	return wts[0]
+}
+
+func TestWorktreeViewsFlagsBranchDisparity(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 4, HeadBranch: "feature/x"}}
+	h.seedSync(t, repo)
+	wt := h.syncedWorktree(t, repo)
+	h.git.branches[wt.DirectoryPath] = "feature/elsewhere"
+
+	views, err := h.svc.WorktreeViews(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("WorktreeViews: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("expected 1 view, got %d", len(views))
+	}
+	st := views[0].Status
+	if !st.BranchDisparity || !st.NeedsReconciliation {
+		t.Errorf("expected a flagged disparity: %+v", st)
+	}
+	if st.CheckedOutBranch != "feature/elsewhere" {
+		t.Errorf("CheckedOutBranch = %q", st.CheckedOutBranch)
+	}
+	want := "needs reconciliation: disparity between local branch feature/elsewhere and PR branch feature/x"
+	if st.Note != want {
+		t.Errorf("note = %q, want %q", st.Note, want)
+	}
+}
+
+func TestSyncRetainsWorktreeWithBranchDisparity(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 4, HeadBranch: "feature/x"}}
+	h.seedSync(t, repo)
+	wt := h.syncedWorktree(t, repo)
+	h.git.branches[wt.DirectoryPath] = "feature/elsewhere"
+
+	h.gh.prs = nil
+	h.gh.merged = map[int64]bool{4: true}
+
+	var changes []WorktreeChange
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo,
+		func(c WorktreeChange) { changes = append(changes, c) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed=%d, want 0: a disparity is never cleaned up", removed)
+	}
+	if !hasAction(changes, "feature/x", ActionRetained) {
+		t.Errorf("expected feature/x retained, got %v", changes)
+	}
+	if _, err := os.Stat(wt.DirectoryPath); err != nil {
+		t.Errorf("worktree directory must survive: %v", err)
+	}
+	if got := h.syncedWorktree(t, repo); got.ID != wt.ID {
+		t.Errorf("expected the worktree to stay tracked, got %+v", got)
+	}
+}
+
+func TestSyncSuppressesPRWhoseBranchAWorktreeHolds(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 4, HeadBranch: "feature/x"}}
+	h.seedSync(t, repo)
+	wt := h.syncedWorktree(t, repo)
+
+	h.git.branches[wt.DirectoryPath] = "feature/y"
+	h.git.worktrees = []worktree.Ref{
+		{Dir: repo.LocalPath, Branch: "main"},
+		{Dir: wt.DirectoryPath, Branch: "feature/y"},
+	}
+	h.gh.prs = append(h.gh.prs, github.PR{Number: 5, HeadBranch: "feature/y"})
+	h.git.addErr["feature/y"] = errors.New("a branch named 'feature/y' already exists")
+
+	var changes []WorktreeChange
+	created, _, err := h.svc.SyncRepository(context.Background(), repo,
+		func(c WorktreeChange) { changes = append(changes, c) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if created != 0 {
+		t.Errorf("created=%d, want 0: the branch is checked out elsewhere", created)
+	}
+	if !hasAction(changes, "feature/y", ActionRetained) {
+		t.Errorf("expected feature/y retained, got %v", changes)
+	}
+	if got := h.syncedWorktree(t, repo); got.ID != wt.ID {
+		t.Errorf("expected only the original worktree tracked, got %+v", got)
+	}
+
+	h.git.branches[wt.DirectoryPath] = "feature/x"
+	h.git.worktrees = []worktree.Ref{
+		{Dir: repo.LocalPath, Branch: "main"},
+		{Dir: wt.DirectoryPath, Branch: "feature/x"},
+	}
+	delete(h.git.addErr, "feature/y")
+
+	created, _, err = h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if created != 1 {
+		t.Errorf("created=%d, want 1 once the disparity is resolved", created)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 2 {
+		t.Fatalf("expected 2 tracked worktrees, got %d", len(wts))
+	}
+}
+
+func TestSyncCreatesWorktreeAfterDisparateWorktreeDeleted(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 4, HeadBranch: "feature/x"}}
+	h.seedSync(t, repo)
+	wt := h.syncedWorktree(t, repo)
+
+	h.git.branches[wt.DirectoryPath] = "feature/y"
+	h.git.worktrees = []worktree.Ref{{Dir: wt.DirectoryPath, Branch: "feature/y"}}
+	h.gh.prs = append(h.gh.prs, github.PR{Number: 5, HeadBranch: "feature/y"})
+
+	res, err := h.svc.DeleteWorktree(context.Background(), repo, "feature/x", false)
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if !res.RequiresConfirmation {
+		t.Fatalf("a disparity must be confirmed before deletion: %+v", res)
+	}
+	want := "worktree is checked out on feature/y rather than its PR branch"
+	if res.Message != want {
+		t.Errorf("message = %q, want %q", res.Message, want)
+	}
+	if _, err := h.svc.DeleteWorktree(context.Background(), repo, "feature/x", true); err != nil {
+		t.Fatalf("forced DeleteWorktree: %v", err)
+	}
+
+	h.git.worktrees = nil
+	delete(h.git.branches, wt.DirectoryPath)
+	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync after delete: %v", err)
+	}
+	if created != 2 {
+		t.Errorf("created=%d, want 2 (both PRs get a worktree again)", created)
+	}
+}
+
 // An on-disk worktree no open PR claims is still adopted, so a directory
 // created by hand after `init` does not stay invisible to Lumberjack.
 func TestSyncAdoptsOrphanWorktreeWithNoPR(t *testing.T) {
@@ -1790,6 +1998,14 @@ func TestConfirmMessage(t *testing.T) {
 		{
 			worktree.Status{LocalOnlyCommits: 3},
 			"worktree has 3 local-only commit(s) that will be lost",
+		},
+		{
+			worktree.Status{BranchDisparity: true, CheckedOutBranch: "other"},
+			"worktree is checked out on other rather than its PR branch",
+		},
+		{
+			worktree.Status{Dirty: true, BranchDisparity: true, CheckedOutBranch: "other"},
+			"worktree has uncommitted changes that will be lost, and is checked out on other rather than its PR branch",
 		},
 	}
 	for _, c := range cases {

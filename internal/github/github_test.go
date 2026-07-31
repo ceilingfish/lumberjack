@@ -3,11 +3,64 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+const (
+	helperEnv  = "LUMBERJACK_TEST_GH_HELPER"
+	helperFlag = "-test.run=TestGhHelperProcess"
+)
+
+func TestGhHelperProcess(t *testing.T) {
+	mode := os.Getenv(helperEnv)
+	if mode == "" {
+		t.Skip("helper process only")
+	}
+	switch mode {
+	case "stdout":
+		fmt.Println("  gh version 2.40.0 (2024-01-01)  ")
+	case "cwd":
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Println(wd)
+	case "stderr":
+		fmt.Fprintln(os.Stderr, "  gh: HTTP 404: Not Found  ")
+		os.Exit(1)
+	case "silent":
+		os.Exit(3)
+	}
+	os.Exit(0)
+}
+
+func helperClient(t *testing.T, mode string) *Client {
+	t.Helper()
+	t.Setenv(helperEnv, mode)
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locating the test binary: %v", err)
+	}
+	c := &Client{bin: self}
+	c.run = c.exec
+	return c
+}
+
+func fakeBinary(t *testing.T, dir string) string {
+	t.Helper()
+	p := filepath.Join(dir, "gh")
+	if err := os.WriteFile(p, nil, 0o755); err != nil {
+		t.Fatalf("writing fake binary: %v", err)
+	}
+	return p
+}
 
 // fakeClient builds a Client whose gh invocations are answered by fn, so tests
 // exercise parsing/behaviour without a real gh binary.
@@ -21,14 +74,7 @@ func fakeClient(fn func(args ...string) (string, error)) *Client {
 }
 
 func TestNewClientEnvOverride(t *testing.T) {
-	binPath, err := exec.LookPath("gh")
-	if err != nil {
-		// Fall back to any executable so the override path is still exercised.
-		binPath, err = exec.LookPath("sh")
-		if err != nil {
-			t.Skip("no executable available")
-		}
-	}
+	binPath := fakeBinary(t, t.TempDir())
 	t.Setenv(EnvCLIPath, binPath)
 	c, err := NewClient()
 	if err != nil {
@@ -36,6 +82,44 @@ func TestNewClientEnvOverride(t *testing.T) {
 	}
 	if c.Path() != binPath {
 		t.Errorf("Path = %q, want %q", c.Path(), binPath)
+	}
+	if c.run == nil {
+		t.Error("NewClient must wire the command runner")
+	}
+}
+
+func TestNewClientFindsGhOnPath(t *testing.T) {
+	dir := t.TempDir()
+	want := fakeBinary(t, dir)
+	t.Setenv(EnvCLIPath, "")
+	t.Setenv("PATH", dir)
+	c, err := NewClient()
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if c.Path() != want {
+		t.Errorf("Path = %q, want %q", c.Path(), want)
+	}
+}
+
+func TestNewClientGhNotOnPath(t *testing.T) {
+	t.Setenv(EnvCLIPath, "")
+	t.Setenv("PATH", t.TempDir())
+	c, err := NewClient()
+	if err == nil {
+		t.Fatalf("expected an error when gh is absent from PATH, got client %+v", c)
+	}
+	if c != nil {
+		t.Errorf("client = %+v, want nil", c)
+	}
+	msg := err.Error()
+	for _, want := range []string{"gh", "PATH", EnvCLIPath} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q should mention %q so the daemon can tell the user what to fix", msg, want)
+		}
+	}
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Errorf("error should wrap exec.ErrNotFound, got %v", err)
 	}
 }
 
@@ -295,16 +379,335 @@ func TestListOpenPRsBadJSON(t *testing.T) {
 	}
 }
 
-func TestExecRealBinaryError(t *testing.T) {
-	// Exercise the real exec path against a binary that fails, so the stderr
-	// wrapping is covered without a real gh.
-	sh, err := exec.LookPath("false")
+func TestExecTrimsStdout(t *testing.T) {
+	c := helperClient(t, "stdout")
+	out, err := c.run(context.Background(), "", helperFlag)
 	if err != nil {
-		t.Skip("no false binary")
+		t.Fatalf("exec: %v", err)
 	}
-	c := &Client{bin: sh}
-	c.run = c.exec
-	if _, err := c.run(context.Background(), "", "anything"); err == nil {
-		t.Error("expected error from failing binary")
+	if out != "gh version 2.40.0 (2024-01-01)" {
+		t.Errorf("out = %q, want trimmed stdout", out)
+	}
+}
+
+func TestExecRunsInDir(t *testing.T) {
+	dir := t.TempDir()
+	c := helperClient(t, "cwd")
+	out, err := c.run(context.Background(), dir, helperFlag)
+	if err != nil {
+		t.Fatalf("exec: %v", err)
+	}
+	got, err := filepath.EvalSymlinks(out)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", out, err)
+	}
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", dir, err)
+	}
+	if got != want {
+		t.Errorf("cwd = %q, want %q", got, want)
+	}
+}
+
+func TestExecReportsStderr(t *testing.T) {
+	c := helperClient(t, "stderr")
+	out, err := c.run(context.Background(), "", helperFlag)
+	if err == nil {
+		t.Fatal("expected an error from a failing gh")
+	}
+	if out != "" {
+		t.Errorf("out = %q, want empty on failure", out)
+	}
+	if !strings.HasSuffix(err.Error(), "gh: HTTP 404: Not Found") {
+		t.Errorf("error = %q, want it to end with gh's trimmed stderr", err)
+	}
+	if !strings.Contains(err.Error(), helperFlag) {
+		t.Errorf("error %q should name the gh invocation", err)
+	}
+}
+
+func TestExecFallsBackToExitError(t *testing.T) {
+	c := helperClient(t, "silent")
+	_, err := c.run(context.Background(), "", helperFlag)
+	if err == nil {
+		t.Fatal("expected an error from a failing gh")
+	}
+	if !strings.Contains(err.Error(), "exit status 3") {
+		t.Errorf("with no stderr the exit status must surface, got %q", err)
+	}
+}
+
+func TestExecCancelledContext(t *testing.T) {
+	c := helperClient(t, "stdout")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := c.run(ctx, "", helperFlag); err == nil {
+		t.Error("expected an error for a cancelled context")
+	}
+}
+
+func TestVersionWithoutTrailingLines(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "gh version 2.1.0", nil })
+	v, err := c.Version(context.Background())
+	if err != nil {
+		t.Fatalf("Version: %v", err)
+	}
+	if v != "2.1.0" {
+		t.Errorf("Version = %q, want 2.1.0", v)
+	}
+}
+
+func TestVersionPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("gh not executable") })
+	v, err := c.Version(context.Background())
+	if err == nil {
+		t.Fatal("expected the gh failure to propagate")
+	}
+	if v != "" {
+		t.Errorf("Version = %q, want empty on error", v)
+	}
+}
+
+func TestAuthStatusUnauthenticatedIsNotNotFound(t *testing.T) {
+	cases := map[string]string{
+		"unauthenticated": "You are not logged into any GitHub hosts. To log in, run: gh auth login",
+		"network":         "dial tcp: lookup api.github.com: no such host",
+	}
+	for name, stderr := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := fakeClient(func(...string) (string, error) { return "", errors.New(stderr) })
+			err := c.AuthStatus(context.Background())
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(err.Error(), stderr) {
+				t.Errorf("error %q should carry gh's own remedy text", err)
+			}
+			if errors.Is(err, ErrRepoNotFound) {
+				t.Error("must not be reported as ErrRepoNotFound")
+			}
+			if isNotFound(err) {
+				t.Error("must not be classified as a 404")
+			}
+		})
+	}
+}
+
+func TestRepoInfoEmptyOutput(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", nil })
+	if _, err := c.RepoInfo(context.Background(), "/repo"); err == nil {
+		t.Error("expected an error for empty gh output")
+	}
+}
+
+func TestRepoInfoUnparseableURLFallsBackToGitHubCom(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `{"owner":{"login":"o"},"name":"n","defaultBranchRef":{"name":"main"},"url":"::not a url"}`, nil
+	})
+	info, err := c.RepoInfo(context.Background(), "/repo")
+	if err != nil {
+		t.Fatalf("RepoInfo: %v", err)
+	}
+	if info.Host != "github.com" {
+		t.Errorf("Host = %q, want the github.com fallback", info.Host)
+	}
+}
+
+func TestCheckRepoAccessPropagatesOtherErrors(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return "", errors.New("gh repo view: dial tcp: connection refused")
+	})
+	err := c.CheckRepoAccess(context.Background(), RepoInfo{Owner: "o", Name: "n", Host: "github.com"})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if errors.Is(err, ErrRepoNotFound) {
+		t.Errorf("a network failure must not be ErrRepoNotFound, got %v", err)
+	}
+}
+
+func TestAuthenticatedUserPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("gh auth required") })
+	user, err := c.AuthenticatedUser(context.Background())
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if user != "" {
+		t.Errorf("user = %q, want empty on error", user)
+	}
+}
+
+func TestActiveLoginFallsBackToFirstListedAccount(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `{"hosts":{"github.com":[{"active":false,"login":"first"},{"active":false,"login":"second"}]}}`, nil
+	})
+	login, err := c.ActiveLogin(context.Background(), "github.com")
+	if err != nil {
+		t.Fatalf("ActiveLogin: %v", err)
+	}
+	if login != "first" {
+		t.Errorf("login = %q, want first", login)
+	}
+}
+
+func TestActiveLoginEmptyAccountList(t *testing.T) {
+	for name, out := range map[string]string{
+		"no entries":  `{"hosts":{"github.com":[]}}`,
+		"blank login": `{"hosts":{"github.com":[{"active":true,"login":""}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := fakeClient(func(...string) (string, error) { return out, nil })
+			if _, err := c.ActiveLogin(context.Background(), "github.com"); err == nil {
+				t.Error("expected an error when no login is usable")
+			}
+		})
+	}
+}
+
+func TestListLogins(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `{"hosts":{"github.com":[{"login":"personal"},{"login":""},{"login":"work"}],` +
+			`"ghe.acme.corp":[{"login":"employee"}]}}`, nil
+	})
+	logins, err := c.ListLogins(context.Background(), "github.com")
+	if err != nil {
+		t.Fatalf("ListLogins: %v", err)
+	}
+	if want := []string{"personal", "work"}; !reflect.DeepEqual(logins, want) {
+		t.Errorf("logins = %v, want %v", logins, want)
+	}
+	want := []string{"auth", "status", "--json", "hosts"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Errorf("args = %v, want %v (no --active, so every account is listed)", gotArgs, want)
+	}
+}
+
+func TestListLoginsUnknownHost(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `{"hosts":{"github.com":[{"login":"personal"}]}}`, nil
+	})
+	logins, err := c.ListLogins(context.Background(), "ghe.acme.corp")
+	if err != nil {
+		t.Fatalf("ListLogins: %v", err)
+	}
+	if len(logins) != 0 {
+		t.Errorf("logins = %v, want empty for a host gh knows nothing about", logins)
+	}
+}
+
+func TestListLoginsBadJSON(t *testing.T) {
+	for name, out := range map[string]string{"garbage": "not json", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			c := fakeClient(func(...string) (string, error) { return out, nil })
+			logins, err := c.ListLogins(context.Background(), "github.com")
+			if err == nil {
+				t.Fatalf("expected a parse error, got %v", logins)
+			}
+			if !strings.Contains(err.Error(), "parsing gh auth status") {
+				t.Errorf("error %q should say what failed to parse", err)
+			}
+		})
+	}
+}
+
+func TestListLoginsPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("not logged in") })
+	logins, err := c.ListLogins(context.Background(), "github.com")
+	if err == nil {
+		t.Fatal("expected the gh failure to propagate")
+	}
+	if logins != nil {
+		t.Errorf("logins = %v, want nil on error", logins)
+	}
+}
+
+func TestSwitchAccountPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return "", errors.New("no account work for github.com")
+	})
+	if err := c.SwitchAccount(context.Background(), "github.com", "work"); err == nil {
+		t.Error("expected the gh failure to propagate")
+	}
+}
+
+func TestListOpenPRsEmpty(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "[]", nil })
+	prs, err := c.ListOpenPRs(context.Background(), RepoInfo{Owner: "o", Name: "n", Host: "github.com"})
+	if err != nil {
+		t.Fatalf("ListOpenPRs: %v", err)
+	}
+	if len(prs) != 0 {
+		t.Errorf("prs = %+v, want none", prs)
+	}
+}
+
+func TestListOpenPRsPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("API rate limit exceeded") })
+	prs, err := c.ListOpenPRs(context.Background(), RepoInfo{})
+	if err == nil {
+		t.Fatal("expected the gh failure to propagate")
+	}
+	if prs != nil {
+		t.Errorf("prs = %+v, want nil on error", prs)
+	}
+	if !strings.Contains(err.Error(), "rate limit") {
+		t.Errorf("error %q should carry gh's reason", err)
+	}
+}
+
+func TestPRMerged(t *testing.T) {
+	cases := map[string]bool{"MERGED": true, "OPEN": false, "CLOSED": false}
+	for state, want := range cases {
+		t.Run(state, func(t *testing.T) {
+			var gotArgs []string
+			c := fakeClient(func(args ...string) (string, error) {
+				gotArgs = args
+				return fmt.Sprintf(`{"state":%q}`, state), nil
+			})
+			repo := RepoInfo{Owner: "o", Name: "n", Host: "github.com"}
+			merged, err := c.PRMerged(context.Background(), repo, 42)
+			if err != nil {
+				t.Fatalf("PRMerged: %v", err)
+			}
+			if merged != want {
+				t.Errorf("PRMerged(%s) = %v, want %v", state, merged, want)
+			}
+			wantArgs := []string{"pr", "view", "42", "--repo", "github.com/o/n", "--json", "state"}
+			if !reflect.DeepEqual(gotArgs, wantArgs) {
+				t.Errorf("args = %v, want %v", gotArgs, wantArgs)
+			}
+		})
+	}
+}
+
+func TestPRMergedPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("gh pr view: HTTP 404") })
+	merged, err := c.PRMerged(context.Background(), RepoInfo{}, 1)
+	if err == nil {
+		t.Fatal("expected the gh failure to propagate")
+	}
+	if merged {
+		t.Error("merged must be false on error")
+	}
+}
+
+func TestPRMergedBadJSON(t *testing.T) {
+	for name, out := range map[string]string{"garbage": "<html>", "empty": ""} {
+		t.Run(name, func(t *testing.T) {
+			c := fakeClient(func(...string) (string, error) { return out, nil })
+			merged, err := c.PRMerged(context.Background(), RepoInfo{}, 1)
+			if err == nil {
+				t.Fatal("expected a parse error")
+			}
+			if merged {
+				t.Error("merged must be false on a parse error")
+			}
+			if !strings.Contains(err.Error(), "parsing gh pr view") {
+				t.Errorf("error %q should say what failed to parse", err)
+			}
+		})
 	}
 }
