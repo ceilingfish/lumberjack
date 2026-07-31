@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
@@ -409,5 +411,72 @@ func TestGetSetupConsentNoConfigNotPending(t *testing.T) {
 	}
 	if consent.Pending {
 		t.Error("no .lumberjack.yml should never require consent")
+	}
+}
+
+func TestApplySetupError(t *testing.T) {
+	// No recorded failure leaves the status alone.
+	clean := worktree.Status{}
+	applySetupError(&clean, nil)
+	empty := ""
+	applySetupError(&clean, &empty)
+	if clean.NeedsReconciliation || clean.Note != "" {
+		t.Errorf("status = %+v, want it untouched", clean)
+	}
+
+	msg := "copy-file failed: permission denied"
+	// With no git-derived note, the setup failure becomes the note.
+	only := worktree.Status{}
+	applySetupError(&only, &msg)
+	if !only.NeedsReconciliation || only.Note != "setup failed: "+msg {
+		t.Errorf("status = %+v, want the setup failure as the note", only)
+	}
+
+	// With one already, the setup failure is appended rather than replacing it.
+	both := worktree.Status{NeedsReconciliation: true, Note: "uncommitted changes"}
+	applySetupError(&both, &msg)
+	if both.Note != "uncommitted changes; setup failed: "+msg {
+		t.Errorf("note = %q, want both reasons", both.Note)
+	}
+}
+
+func TestSetupStepsReportAnUnreadableConfig(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.showFileErr = errors.New("fatal: not a valid object name")
+
+	res, err := h.svc.AddWorktree(context.Background(), repo, "feature/x")
+	if err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if !strings.Contains(res.SetupError, setup.ConfigFileName) {
+		t.Errorf("SetupError = %q, want it to name the config it could not load", res.SetupError)
+	}
+	// The worktree is kept regardless: setup failures are surfaced, not fatal.
+	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 1 {
+		t.Errorf("worktrees = %d, want the worktree kept", len(wts))
+	}
+}
+
+func TestGetSetupConsentReportsAnUnresolvableDefaultBranch(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.defaultBranchErr = errors.New("fatal: no upstream configured")
+
+	_, err := h.svc.GetSetupConsent(context.Background(), repo)
+	if err == nil || !strings.Contains(err.Error(), "determining default branch") {
+		t.Errorf("err = %v, want the default-branch failure", err)
+	}
+}
+
+func TestGetSetupConsentReportsAnUnparsableConfig(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.configFiles = map[string][]byte{
+		"origin/main:" + setup.ConfigFileName: []byte("steps: [: not yaml"),
+	}
+
+	if _, err := h.svc.GetSetupConsent(context.Background(), repo); err == nil {
+		t.Error("expected an error parsing a malformed config")
 	}
 }

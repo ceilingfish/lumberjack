@@ -2,14 +2,18 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/github"
+	"github.com/ceilingfish/lumberjack/internal/worktree"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -628,5 +632,485 @@ func TestServerTidyAbortAcrossReposMovesNothingAnywhere(t *testing.T) {
 	}
 	if len(h.git.moves) != 0 {
 		t.Errorf("git moves=%v, want none after an abort", h.git.moves)
+	}
+}
+
+// failingWatchStream lets `allow` sends through — signalling each on sent — and
+// fails every send after that, so a test can fail the snapshot or a later delta.
+type failingWatchStream struct {
+	grpc.ServerStream
+	ctx   context.Context
+	allow int
+	n     int
+	sent  chan struct{}
+	err   error
+}
+
+func (f *failingWatchStream) Send(*lumberjackv1.WatchResponse) error {
+	f.n++
+	if f.n > f.allow {
+		return f.err
+	}
+	f.sent <- struct{}{}
+	return nil
+}
+func (f *failingWatchStream) Context() context.Context { return f.ctx }
+
+// blockingWatchStream holds its first Send until release is closed — signalling
+// on entered that it is stalled — so a test can pile events up behind the
+// subscriber's buffer while the stream cannot drain. Later sends pass straight
+// through.
+type blockingWatchStream struct {
+	grpc.ServerStream
+	ctx     context.Context
+	once    sync.Once
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingWatchStream) Send(*lumberjackv1.WatchResponse) error {
+	b.once.Do(func() {
+		b.entered <- struct{}{}
+		<-b.release
+	})
+	return nil
+}
+func (b *blockingWatchStream) Context() context.Context { return b.ctx }
+
+func TestServerInitRepositoryReportsAdoptedWorktrees(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	dir := filepath.Join(h.parent, "repo")
+	h.git.worktrees = []worktree.Ref{
+		{Dir: dir, Branch: "main"},
+		{Dir: filepath.Join(h.parent, "repo-feature"), Branch: "feature/x"},
+	}
+
+	resp, err := srv.InitRepository(context.Background(),
+		&lumberjackv1.InitRepositoryRequest{LocalPath: dir})
+	if err != nil {
+		t.Fatalf("InitRepository: %v", err)
+	}
+	if len(resp.GetAdopted()) != 1 {
+		t.Fatalf("adopted = %v, want one entry", resp.GetAdopted())
+	}
+	got := resp.GetAdopted()[0]
+	if got.GetBranch() != "feature/x" ||
+		got.GetAction() != lumberjackv1.WorktreeAction_WORKTREE_ACTION_ADOPTED {
+		t.Errorf("adopted = %+v", got)
+	}
+}
+
+func TestServerListRepositoriesDatabaseFailureIsInternal(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	if err := h.db.Close(); err != nil {
+		t.Fatalf("Close db: %v", err)
+	}
+	_, err := srv.ListRepositories(context.Background(), &lumberjackv1.ListRepositoriesRequest{})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("expected Internal, got %v", err)
+	}
+}
+
+// TestServerListRepositoriesSurvivesUnreadableSetupConfig covers the decoration
+// being best-effort: a repository whose trusted config cannot be read must
+// still be listed.
+func TestServerListRepositoriesSurvivesUnreadableSetupConfig(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.showFileErr = errors.New("fatal: not a valid object name")
+
+	resp, err := srv.ListRepositories(context.Background(), &lumberjackv1.ListRepositoriesRequest{})
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(resp.GetRepositories()) != 1 {
+		t.Fatalf("repositories = %v, want one", resp.GetRepositories())
+	}
+	if resp.GetRepositories()[0].GetSetupConsentPending() {
+		t.Error("consent must not be reported as pending when it could not be read")
+	}
+}
+
+func TestServerGetSetupConsentFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.GetSetupConsent(context.Background(),
+		&lumberjackv1.GetSetupConsentRequest{Repository: "nope"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
+	}
+
+	h.git.showFileErr = errors.New("fatal: not a valid object name")
+	_, err = srv.GetSetupConsent(context.Background(),
+		&lumberjackv1.GetSetupConsentRequest{Repository: "n"})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("unreadable config: expected Internal, got %v", err)
+	}
+}
+
+func TestServerSetSetupConsentFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.SetSetupConsent(context.Background(), &lumberjackv1.SetSetupConsentRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty repository: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.SetSetupConsent(context.Background(),
+		&lumberjackv1.SetSetupConsentRequest{Repository: "nope"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
+	}
+
+	h.git.showFileErr = errors.New("fatal: not a valid object name")
+	_, err = srv.SetSetupConsent(context.Background(),
+		&lumberjackv1.SetSetupConsentRequest{Repository: "n"})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("unreadable config: expected Internal, got %v", err)
+	}
+}
+
+func TestServerSetLogin(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.gh.logins = []string{"octocat"}
+	h.gh.active = "someone-else"
+
+	resp, err := srv.SetLogin(context.Background(),
+		&lumberjackv1.SetLoginRequest{Repository: "n", Login: "octocat"})
+	if err != nil {
+		t.Fatalf("SetLogin: %v", err)
+	}
+	if resp.GetRepository().GetLogin() != "octocat" {
+		t.Errorf("login = %q, want octocat", resp.GetRepository().GetLogin())
+	}
+}
+
+func TestServerSetLoginFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	cases := map[string]struct {
+		req  *lumberjackv1.SetLoginRequest
+		want codes.Code
+	}{
+		"no repository": {&lumberjackv1.SetLoginRequest{Login: "octocat"}, codes.InvalidArgument},
+		"no login":      {&lumberjackv1.SetLoginRequest{Repository: "n"}, codes.InvalidArgument},
+		"unknown repository": {
+			&lumberjackv1.SetLoginRequest{Repository: "nope", Login: "octocat"}, codes.NotFound,
+		},
+		"login gh does not know": {
+			&lumberjackv1.SetLoginRequest{Repository: "n", Login: "octocat"}, codes.Internal,
+		},
+	}
+	for name, c := range cases {
+		if _, err := srv.SetLogin(context.Background(), c.req); status.Code(err) != c.want {
+			t.Errorf("%s: expected %v, got %v", name, c.want, err)
+		}
+	}
+}
+
+func TestServerListLogins(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	repo.Login = "octocat"
+	if err := h.db.UpdateLogin(context.Background(), repo.ID, "octocat"); err != nil {
+		t.Fatalf("UpdateLogin: %v", err)
+	}
+	h.gh.logins = []string{"octocat", "hubot"}
+
+	resp, err := srv.ListLogins(context.Background(), &lumberjackv1.ListLoginsRequest{Repository: "n"})
+	if err != nil {
+		t.Fatalf("ListLogins: %v", err)
+	}
+	if len(resp.GetLogins()) != 2 || resp.GetCurrent() != "octocat" {
+		t.Errorf("logins = %v, current = %q", resp.GetLogins(), resp.GetCurrent())
+	}
+}
+
+func TestServerListLoginsFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.ListLogins(context.Background(), &lumberjackv1.ListLoginsRequest{})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty repository: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.ListLogins(context.Background(), &lumberjackv1.ListLoginsRequest{Repository: "nope"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
+	}
+
+	h.gh.loginsErr = errors.New("gh: not logged in")
+	_, err = srv.ListLogins(context.Background(), &lumberjackv1.ListLoginsRequest{Repository: "n"})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("gh failure: expected Internal, got %v", err)
+	}
+}
+
+func TestServerAddWorktree(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	resp, err := srv.AddWorktree(context.Background(),
+		&lumberjackv1.AddWorktreeRequest{Repository: "n", Branch: "feature/x"})
+	if err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if resp.GetBranch() != "feature/x" || resp.GetDirectoryPath() == "" {
+		t.Errorf("response = %+v", resp)
+	}
+	if resp.GetSetupError() != "" {
+		t.Errorf("setup error = %q, want empty", resp.GetSetupError())
+	}
+}
+
+func TestServerAddWorktreeFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.AddWorktree(context.Background(),
+		&lumberjackv1.AddWorktreeRequest{Repository: "n"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty branch: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.AddWorktree(context.Background(),
+		&lumberjackv1.AddWorktreeRequest{Repository: "nope", Branch: "feature/x"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
+	}
+
+	h.git.fetchErr = errors.New("network is unreachable")
+	_, err = srv.AddWorktree(context.Background(),
+		&lumberjackv1.AddWorktreeRequest{Repository: "n", Branch: "feature/x"})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("fetch failure: expected Internal, got %v", err)
+	}
+}
+
+func TestServerListWorktreesFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.ListWorktrees(context.Background(),
+		&lumberjackv1.ListWorktreesRequest{Repository: "nope"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
+	}
+
+	h.git.fetchErr = errors.New("network is unreachable")
+	_, err = srv.ListWorktrees(context.Background(),
+		&lumberjackv1.ListWorktreesRequest{Repository: "n"})
+	if status.Code(err) != codes.Internal {
+		t.Errorf("fetch failure: expected Internal, got %v", err)
+	}
+}
+
+func TestServerDeleteWorktreeUnknownRepository(t *testing.T) {
+	srv := newServer(newHarness(t))
+	_, err := srv.DeleteWorktree(context.Background(),
+		&lumberjackv1.DeleteWorktreeRequest{Repository: "nope", Worktree: "feature/x"})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
+func TestServerSyncSendFailureIsReturned(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	sendErr := errors.New("client hung up")
+	stream := &fakeSyncStream{ctx: context.Background(), err: sendErr}
+
+	if err := srv.Sync(&lumberjackv1.SyncRequest{Repository: "n"}, stream); !errors.Is(err, sendErr) {
+		t.Errorf("Sync = %v, want the send error", err)
+	}
+}
+
+func TestServerSyncScopeFailureIsInternal(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	if err := h.db.Close(); err != nil {
+		t.Fatalf("Close db: %v", err)
+	}
+	stream := &fakeSyncStream{ctx: context.Background()}
+	err := srv.Sync(&lumberjackv1.SyncRequest{}, stream)
+	if status.Code(err) != codes.Internal {
+		t.Errorf("expected Internal, got %v", err)
+	}
+}
+
+func TestServerWatchDatabaseFailureIsInternal(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	if err := h.db.Close(); err != nil {
+		t.Fatalf("Close db: %v", err)
+	}
+	stream := &fakeWatchStream{ctx: context.Background(), sent: make(chan *lumberjackv1.WatchResponse, 1)}
+	if err := srv.Watch(&lumberjackv1.WatchRequest{}, stream); status.Code(err) != codes.Internal {
+		t.Errorf("expected Internal, got %v", err)
+	}
+}
+
+func TestServerWatchSnapshotFailureIsInternal(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.fetchErr = errors.New("network is unreachable")
+
+	stream := &fakeWatchStream{ctx: context.Background(), sent: make(chan *lumberjackv1.WatchResponse, 1)}
+	if err := srv.Watch(&lumberjackv1.WatchRequest{}, stream); status.Code(err) != codes.Internal {
+		t.Errorf("expected Internal, got %v", err)
+	}
+}
+
+func TestServerWatchStopsOnSendFailure(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+	sendErr := errors.New("client hung up")
+
+	// The snapshot itself failing ends the stream.
+	stream := &failingWatchStream{ctx: context.Background(), sent: make(chan struct{}, 1), err: sendErr}
+	if err := srv.Watch(&lumberjackv1.WatchRequest{}, stream); !errors.Is(err, sendErr) {
+		t.Errorf("snapshot failure: Watch = %v, want the send error", err)
+	}
+
+	// A later delta failing ends it too, after the snapshot went out.
+	stream = &failingWatchStream{
+		ctx: context.Background(), allow: 1, sent: make(chan struct{}, 1), err: sendErr,
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.Watch(&lumberjackv1.WatchRequest{}, stream) }()
+	<-stream.sent
+	h.svc.events.Publish(Event{Type: EventSyncStarted, Repository: repo})
+	select {
+	case err := <-done:
+		if !errors.Is(err, sendErr) {
+			t.Errorf("delta failure: Watch = %v, want the send error", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not return after a delta send failed")
+	}
+}
+
+// TestServerWatchDisconnectsASubscriberThatFellBehind covers the bounded
+// subscriber buffer: a client too slow to keep up is disconnected with
+// ResourceExhausted rather than stalling the daemon.
+func TestServerWatchDisconnectsASubscriberThatFellBehind(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	repo := h.repo(t)
+
+	stream := &blockingWatchStream{
+		ctx:     context.Background(),
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() { done <- srv.Watch(&lumberjackv1.WatchRequest{}, stream) }()
+
+	// Wait until the stream is stalled inside the snapshot send, then overrun the
+	// subscriber's buffer while it cannot drain.
+	<-stream.entered
+	for i := 0; i <= subscriberBuffer; i++ {
+		h.svc.events.Publish(Event{Type: EventSyncStarted, Repository: repo})
+	}
+	close(stream.release)
+
+	select {
+	case err := <-done:
+		if status.Code(err) != codes.ResourceExhausted {
+			t.Errorf("Watch = %v, want ResourceExhausted", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Watch did not return after its subscriber was dropped")
+	}
+}
+
+func TestToStatusMapsDomainErrors(t *testing.T) {
+	cases := []struct {
+		err  error
+		want codes.Code
+	}{
+		{database.ErrRepositoryNotFound, codes.NotFound},
+		{database.ErrWorktreeNotFound, codes.NotFound},
+		{fmt.Errorf("wrapped: %w", database.ErrRepositoryNotFound), codes.NotFound},
+		{database.ErrRepositoryExists, codes.AlreadyExists},
+		{ErrTidyAborted, codes.Aborted},
+		{errors.New("something else"), codes.Internal},
+	}
+	for _, c := range cases {
+		if got := status.Code(toStatus(c.err)); got != c.want {
+			t.Errorf("toStatus(%v) = %v, want %v", c.err, got, c.want)
+		}
+	}
+}
+
+func TestToLockStrategy(t *testing.T) {
+	cases := map[lumberjackv1.LockStrategy]LockStrategy{
+		lumberjackv1.LockStrategy_LOCK_STRATEGY_UNLOCK:      LockUnlock,
+		lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE:      LockDelete,
+		lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT:       LockAbort,
+		lumberjackv1.LockStrategy_LOCK_STRATEGY_SKIP:        LockSkip,
+		lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED: LockSkip,
+	}
+	for in, want := range cases {
+		if got := toLockStrategy(in); got != want {
+			t.Errorf("toLockStrategy(%v) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+func TestToLockDecisions(t *testing.T) {
+	if got := toLockDecisions(nil); got != nil {
+		t.Errorf("toLockDecisions(nil) = %v, want nil", got)
+	}
+	// A repeated path means the client resent its decision: the later one wins.
+	got := toLockDecisions([]*lumberjackv1.LockDecision{
+		{WorktreePath: "/a", Strategy: lumberjackv1.LockStrategy_LOCK_STRATEGY_SKIP},
+		{WorktreePath: "/a", Strategy: lumberjackv1.LockStrategy_LOCK_STRATEGY_DELETE},
+	})
+	if len(got) != 1 || got["/a"] != LockDelete {
+		t.Errorf("toLockDecisions = %v, want {/a: delete}", got)
+	}
+}
+
+func TestCanAbortOnLock(t *testing.T) {
+	cases := map[string]struct {
+		opts TidyOptions
+		want bool
+	}{
+		"no abort anywhere": {TidyOptions{LockStrategy: LockSkip}, false},
+		"abort as strategy": {TidyOptions{LockStrategy: LockAbort}, true},
+		"abort as a per-worktree decision": {
+			TidyOptions{
+				LockStrategy:  LockSkip,
+				LockDecisions: map[string]LockStrategy{"/a": LockSkip, "/b": LockAbort},
+			},
+			true,
+		},
+		"decisions with no abort": {
+			TidyOptions{LockStrategy: LockSkip, LockDecisions: map[string]LockStrategy{"/a": LockUnlock}},
+			false,
+		},
+	}
+	for name, c := range cases {
+		if got := c.opts.CanAbortOnLock(); got != c.want {
+			t.Errorf("%s: CanAbortOnLock = %v, want %v", name, got, c.want)
+		}
 	}
 }

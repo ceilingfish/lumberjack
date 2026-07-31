@@ -21,20 +21,32 @@ import (
 // (which stats the directory) works, while dirt and local-commit state are
 // answered from in-memory maps keyed by directory.
 type fakeGit struct {
-	dirty     map[string]bool
+	dirty map[string]bool
+	// dirtyErr fails IsDirty for one directory, so worktree.Reconcile fails for
+	// exactly that worktree.
+	dirtyErr  map[string]error
 	localOnly map[string]int64
 	addErr    map[string]error // keyed by branch
+	// removeErr fails RemoveWorktree for one directory, keyed by directory.
+	removeErr map[string]error
 	// newBranches records, per branch, the base AddWorktreeNewBranch created it
 	// from; newBranchErr forces that fallback to fail, keyed by branch.
 	newBranches  map[string]string
 	newBranchErr map[string]error
 	fetchErr     error
-	pullErr      error    // forces Pull to fail
-	pulled       []string // repo paths Pull was called on, for assertions
-	remotes      string
-	remoteErr    error
-	remoteURL    string
-	urlErr       error
+	// fetchErrByPath fails Fetch for one repository only, so a test can make a
+	// single repository's sync fail while its siblings succeed.
+	fetchErrByPath map[string]error
+	// fetchBlock, when non-nil, holds every Fetch until it is closed, so a test
+	// can keep a sync in flight while it exercises shutdown. It must be set
+	// before the sync starts.
+	fetchBlock chan struct{}
+	pullErr    error    // forces Pull to fail
+	pulled     []string // repo paths Pull was called on, for assertions
+	remotes    string
+	remoteErr  error
+	remoteURL  string
+	urlErr     error
 	// worktrees is what ListWorktrees reports — the worktrees git already has
 	// registered (used to exercise adoption of hand-checked-out directories).
 	// listErr forces the listing to fail.
@@ -65,13 +77,16 @@ type fakeGit struct {
 
 func newFakeGit() *fakeGit {
 	return &fakeGit{
-		dirty:        map[string]bool{},
-		localOnly:    map[string]int64{},
-		addErr:       map[string]error{},
-		newBranches:  map[string]string{},
-		newBranchErr: map[string]error{},
-		remotes:      "origin",
-		locks:        map[string]string{},
+		dirty:          map[string]bool{},
+		dirtyErr:       map[string]error{},
+		localOnly:      map[string]int64{},
+		addErr:         map[string]error{},
+		removeErr:      map[string]error{},
+		fetchErrByPath: map[string]error{},
+		newBranches:    map[string]string{},
+		newBranchErr:   map[string]error{},
+		remotes:        "origin",
+		locks:          map[string]string{},
 	}
 }
 
@@ -85,7 +100,16 @@ func (f *fakeGit) DefaultRemote(context.Context, string) (string, error) {
 func (f *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
 	return f.remoteURL, f.urlErr
 }
-func (f *fakeGit) Fetch(context.Context, string, string) error { return f.fetchErr }
+
+func (f *fakeGit) Fetch(_ context.Context, repoPath, _ string) error {
+	if f.fetchBlock != nil {
+		<-f.fetchBlock
+	}
+	if err := f.fetchErrByPath[repoPath]; err != nil {
+		return err
+	}
+	return f.fetchErr
+}
 
 func (f *fakeGit) Pull(_ context.Context, repoPath string) error {
 	f.pulled = append(f.pulled, repoPath)
@@ -120,6 +144,9 @@ func (f *fakeGit) AddWorktreeNewBranch(_ context.Context, _, dir, base, branch s
 }
 
 func (f *fakeGit) RemoveWorktree(_ context.Context, _, dir string, _ bool) error {
+	if err := f.removeErr[dir]; err != nil {
+		return err
+	}
 	return os.RemoveAll(dir)
 }
 
@@ -182,6 +209,9 @@ func (f *fakeGit) UnlockWorktree(_ context.Context, _, dir string) error {
 }
 
 func (f *fakeGit) IsDirty(_ context.Context, dir string) (bool, error) {
+	if err := f.dirtyErr[dir]; err != nil {
+		return false, err
+	}
 	return f.dirty[dir], nil
 }
 
@@ -224,7 +254,10 @@ type fakeGH struct {
 	active    string
 	activeErr error
 	switchErr error
-	switches  [][2]string
+	// switchErrByLogin fails the switch to one account only, so a test can let
+	// the switch to a repository's login succeed and the restore afterwards fail.
+	switchErrByLogin map[string]error
+	switches         [][2]string
 	// logins is what ListLogins reports for any host; loginsErr forces it to
 	// fail. A nil logins slice means gh has no accounts.
 	logins    []string
@@ -260,6 +293,9 @@ func (f *fakeGH) ActiveLogin(context.Context, string) (string, error) {
 }
 
 func (f *fakeGH) SwitchAccount(_ context.Context, host, login string) error {
+	if err := f.switchErrByLogin[login]; err != nil {
+		return err
+	}
 	if f.switchErr != nil {
 		return f.switchErr
 	}
@@ -310,9 +346,16 @@ func newHarness(t *testing.T) *harness {
 // repo inserts and returns a tracked repository rooted under the temp parent.
 func (h *harness) repo(t *testing.T) *schema.Repository {
 	t.Helper()
+	return h.namedRepo(t, "n")
+}
+
+// namedRepo inserts and returns a tracked repository whose checkout folder (and
+// therefore worktree prefix) is name, so a test can track more than one.
+func (h *harness) namedRepo(t *testing.T, name string) *schema.Repository {
+	t.Helper()
 	r := &schema.Repository{
-		LocalPath: filepath.Join(h.parent, "n"), WorktreeParentDir: h.parent,
-		DirPrefix: "n", GithubOwner: "o", GithubName: "n",
+		LocalPath: filepath.Join(h.parent, name), WorktreeParentDir: h.parent,
+		DirPrefix: name, GithubOwner: "o", GithubName: name,
 		DefaultRemote: "origin", Host: "github.com",
 	}
 	if err := h.db.CreateRepository(context.Background(), r); err != nil {
@@ -513,6 +556,9 @@ func TestGithubRepoSlug(t *testing.T) {
 		{"https://gitlab.com/someone/thing.git", "", false},
 		{"git@gitlab.com:someone/thing.git", "", false},
 		{"not a url", "", false},
+		// A GitHub host with no owner/name pair is not a repository remote.
+		{"https://github.com/ceilingfish", "", false},
+		{"https://github.com/", "", false},
 	}
 	for _, tc := range cases {
 		slug, ok := githubRepoSlug(tc.raw)
@@ -1417,6 +1463,360 @@ func TestSubscribeMultipleConcurrentSubscribers(t *testing.T) {
 	for _, ch := range []<-chan Event{ch1, ch2} {
 		if ev := recv(t, ch); ev.Type != EventSyncStarted {
 			t.Errorf("expected EventSyncStarted, got %v", ev.Type)
+		}
+	}
+}
+
+func TestInitRepositoryReportsAnUnlistableWorktreeSet(t *testing.T) {
+	h := newHarness(t)
+	h.git.listErr = errors.New("fatal: not a git repository")
+
+	repo, adopted, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
+	if err == nil {
+		t.Fatal("expected an error when git cannot list worktrees")
+	}
+	// The repository row is still returned: it was created before adoption ran.
+	if repo == nil || len(adopted) != 0 {
+		t.Errorf("repo=%v adopted=%v, want the repo and no adoptions", repo, adopted)
+	}
+}
+
+func TestInitRepositoryCredentialHintFallsBackWithoutARemoteURL(t *testing.T) {
+	h := newHarness(t)
+	h.gh.infoErr = github.ErrRepoNotFound
+	h.git.urlErr = errors.New("fatal: no such remote")
+
+	_, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "is not a GitHub repository") {
+		t.Errorf("err = %v, want the generic not-a-GitHub-repository message", err)
+	}
+}
+
+func TestInitRepositoryCredentialHintWithoutAKnownAccount(t *testing.T) {
+	h := newHarness(t)
+	h.gh.infoErr = github.ErrRepoNotFound
+	h.git.remoteURL = "git@github.com:someone/private.git"
+	h.gh.userErr = errors.New("gh: not logged in")
+
+	_, _, err := h.svc.InitRepository(context.Background(), filepath.Join(h.parent, "x"))
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(err.Error(), "the current gh credentials may not have access") {
+		t.Errorf("err = %v, want the anonymous credentials hint", err)
+	}
+}
+
+func TestSetLoginReportsWhenGHAccountsCannotBeListed(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.loginsErr = errors.New("gh: not logged in")
+
+	if _, err := h.svc.SetLogin(context.Background(), repo, "octocat"); err == nil {
+		t.Error("expected an error when gh's accounts cannot be listed")
+	}
+}
+
+func TestSetLoginWithNoAuthenticatedAccountsListsNone(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.logins = nil
+
+	_, err := h.svc.SetLogin(context.Background(), repo, "octocat")
+	if err == nil {
+		t.Fatal("expected an error when gh has no accounts")
+	}
+	if !strings.Contains(err.Error(), "available: none") {
+		t.Errorf("err = %v, want it to report no available accounts", err)
+	}
+}
+
+func TestSyncReportsAnUnreachableActiveAccount(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	repo.Login = "octocat"
+	h.gh.activeErr = errors.New("gh: not logged in")
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err == nil {
+		t.Error("expected an error when gh's active account cannot be read")
+	}
+}
+
+// TestSyncSurfacesAFailedAccountRestore covers the account switch being put
+// back: the sync itself succeeds, so the failure to restore the previously
+// active account is what the caller must hear about.
+func TestSyncSurfacesAFailedAccountRestore(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	repo.Login = "octocat"
+	h.gh.active = "someone-else"
+	h.gh.switchErrByLogin = map[string]error{"someone-else": errors.New("gh: no such account")}
+
+	_, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil {
+		t.Fatal("expected the restore failure to surface")
+	}
+	if !strings.Contains(err.Error(), "restoring GitHub account") {
+		t.Errorf("err = %v, want a restore failure", err)
+	}
+}
+
+func TestSyncReportsWhenOpenPRsCannotBeListed(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prsErr = errors.New("gh: API rate limit exceeded")
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err == nil {
+		t.Error("expected an error when open PRs cannot be listed")
+	}
+}
+
+func TestSyncCollectsAWorktreeListingFailureAndStillCreates(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+	h.git.listErr = errors.New("fatal: not a git repository")
+
+	_, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil || !strings.Contains(err.Error(), "listing existing worktrees") {
+		t.Errorf("err = %v, want the listing failure collected", err)
+	}
+	// The listing is only used for adoption, so creation still happened.
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Errorf("worktrees = %d, want 1 created despite the listing failure", len(wts))
+	}
+}
+
+func TestSyncCollectsAPRStateLookupFailure(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+	h.seedSync(t, repo)
+
+	// The PR closes, and gh cannot say whether it merged.
+	h.gh.prs = nil
+	h.gh.mergedErr = errors.New("gh: API rate limit exceeded")
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil || !strings.Contains(err.Error(), "resolving PR state") {
+		t.Errorf("err = %v, want the PR state failure collected", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed = %d, want 0 — an unknown PR state must not delete work", removed)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Errorf("worktrees = %d, want the worktree kept", len(wts))
+	}
+}
+
+func TestSyncCollectsAReconcileFailureAndKeepsTheWorktree(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+	h.seedSync(t, repo)
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("seed: worktrees = %d, want 1", len(wts))
+	}
+	h.gh.prs = nil
+	h.git.dirtyErr[wts[0].DirectoryPath] = errors.New("fatal: unable to read index")
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil || !strings.Contains(err.Error(), "reconciling") {
+		t.Errorf("err = %v, want the reconcile failure collected", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed = %d, want 0", removed)
+	}
+}
+
+func TestSyncCollectsAWorktreeRemovalFailure(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+	h.seedSync(t, repo)
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("seed: worktrees = %d, want 1", len(wts))
+	}
+	h.gh.prs = nil
+	h.git.removeErr[wts[0].DirectoryPath] = errors.New("fatal: worktree is locked")
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil || !strings.Contains(err.Error(), "removing") {
+		t.Errorf("err = %v, want the removal failure collected", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed = %d, want 0", removed)
+	}
+	// Still tracked: dropping the row would hide a worktree that is still there.
+	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 1 {
+		t.Errorf("worktrees = %d, want the row kept", len(wts))
+	}
+}
+
+func TestSyncPullSkippedWhenTheCheckoutCannotBeInspected(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.dirtyErr[repo.LocalPath] = errors.New("fatal: unable to read index")
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	if len(h.git.pulled) != 0 {
+		t.Errorf("pulled = %v, want no pull attempted", h.git.pulled)
+	}
+}
+
+// TestSyncPullFailureDoesNotFailTheSync covers the pull being a convenience:
+// a checkout that cannot fast-forward must not fail reconciliation.
+func TestSyncPullFailureDoesNotFailTheSync(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.pullErr = errors.New("fatal: not possible to fast-forward")
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+
+	created, _, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("SyncRepository: %v", err)
+	}
+	if created != 1 {
+		t.Errorf("created = %d, want 1", created)
+	}
+}
+
+func TestWorktreeViewsReportsAFetchFailure(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.fetchErr = errors.New("network is unreachable")
+
+	if _, err := h.svc.WorktreeViews(context.Background(), repo); err == nil {
+		t.Error("expected an error when the fetch fails")
+	}
+}
+
+func TestWorktreeViewsReportsAPRStateFailure(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+	h.seedSync(t, repo)
+	h.gh.prs = nil
+	h.gh.mergedErr = errors.New("gh: API rate limit exceeded")
+
+	_, err := h.svc.WorktreeViews(context.Background(), repo)
+	if err == nil || !strings.Contains(err.Error(), "resolving PR state") {
+		t.Errorf("err = %v, want the PR state failure", err)
+	}
+}
+
+func TestWorktreeViewsReportsAReconcileFailure(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
+	h.seedSync(t, repo)
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("seed: worktrees = %d, want 1", len(wts))
+	}
+	h.git.dirtyErr[wts[0].DirectoryPath] = errors.New("fatal: unable to read index")
+
+	_, err := h.svc.WorktreeViews(context.Background(), repo)
+	if err == nil || !strings.Contains(err.Error(), "reconciling") {
+		t.Errorf("err = %v, want the reconcile failure", err)
+	}
+}
+
+func TestDeleteWorktreeFetchFailureAborts(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+	h.git.fetchErr = errors.New("network is unreachable")
+
+	if _, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false); err == nil {
+		t.Error("expected an error when the fetch fails")
+	}
+	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 1 {
+		t.Errorf("worktrees = %d, want the worktree kept", len(wts))
+	}
+}
+
+func TestDeleteWorktreePRStateFailureAborts(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+	h.gh.mergedErr = errors.New("gh: API rate limit exceeded")
+
+	_, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false)
+	if err == nil || !strings.Contains(err.Error(), "checking PR #1 state") {
+		t.Errorf("err = %v, want the PR state failure", err)
+	}
+}
+
+func TestDeleteWorktreeReconcileFailureAborts(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("seed: worktrees = %d, want 1", len(wts))
+	}
+	h.git.dirtyErr[wts[0].DirectoryPath] = errors.New("fatal: unable to read index")
+
+	_, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false)
+	if err == nil || !strings.Contains(err.Error(), "reconciling") {
+		t.Errorf("err = %v, want the reconcile failure", err)
+	}
+}
+
+func TestDeleteWorktreeRemovalFailureKeepsTheRow(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if len(wts) != 1 {
+		t.Fatalf("seed: worktrees = %d, want 1", len(wts))
+	}
+	h.git.removeErr[wts[0].DirectoryPath] = errors.New("fatal: worktree is locked")
+
+	_, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false)
+	if err == nil || !strings.Contains(err.Error(), "removing") {
+		t.Errorf("err = %v, want the removal failure", err)
+	}
+	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 1 {
+		t.Errorf("worktrees = %d, want the row kept when git refused", len(wts))
+	}
+}
+
+func TestConfirmMessage(t *testing.T) {
+	cases := []struct {
+		st   worktree.Status
+		want string
+	}{
+		{
+			worktree.Status{Dirty: true, LocalOnlyCommits: 2},
+			"worktree has uncommitted changes and 2 local-only commit(s) that will be lost",
+		},
+		{
+			worktree.Status{Dirty: true},
+			"worktree has uncommitted changes that will be lost",
+		},
+		{
+			worktree.Status{LocalOnlyCommits: 3},
+			"worktree has 3 local-only commit(s) that will be lost",
+		},
+	}
+	for _, c := range cases {
+		if got := confirmMessage(c.st); got != c.want {
+			t.Errorf("confirmMessage(%+v) = %q, want %q", c.st, got, c.want)
 		}
 	}
 }

@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -63,5 +65,158 @@ func TestReadPID(t *testing.T) {
 	}
 	if _, _, err := ReadPID(); err == nil {
 		t.Error("malformed pid file: expected error, got nil")
+	}
+}
+
+func TestPIDFilePathFailsWithoutAHomeDirectory(t *testing.T) {
+	t.Setenv("HOME", "")
+	if _, err := PIDFilePath(); err == nil {
+		t.Error("expected an error with no home directory, got nil")
+	}
+	if _, _, err := ReadPID(); err == nil {
+		t.Error("ReadPID: expected an error with no home directory, got nil")
+	}
+	lc := &recordingLifecycle{}
+	if err := writePIDFile(lc); err == nil {
+		t.Error("writePIDFile: expected an error with no home directory, got nil")
+	}
+}
+
+func TestWritePIDFileRecordsThenRemovesThePID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	lc := &recordingLifecycle{}
+	if err := writePIDFile(lc); err != nil {
+		t.Fatalf("writePIDFile: %v", err)
+	}
+	if len(lc.hooks) != 1 {
+		t.Fatalf("hooks appended = %d, want 1", len(lc.hooks))
+	}
+	hook := lc.hooks[0]
+
+	if err := hook.OnStart(context.Background()); err != nil {
+		t.Fatalf("OnStart: %v", err)
+	}
+	if pid, running, err := ReadPID(); err != nil || !running || pid != os.Getpid() {
+		t.Errorf("after OnStart: (%d, %v, %v), want (%d, true, nil)", pid, running, err, os.Getpid())
+	}
+
+	if err := hook.OnStop(context.Background()); err != nil {
+		t.Fatalf("OnStop: %v", err)
+	}
+	path, err := PIDFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("pid file still present after OnStop: %v", err)
+	}
+	// Stopping again is not an error: the file being gone is the normal case.
+	if err := hook.OnStop(context.Background()); err != nil {
+		t.Errorf("second OnStop: %v", err)
+	}
+}
+
+func TestWritePIDFileSurfacesFilesystemFailures(t *testing.T) {
+	// A regular file where ~/.lumberjack must go: the directory cannot be made.
+	blocked := filepath.Join(t.TempDir(), "home")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", blocked)
+	lc := &recordingLifecycle{}
+	if err := writePIDFile(lc); err != nil {
+		t.Fatalf("writePIDFile: %v", err)
+	}
+	if err := lc.hooks[0].OnStart(context.Background()); err == nil {
+		t.Error("expected OnStart to fail when the pid dir cannot be created")
+	}
+
+	// A non-empty directory where the pid file must go: it can neither be
+	// written on start nor removed on stop.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, err := PIDFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(path, "occupied"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lc = &recordingLifecycle{}
+	if err := writePIDFile(lc); err != nil {
+		t.Fatalf("writePIDFile: %v", err)
+	}
+	if err := lc.hooks[0].OnStart(context.Background()); err == nil {
+		t.Error("expected OnStart to fail when the pid file cannot be written")
+	}
+	if err := lc.hooks[0].OnStop(context.Background()); err == nil {
+		t.Error("expected OnStop to fail when the pid file cannot be removed")
+	}
+	// The same directory makes the file unreadable, which ReadPID must report
+	// rather than mistake for "no daemon running".
+	if _, _, err := ReadPID(); err == nil {
+		t.Error("expected ReadPID to fail on an unreadable pid file")
+	}
+}
+
+// TestReadPIDStaleFileFromKilledProcess covers what `daemon status` has to
+// reason about: a pid file left behind by a daemon that was killed rather than
+// shut down. The pid is recorded but its process is gone.
+func TestReadPIDStaleFileFromKilledProcess(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not available")
+	}
+	cmd := exec.Command("sleep", "60")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting a process to kill: %v", err)
+	}
+	dead := cmd.Process.Pid
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	_ = cmd.Wait()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, err := PIDFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strconv.Itoa(dead)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pid, running, err := ReadPID()
+	if err != nil {
+		t.Fatalf("ReadPID: %v", err)
+	}
+	if pid != dead {
+		t.Errorf("pid = %d, want the recorded %d", pid, dead)
+	}
+	if running {
+		t.Error("a killed process's pid file must report not running")
+	}
+}
+
+func TestReadPIDRejectsNonPositivePIDs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, err := PIDFilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, recorded := range []string{"0", "-1"} {
+		if err := os.WriteFile(path, []byte(recorded+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, running, err := ReadPID(); err != nil || running {
+			t.Errorf("pid %q: got running=%v err=%v, want false/nil", recorded, running, err)
+		}
 	}
 }
