@@ -19,15 +19,15 @@ struct DaemonClientTests {
     @Test("a health probe against an absent daemon fails rather than hanging")
     func healthFailsWithoutADaemon() async throws {
         let client = try clientOnADeadSocket()
-        defer { Task { await client.close() } }
 
         await #expect(throws: (any Error).self) { try await client.health() }
+
+        await client.close()
     }
 
     @Test("every RPC surfaces a connection failure to its caller")
     func rpcsFailWithoutADaemon() async throws {
         let client = try clientOnADeadSocket()
-        defer { Task { await client.close() } }
 
         let repositories = Task { try await client.listRepositories() }
         repositories.cancel()
@@ -40,5 +40,7 @@ struct DaemonClientTests {
         let sync = Task { try await client.sync(repository: "/tmp/repo") }
         sync.cancel()
         await #expect(throws: (any Error).self) { try await sync.value }
+
+        await client.close()
     }
 }
