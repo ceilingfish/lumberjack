@@ -28,6 +28,18 @@ func unavailableServiceManager(t *testing.T, err error) {
 	t.Cleanup(func() { newLifecycle = prev })
 }
 
+func recordingServiceManager(t *testing.T, f *fakeLifecycle) *string {
+	t.Helper()
+	var registered string
+	prev := newLifecycle
+	newLifecycle = func(_, executable string) (lifecycle, error) {
+		registered = executable
+		return f, nil
+	}
+	t.Cleanup(func() { newLifecycle = prev })
+	return &registered
+}
+
 func installedCLI(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
@@ -126,13 +138,7 @@ func TestCmdInstallDaemonOnly(t *testing.T) {
 
 func TestRunInstallRegistersTheDaemonAgainstTheInstalledCLI(t *testing.T) {
 	f := &fakeLifecycle{}
-	var registered string
-	prev := newLifecycle
-	newLifecycle = func(_, executable string) (lifecycle, error) {
-		registered = executable
-		return f, nil
-	}
-	t.Cleanup(func() { newLifecycle = prev })
+	registered := recordingServiceManager(t, f)
 
 	srcDir := t.TempDir()
 	exe := filepath.Join(srcDir, "lumberjack")
@@ -147,8 +153,8 @@ func TestRunInstallRegistersTheDaemonAgainstTheInstalledCLI(t *testing.T) {
 		t.Fatalf("runInstall: %v", err)
 	}
 	want := filepath.Join(binDir, cliBinaryName)
-	if registered != want {
-		t.Errorf("daemon registered against %q, want the installed CLI copy %q", registered, want)
+	if *registered != want {
+		t.Errorf("daemon registered against %q, want the installed CLI copy %q", *registered, want)
 	}
 	if !f.installed {
 		t.Error("the daemon was not registered")
@@ -160,13 +166,7 @@ func TestRunInstallRegistersTheDaemonAgainstTheInstalledCLI(t *testing.T) {
 
 func TestRunInstallDaemonOnlyUsesTheInstalledCLIWhenPresent(t *testing.T) {
 	binDir := installedCLI(t)
-	var registered string
-	prev := newLifecycle
-	newLifecycle = func(_, executable string) (lifecycle, error) {
-		registered = executable
-		return &fakeLifecycle{}, nil
-	}
-	t.Cleanup(func() { newLifecycle = prev })
+	registered := recordingServiceManager(t, &fakeLifecycle{})
 
 	var out bytes.Buffer
 	if err := runInstall(&out, installOptions{
@@ -174,8 +174,8 @@ func TestRunInstallDaemonOnlyUsesTheInstalledCLIWhenPresent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("runInstall --daemon-only: %v", err)
 	}
-	if registered != filepath.Join(binDir, cliBinaryName) {
-		t.Errorf("registered %q, want the installed CLI copy", registered)
+	if *registered != filepath.Join(binDir, cliBinaryName) {
+		t.Errorf("registered %q, want the installed CLI copy", *registered)
 	}
 }
 
@@ -319,8 +319,9 @@ func TestInstallCLIRejectsAnUnusableDestination(t *testing.T) {
 	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installCLI(io.Discard, notADir, notADir, false); err == nil {
-		t.Error("expected installCLI to fail when the destination's parent is a file")
+	if _, err := installCLI(io.Discard, notADir, notADir, false); err == nil ||
+		!strings.Contains(err.Error(), "checking") {
+		t.Errorf("err = %v, want the stat failure when the destination's parent is a file", err)
 	}
 
 	readOnly := filepath.Join(t.TempDir(), "ro")

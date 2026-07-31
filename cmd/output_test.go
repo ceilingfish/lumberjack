@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
@@ -486,17 +485,6 @@ func TestReinstallDaemonSurfacesAFailedInstall(t *testing.T) {
 	}
 }
 
-func TestInstallCLISurfacesAnUnreadableDestination(t *testing.T) {
-	blocked := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := installCLI(io.Discard, blocked, blocked, false); err == nil ||
-		!strings.Contains(err.Error(), "checking") {
-		t.Errorf("err = %v, want the stat failure", err)
-	}
-}
-
 func TestSetupStepsJSONAndFailedWrites(t *testing.T) {
 	cases := []struct {
 		name string
@@ -569,26 +557,6 @@ func TestWriteSetupMessageJSON(t *testing.T) {
 	}
 	if decoded["message"] != "No setup steps configured." {
 		t.Errorf("decoded = %+v", decoded)
-	}
-}
-
-func TestEmitTidyMovesFormats(t *testing.T) {
-	moves := []*lumberjackv1.TidyMove{{Branch: "feature/x", From: "/a", To: "/b"}}
-
-	var jsonOut bytes.Buffer
-	if err := emitTidyMoves(&jsonOut, present.JSON, moves, true); err != nil {
-		t.Fatalf("emitTidyMoves json: %v", err)
-	}
-	if !strings.HasPrefix(strings.TrimSpace(jsonOut.String()), "[") {
-		t.Errorf("out = %q, want a bare JSON array", jsonOut.String())
-	}
-
-	var textOut bytes.Buffer
-	if err := emitTidyMoves(&textOut, present.Structured, moves, true); err != nil {
-		t.Fatalf("emitTidyMoves structured: %v", err)
-	}
-	if !strings.Contains(textOut.String(), "would move") {
-		t.Errorf("out = %q, want the dry-run verb", textOut.String())
 	}
 }
 

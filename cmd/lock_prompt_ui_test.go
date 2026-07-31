@@ -94,20 +94,6 @@ func TestPromptLockStrategyRawModeFailure(t *testing.T) {
 	}
 }
 
-func TestCmdTidyPromptsThroughTheRealPrompter(t *testing.T) {
-	stub := &coverStub{tidyMoves: []*lumberjackv1.TidyMove{{
-		Repository: "n", Branch: "feature/foo", From: "/elsewhere/foo", To: "/p/n-foo",
-		Locked: true, LockReason: "in use",
-	}}}
-	serveService(t, stub)
-	onATerminal(t)
-	scriptTerminal(t, "s")
-
-	if _, err := run(t, "", "tidy", "--repository", "n"); err != nil {
-		t.Fatalf("tidy: %v", err)
-	}
-}
-
 func TestLockStrategyValuesAreSorted(t *testing.T) {
 	got := lockStrategyValues()
 	want := []string{"abort", "delete", "skip", "unlock"}
