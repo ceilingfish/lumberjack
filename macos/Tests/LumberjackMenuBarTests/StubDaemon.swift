@@ -49,7 +49,9 @@ func stubWorktree(
     path: String,
     needsReconciliation: Bool = false,
     reconciliationNote: String = "",
-    orphaned: Bool = false
+    orphaned: Bool = false,
+    branchDisparity: Bool = false,
+    checkedOutBranch: String = ""
 ) -> Lumberjack_V1_Worktree {
     var worktree = Lumberjack_V1_Worktree()
     worktree.branchName = branch
@@ -57,5 +59,7 @@ func stubWorktree(
     worktree.needsReconciliation = needsReconciliation
     worktree.reconciliationNote = reconciliationNote
     worktree.orphaned = orphaned
+    worktree.branchDisparity = branchDisparity
+    worktree.checkedOutBranch = checkedOutBranch
     return worktree
 }

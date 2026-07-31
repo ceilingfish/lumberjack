@@ -647,6 +647,7 @@ private struct WorktreeRow: View {
         switch MenuBarPresentation.status(of: worktree, isSyncing: isSyncing) {
         case .inSync: return .inSync
         case .attention: return .attention
+        case .disparity: return .disparity
         case .orphaned: return .orphaned
         case .syncing: return .syncing
         }
@@ -667,6 +668,9 @@ private struct StatusStyle {
     static let attention = StatusStyle(
         label: "Needs attention", dot: Palette.dotAmber,
         pillFg: Palette.warnText, pillBg: Palette.pillWarnBg, subColor: Palette.warnText)
+    static let disparity = StatusStyle(
+        label: "Branch disparity", dot: Palette.destructive,
+        pillFg: Palette.destructiveDeep, pillBg: Palette.destructiveTint, subColor: Palette.destructiveDeep)
     static let syncing = StatusStyle(
         label: "Syncing", dot: Palette.dotBlue,
         pillFg: Palette.primary, pillBg: Palette.pillBlueBg, subColor: Palette.faintText)

@@ -4,6 +4,7 @@ import SwiftProtobuf
 enum WorktreeStatus {
     case inSync
     case attention
+    case disparity
     case orphaned
     case syncing
 }
@@ -51,6 +52,7 @@ enum MenuBarPresentation {
         let parts: [String] = [
             counts[.inSync].map { "\($0) in sync" },
             counts[.attention].map { "\($0) needs attention" },
+            counts[.disparity].map { "\($0) branch disparity" },
             counts[.orphaned].map { "\($0) orphaned" },
         ].compactMap { $0 }
         return parts.joined(separator: " · ")
@@ -58,6 +60,7 @@ enum MenuBarPresentation {
 
     static func status(of worktree: Lumberjack_V1_Worktree, isSyncing: Bool) -> WorktreeStatus {
         if isSyncing { return .syncing }
+        if worktree.branchDisparity { return .disparity }
         if worktree.needsReconciliation { return .attention }
         if worktree.orphaned { return .orphaned }
         return .inSync
@@ -65,7 +68,11 @@ enum MenuBarPresentation {
 
     static func rowSubtitle(_ worktree: Lumberjack_V1_Worktree) -> String? {
         if worktree.needsReconciliation {
-            return worktree.reconciliationNote.isEmpty ? "Needs reconciliation" : worktree.reconciliationNote
+            if !worktree.reconciliationNote.isEmpty { return worktree.reconciliationNote }
+            if worktree.branchDisparity {
+                return "On \(worktree.checkedOutBranch), not the PR branch \(worktree.branchName)"
+            }
+            return "Needs reconciliation"
         }
         guard worktree.hasLastSyncedAt else { return nil }
         return "Synced \(relative(date(from: worktree.lastSyncedAt)))"

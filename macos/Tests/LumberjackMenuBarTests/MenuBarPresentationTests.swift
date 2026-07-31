@@ -110,6 +110,30 @@ struct MenuBarPresentationTests {
         #expect(MenuBarPresentation.status(of: worktree, isSyncing: false) == .attention)
     }
 
+    @Test("a branch disparity outranks reconciliation, and is summarised separately")
+    func disparityOutranksReconciliation() {
+        let disparate = stubWorktree(
+            branch: "feature-x", path: "/tmp/a", needsReconciliation: true, branchDisparity: true,
+            checkedOutBranch: "main")
+
+        #expect(MenuBarPresentation.status(of: disparate, isSyncing: false) == .disparity)
+        #expect(MenuBarPresentation.status(of: disparate, isSyncing: true) == .syncing)
+        #expect(
+            MenuBarPresentation.worktreeSummary([disparate, stubWorktree(branch: "b", path: "/tmp/b")])
+                == "1 in sync · 1 branch disparity")
+        #expect(
+            MenuBarPresentation.rowSubtitle(disparate) == "On main, not the PR branch feature-x")
+    }
+
+    @Test("an explicit reconciliation note beats the generated branch-disparity wording")
+    func reconciliationNoteBeatsTheDisparityWording() {
+        let disparate = stubWorktree(
+            branch: "feature-x", path: "/tmp/a", needsReconciliation: true, reconciliationNote: "diverged",
+            branchDisparity: true, checkedOutBranch: "main")
+
+        #expect(MenuBarPresentation.rowSubtitle(disparate) == "diverged")
+    }
+
     @Test("an in-flight sync outranks every other status")
     func syncingOutranksEverything() {
         let worktree = stubWorktree(branch: "a", path: "/tmp/a", needsReconciliation: true)

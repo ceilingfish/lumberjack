@@ -304,6 +304,18 @@ func (g *Git) IsDirty(ctx context.Context, dir string) (bool, error) {
 	return out != "", nil
 }
 
+// CurrentBranch is the branch checked out at dir, empty for a detached HEAD.
+func (g *Git) CurrentBranch(ctx context.Context, dir string) (string, error) {
+	out, err := g.run(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if out == "HEAD" {
+		return "", nil
+	}
+	return out, nil
+}
+
 // LocalOnlyCommits counts commits reachable from the worktree's HEAD but from
 // no remote-tracking branch — i.e. local work that exists nowhere on the
 // remote. It is the "commits you would lose" figure used both to decide

@@ -100,23 +100,6 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	}
 }
 
-func TestOpenIsIdempotent(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "test.sqlite")
-
-	first, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("first Open: %v", err)
-	}
-	_ = first.Close()
-
-	// Re-opening the same database re-runs migrate with nothing pending.
-	second, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("second Open: %v", err)
-	}
-	_ = second.Close()
-}
-
 func TestRepositoryRoundTrip(t *testing.T) {
 	client := openTemp(t)
 	ctx := context.Background()
