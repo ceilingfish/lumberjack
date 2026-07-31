@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.0](https://github.com/ceilingfish/lumberjack/compare/v0.2.1...v0.3.0) (2026-07-31)
+
+
+### Features
+
+* bound each git invocation and sync three repositories at once ([#75](https://github.com/ceilingfish/lumberjack/issues/75)) ([857d715](https://github.com/ceilingfish/lumberjack/commit/857d715d8593e68f4444b4869ca0cd0e1f21a862))
+* raise the per-package coverage floor to 95% ([#80](https://github.com/ceilingfish/lumberjack/issues/80)) ([2c05b09](https://github.com/ceilingfish/lumberjack/commit/2c05b09d6df88d996ef933742d7adab501027164)), closes [#6](https://github.com/ceilingfish/lumberjack/issues/6)
+
+
+### Bug Fixes
+
+* **sync:** prune ghost worktrees with neither a PR nor a directory ([#81](https://github.com/ceilingfish/lumberjack/issues/81)) ([da66ccf](https://github.com/ceilingfish/lumberjack/commit/da66ccf47e8b97b884d7bbb9ece866b7a3851b21))
+* **worktree:** update Reconcile test calls for the prBranch parameter ([#71](https://github.com/ceilingfish/lumberjack/issues/71)) ([0b47c89](https://github.com/ceilingfish/lumberjack/commit/0b47c89c3b2fbc4bafdcc08167b12c79ad14801c))
+
 ## [0.1.1](https://github.com/ceilingfish/lumberjack/compare/v0.1.0...v0.1.1) (2026-07-31)
 
 ## [0.2.1](https://github.com/ceilingfish/lumberjack/compare/v0.2.0...v0.2.1) (2026-07-31)
