@@ -11,7 +11,7 @@ name: Release
 # than duplicated.
 on:
   push:
-    branches: [main, issue-31-per-package-coverage-floors]
+    branches: [main]
 
 permissions:
   contents: write
