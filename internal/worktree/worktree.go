@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // PRState is the state of a worktree's source pull request as far as
@@ -82,6 +83,16 @@ func Reconcile(ctx context.Context, p Prober, dir string, pr PRState) (Status, e
 		return Status{}, fmt.Errorf("stat worktree directory: %w", err)
 	case !info.IsDir():
 		return Status{Missing: true, Note: "worktree path is not a directory"}, nil
+	}
+
+	// A worktree directory always contains a .git entry (a gitdir pointer
+	// file). Its absence means the worktree was removed out-of-band and only a
+	// husk remains — typically ignored build artifacts that survived `git
+	// worktree remove`. Probing it with git would fail ("not a git
+	// repository"), so treat it as missing: prunable from tracking, with the
+	// husk left on disk for the user.
+	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+		return Status{Missing: true, Note: "directory is no longer a git worktree"}, nil
 	}
 
 	dirty, err := p.IsDirty(ctx, dir)

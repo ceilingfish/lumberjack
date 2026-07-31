@@ -92,11 +92,21 @@ func (f *fakeGit) Pull(_ context.Context, repoPath string) error {
 	return f.pullErr
 }
 
+// mkWorktreeDir creates a fake worktree directory with the .git gitdir
+// pointer file real worktrees always carry (Reconcile treats a directory
+// without one as a husk left by an out-of-band removal).
+func mkWorktreeDir(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, ".git"), []byte("gitdir: fake\n"), 0o644)
+}
+
 func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error {
 	if err := f.addErr[branch]; err != nil {
 		return err
 	}
-	return os.MkdirAll(dir, 0o755)
+	return mkWorktreeDir(dir)
 }
 
 // AddWorktreeNewBranch records the base each new branch was created from so
@@ -106,7 +116,7 @@ func (f *fakeGit) AddWorktreeNewBranch(_ context.Context, _, dir, base, branch s
 		return err
 	}
 	f.newBranches[branch] = base
-	return os.MkdirAll(dir, 0o755)
+	return mkWorktreeDir(dir)
 }
 
 func (f *fakeGit) RemoveWorktree(_ context.Context, _, dir string, _ bool) error {
