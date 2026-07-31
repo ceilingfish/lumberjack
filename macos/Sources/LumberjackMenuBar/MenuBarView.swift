@@ -556,11 +556,13 @@ struct MenuBarView: View {
 
     private var worktreeSummary: String {
         let inSync = state.worktrees.filter { !$0.needsReconciliation && !$0.orphaned }.count
-        let attention = state.worktrees.filter { $0.needsReconciliation }.count
+        let disparity = state.worktrees.filter { $0.branchDisparity }.count
+        let attention = state.worktrees.filter { $0.needsReconciliation && !$0.branchDisparity }.count
         let orphaned = state.worktrees.filter { $0.orphaned && !$0.needsReconciliation }.count
         var parts: [String] = []
         if inSync > 0 { parts.append("\(inSync) in sync") }
         if attention > 0 { parts.append("\(attention) needs attention") }
+        if disparity > 0 { parts.append("\(disparity) branch disparity") }
         if orphaned > 0 { parts.append("\(orphaned) orphaned") }
         return parts.joined(separator: " · ")
     }
@@ -681,9 +683,11 @@ private struct WorktreeRow: View {
 
     private var subtitle: String? {
         if worktree.needsReconciliation {
-            return worktree.reconciliationNote.isEmpty
-                ? "Needs reconciliation"
-                : worktree.reconciliationNote
+            if !worktree.reconciliationNote.isEmpty { return worktree.reconciliationNote }
+            if worktree.branchDisparity {
+                return "On \(worktree.checkedOutBranch), not the PR branch \(worktree.branchName)"
+            }
+            return "Needs reconciliation"
         }
         guard worktree.hasLastSyncedAt else { return nil }
         let ts = worktree.lastSyncedAt
@@ -693,6 +697,7 @@ private struct WorktreeRow: View {
 
     private var style: StatusStyle {
         if isSyncing { return .syncing }
+        if worktree.branchDisparity { return .disparity }
         if worktree.needsReconciliation { return .attention }
         if worktree.orphaned { return .orphaned }
         return .inSync
@@ -713,6 +718,9 @@ private struct StatusStyle {
     static let attention = StatusStyle(
         label: "Needs attention", dot: Palette.dotAmber,
         pillFg: Palette.warnText, pillBg: Palette.pillWarnBg, subColor: Palette.warnText)
+    static let disparity = StatusStyle(
+        label: "Branch disparity", dot: Palette.destructive,
+        pillFg: Palette.destructiveDeep, pillBg: Palette.destructiveTint, subColor: Palette.destructiveDeep)
     static let syncing = StatusStyle(
         label: "Syncing", dot: Palette.dotBlue,
         pillFg: Palette.primary, pillBg: Palette.pillBlueBg, subColor: Palette.faintText)

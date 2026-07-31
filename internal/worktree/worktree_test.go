@@ -19,7 +19,7 @@ func TestReconcileClean(t *testing.T) {
 		t.Fatalf("AddWorktree: %v", err)
 	}
 
-	st, err := Reconcile(ctx, g, dir, PROpen)
+	st, err := Reconcile(ctx, g, dir, "feature/foo", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestReconcileDirtyOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _ := Reconcile(ctx, g, dir, PROpen)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PROpen)
 	if !st.Dirty || !st.NeedsReconciliation {
 		t.Errorf("expected dirty+needs reconciliation: %+v", st)
 	}
@@ -61,7 +61,7 @@ func TestReconcileOrphaned(t *testing.T) {
 	}
 	runGit(t, dir, "commit", "-am", "local")
 
-	st, _ := Reconcile(ctx, g, dir, PRGone)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRGone)
 	if !st.Orphaned || st.LocalOnlyCommits != 1 {
 		t.Errorf("expected orphaned with 1 local commit: %+v", st)
 	}
@@ -88,7 +88,7 @@ func TestReconcileMerged(t *testing.T) {
 	}
 	runGit(t, dir, "commit", "-am", "merged work")
 
-	st, _ := Reconcile(ctx, g, dir, PRMerged)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRMerged)
 	if st.NeedsReconciliation || st.Orphaned || st.LocalOnlyCommits != 0 {
 		t.Errorf("merged worktree should be a safe-remove candidate: %+v", st)
 	}
@@ -110,7 +110,7 @@ func TestReconcileMergedButDirty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _ := Reconcile(ctx, g, dir, PRMerged)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRMerged)
 	if !st.Dirty || !st.NeedsReconciliation || !st.Merged {
 		t.Errorf("merged+dirty should still need reconciliation: %+v", st)
 	}
@@ -127,7 +127,7 @@ func TestReconcileClosedButClean(t *testing.T) {
 	dir := filepath.Join(filepath.Dir(main), "wt")
 	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
 
-	st, _ := Reconcile(ctx, g, dir, PRGone)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRGone)
 	if st.NeedsReconciliation || st.Orphaned {
 		t.Errorf("clean closed worktree is a safe-remove candidate: %+v", st)
 	}
@@ -147,7 +147,7 @@ func TestReconcileHuskDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := Reconcile(context.Background(), g, dir, PROpen)
+	st, err := Reconcile(context.Background(), g, dir, "feature/foo", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -156,9 +156,102 @@ func TestReconcileHuskDir(t *testing.T) {
 	}
 }
 
+func TestReconcileBranchDisparity(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	_ = g.Fetch(ctx, main, "origin")
+
+	dir := filepath.Join(filepath.Dir(main), "wt")
+	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
+	runGit(t, dir, "checkout", "-b", "feature/elsewhere")
+
+	st, err := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !st.BranchDisparity || !st.NeedsReconciliation {
+		t.Errorf("expected a branch disparity needing reconciliation: %+v", st)
+	}
+	if st.CheckedOutBranch != "feature/elsewhere" {
+		t.Errorf("CheckedOutBranch = %q", st.CheckedOutBranch)
+	}
+	want := "needs reconciliation: disparity between local branch feature/elsewhere and PR branch feature/foo"
+	if st.Note != want {
+		t.Errorf("note = %q, want %q", st.Note, want)
+	}
+}
+
+func TestReconcileMergedWithBranchDisparity(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	_ = g.Fetch(ctx, main, "origin")
+
+	dir := filepath.Join(filepath.Dir(main), "wt")
+	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
+	runGit(t, dir, "checkout", "-b", "feature/elsewhere")
+
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRMerged)
+	if !st.NeedsReconciliation {
+		t.Errorf("merged worktree with a disparity must be retained: %+v", st)
+	}
+	if st.Note != "PR merged but disparity between local branch feature/elsewhere and PR branch feature/foo" {
+		t.Errorf("note = %q", st.Note)
+	}
+}
+
+func TestReconcileDirtyAndBranchDisparity(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	_ = g.Fetch(ctx, main, "origin")
+
+	dir := filepath.Join(filepath.Dir(main), "wt")
+	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
+	runGit(t, dir, "checkout", "-b", "feature/elsewhere")
+	if err := os.WriteFile(filepath.Join(dir, "foo.txt"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	want := "needs reconciliation: uncommitted changes and " +
+		"disparity between local branch feature/elsewhere and PR branch feature/foo"
+	if st.Note != want {
+		t.Errorf("note = %q, want %q", st.Note, want)
+	}
+}
+
+func TestReconcileNoPRBranchNoDisparity(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	_ = g.Fetch(ctx, main, "origin")
+
+	dir := filepath.Join(filepath.Dir(main), "wt")
+	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
+	runGit(t, dir, "checkout", "-b", "feature/elsewhere")
+
+	st, _ := Reconcile(ctx, g, dir, "", PRNone)
+	if st.BranchDisparity || st.NeedsReconciliation {
+		t.Errorf("no PR branch means nothing to differ from: %+v", st)
+	}
+}
+
+func TestReconcileDetachedHeadNoDisparity(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	_ = g.Fetch(ctx, main, "origin")
+
+	dir := filepath.Join(filepath.Dir(main), "wt")
+	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
+	runGit(t, dir, "checkout", "--detach")
+
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	if st.BranchDisparity || st.CheckedOutBranch != "" {
+		t.Errorf("detached HEAD is not a disparity: %+v", st)
+	}
+}
+
 func TestReconcileMissingDir(t *testing.T) {
 	g, main := setupRepos(t)
-	st, err := Reconcile(context.Background(), g, filepath.Join(filepath.Dir(main), "gone"), PROpen)
+	st, err := Reconcile(context.Background(), g, filepath.Join(filepath.Dir(main), "gone"), "feature/foo", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}

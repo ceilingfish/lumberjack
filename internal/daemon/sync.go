@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -244,7 +245,7 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 			if perr != nil {
 				return fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, perr)
 			}
-			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prState)
+			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), prState)
 			if rerr != nil {
 				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
 			}
@@ -344,9 +345,10 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 // PR: which directories are taken, which tracked-but-unlinked branches remain,
 // and which on-disk directories are available to adopt (keyed by branch).
 type reconcileState struct {
-	usedDirs  map[string]bool
-	unlinked  map[string]schema.Worktree
-	adoptable map[string]string
+	usedDirs   map[string]bool
+	unlinked   map[string]schema.Worktree
+	adoptable  map[string]string
+	branchDirs map[string]string
 }
 
 // createMissing gives every open PR that lacks a linked worktree one, then
@@ -365,14 +367,12 @@ func (s *Service) createMissing(
 	if lerr != nil {
 		*errs = append(*errs, fmt.Errorf("listing existing worktrees: %w", lerr))
 	}
-	branchByDir := make(map[string]string, len(refs))
-	for _, r := range refs {
-		branchByDir[r.Dir] = r.Branch
-	}
+	branchByDir, dirByBranch := indexRefs(refs)
 
 	havePR := make(map[int64]bool, len(stored))
 	st := reconcileState{
-		usedDirs: make(map[string]bool, len(stored)),
+		branchDirs: dirByBranch,
+		usedDirs:   make(map[string]bool, len(stored)),
 		// Worktrees tracked by branch but not yet linked to a PR (e.g. adopted at
 		// init with no PR number). An open PR on such a branch links to the
 		// existing row instead of trying to recreate a branch git already has.
@@ -438,11 +438,35 @@ func (s *Service) adoptOrphans(
 	return adopted
 }
 
+func heldElsewhere(dir, mainPath string) string {
+	if dir == mainPath {
+		return "branch is checked out in the main working tree"
+	}
+	return "branch is already checked out in " + filepath.Base(dir)
+}
+
+func indexRefs(refs []worktree.Ref) (branchByDir, dirByBranch map[string]string) {
+	branchByDir = make(map[string]string, len(refs))
+	dirByBranch = make(map[string]string, len(refs))
+	for _, r := range refs {
+		branchByDir[r.Dir] = r.Branch
+		if r.Branch == "" {
+			continue
+		}
+		if _, seen := dirByBranch[r.Branch]; !seen {
+			dirByBranch[r.Branch] = r.Dir
+		}
+	}
+	return branchByDir, dirByBranch
+}
+
 // reconcilePR ensures one open PR that lacks a linked worktree gets one, in
 // preference order: link an already-tracked branch, adopt an untracked
-// checked-out directory, or create a fresh worktree. It returns 1 when a
-// worktree was created or adopted (linking mutates an existing row and returns
-// 0), maintaining st as branches and directories are consumed.
+// checked-out directory, or create a fresh worktree. A PR whose branch is
+// already checked out somewhere gets none of these — it is reported as retained.
+// It returns 1 when a worktree was created or adopted (linking mutates an
+// existing row and returns 0), maintaining st as branches and directories are
+// consumed.
 func (s *Service) reconcilePR(
 	ctx context.Context, repo *schema.Repository, num int64, pr github.PR,
 	st *reconcileState, progress progressFn, errs *[]error,
@@ -458,6 +482,14 @@ func (s *Service) reconcilePR(
 			st.usedDirs[dir] = true
 			return 1
 		}
+		return 0
+	}
+	if dir, held := st.branchDirs[pr.HeadBranch]; held {
+		n := num
+		s.emitChange(repo, progress, WorktreeChange{
+			Branch: pr.HeadBranch, PRNumber: &n, Action: ActionRetained,
+			DirectoryPath: dir, Detail: heldElsewhere(dir, repo.LocalPath),
+		})
 		return 0
 	}
 	if dir, ok := s.createWorktree(ctx, repo, num, pr, st.usedDirs, progress, errs); ok {
@@ -636,6 +668,13 @@ func (s *Service) removeClosed(
 	return removed
 }
 
+func prBranchOf(wt schema.Worktree) string {
+	if wt.GithubPRNumber == nil {
+		return ""
+	}
+	return wt.BranchName
+}
+
 // prStillOpen reports whether the worktree's source PR is among the open set.
 func (s *Service) prStillOpen(wt schema.Worktree, openByNum map[int64]github.PR) bool {
 	if wt.GithubPRNumber == nil {
@@ -698,7 +737,7 @@ func (s *Service) removeOne(
 	ctx context.Context, repo *schema.Repository, wt schema.Worktree, state worktree.PRState,
 	progress progressFn, errs *[]error,
 ) bool {
-	st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, state)
+	st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), state)
 	if rerr != nil {
 		*errs = append(*errs, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr))
 		return false
