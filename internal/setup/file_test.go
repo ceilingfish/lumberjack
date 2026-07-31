@@ -85,17 +85,17 @@ func TestLoadIfPresentMalformedFile(t *testing.T) {
 	}
 }
 
-func TestLoadIfPresentUnreadableFile(t *testing.T) {
+func TestLoadIfPresentDirectoryAtConfigPath(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.Mkdir(configPath(dir), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err := loadIfPresent(configPath(dir))
 	if err == nil {
-		t.Fatal("loadIfPresent: want an error when the config cannot be read, got nil")
+		t.Fatal("loadIfPresent: want an error when a directory sits at the config path, got nil")
 	}
 	if !strings.Contains(err.Error(), configPath(dir)) {
-		t.Errorf("error = %q, want it to name the unreadable path", err)
+		t.Errorf("error = %q, want it to name the path it could not read", err)
 	}
 }
 

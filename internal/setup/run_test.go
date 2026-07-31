@@ -263,7 +263,7 @@ func TestRunCommandFailureIncludesOutput(t *testing.T) {
 	}
 }
 
-func TestRunCopyFileUnreadableSource(t *testing.T) {
+func TestRunCopyFileDirectorySource(t *testing.T) {
 	main, wt := t.TempDir(), t.TempDir()
 	if err := os.Mkdir(filepath.Join(main, "adir"), 0o755); err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestRunCopyFileUnreadableSource(t *testing.T) {
 		t.Fatalf("failed step = %q", step)
 	}
 	if !strings.Contains(err.Error(), "reading adir") {
-		t.Fatalf("error = %q, want it to name the unreadable source", err)
+		t.Fatalf("error = %q, want it to name the source it could not read", err)
 	}
 }
 
