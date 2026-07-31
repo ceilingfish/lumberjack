@@ -60,6 +60,9 @@ func TestWriteJSONObjectProto(t *testing.T) {
 	if err := WriteJSONObject(&buf, repo); err != nil {
 		t.Fatalf("WriteJSONObject: %v", err)
 	}
+	if !strings.HasSuffix(buf.String(), "\n") {
+		t.Errorf("output %q should end with a newline", buf.String())
+	}
 	var decoded map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
 		t.Fatalf("output is not valid JSON: %v (%q)", err, buf.String())
@@ -167,22 +170,15 @@ func TestWriteJSONArrayWriteError(t *testing.T) {
 	}
 }
 
-func TestWriteJSONObjectEndsWithNewline(t *testing.T) {
-	var buf bytes.Buffer
-	if err := WriteJSONObject(&buf, &lumberjackv1.Repository{DirPrefix: "n"}); err != nil {
-		t.Fatalf("WriteJSONObject: %v", err)
-	}
-	if !strings.HasSuffix(buf.String(), "\n") {
-		t.Errorf("output %q should end with a newline", buf.String())
-	}
-}
-
-func TestWriteJSONObjectMarshalError(t *testing.T) {
+func TestWriteJSONObjectProtoMarshalError(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteJSONObject(&buf, invalidUTF8Repo()); err == nil {
 		t.Fatalf("expected an error for an unmarshalable proto message, wrote %q", buf.String())
 	}
-	buf.Reset()
+}
+
+func TestWriteJSONObjectViewModelMarshalError(t *testing.T) {
+	var buf bytes.Buffer
 	if err := WriteJSONObject(&buf, make(chan int)); err == nil {
 		t.Fatalf("expected an error for an unmarshalable value, wrote %q", buf.String())
 	}
