@@ -318,6 +318,41 @@ func TestActiveLoginPropagatesError(t *testing.T) {
 	}
 }
 
+func TestToken(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return "ghp_abc123", nil
+	})
+	tok, err := c.Token(context.Background(), "github.com", "work")
+	if err != nil {
+		t.Fatalf("Token: %v", err)
+	}
+	if tok != "ghp_abc123" {
+		t.Errorf("token = %q, want ghp_abc123", tok)
+	}
+	want := []string{"auth", "token", "--hostname", "github.com", "--user", "work"}
+	if !reflect.DeepEqual(gotArgs, want) {
+		t.Errorf("args = %v, want %v", gotArgs, want)
+	}
+}
+
+func TestTokenEmptyOutputIsAnError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", nil })
+	if _, err := c.Token(context.Background(), "github.com", "work"); err == nil {
+		t.Error("expected an empty token to be reported as an error")
+	}
+}
+
+func TestTokenPropagatesError(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return "", errors.New("no token for work")
+	})
+	if _, err := c.Token(context.Background(), "github.com", "work"); err == nil {
+		t.Error("expected the gh failure to propagate")
+	}
+}
+
 func TestSwitchAccount(t *testing.T) {
 	var gotArgs []string
 	c := fakeClient(func(args ...string) (string, error) {

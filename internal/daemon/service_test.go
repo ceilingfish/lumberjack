@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
+	"github.com/ceilingfish/lumberjack/internal/ghauth"
 	"github.com/ceilingfish/lumberjack/internal/github"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
@@ -21,6 +23,7 @@ import (
 // (which stats the directory) works, while dirt and local-commit state are
 // answered from in-memory maps keyed by directory.
 type fakeGit struct {
+	mu        sync.Mutex
 	dirty     map[string]bool
 	localOnly map[string]int64
 	addErr    map[string]error // keyed by branch
@@ -76,6 +79,8 @@ func newFakeGit() *fakeGit {
 }
 
 func (f *fakeGit) DefaultRemote(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.remoteErr != nil {
 		return "", f.remoteErr
 	}
@@ -83,11 +88,15 @@ func (f *fakeGit) DefaultRemote(context.Context, string) (string, error) {
 }
 
 func (f *fakeGit) RemoteURL(context.Context, string, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.remoteURL, f.urlErr
 }
 func (f *fakeGit) Fetch(context.Context, string, string) error { return f.fetchErr }
 
 func (f *fakeGit) Pull(_ context.Context, repoPath string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.pulled = append(f.pulled, repoPath)
 	return f.pullErr
 }
@@ -103,6 +112,8 @@ func mkWorktreeDir(dir string) error {
 }
 
 func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.addErr[branch]; err != nil {
 		return err
 	}
@@ -112,6 +123,8 @@ func (f *fakeGit) AddWorktree(_ context.Context, _, dir, _, branch string) error
 // AddWorktreeNewBranch records the base each new branch was created from so
 // `worktree add` tests can assert the fallback ran and off which ref.
 func (f *fakeGit) AddWorktreeNewBranch(_ context.Context, _, dir, base, branch string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.newBranchErr[branch]; err != nil {
 		return err
 	}
@@ -120,6 +133,8 @@ func (f *fakeGit) AddWorktreeNewBranch(_ context.Context, _, dir, base, branch s
 }
 
 func (f *fakeGit) RemoveWorktree(_ context.Context, _, dir string, _ bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return os.RemoveAll(dir)
 }
 
@@ -128,6 +143,8 @@ func (f *fakeGit) RemoveWorktree(_ context.Context, _, dir string, _ bool) error
 // a move to fail (git refusing a locked worktree, say); moves records each
 // from→to pair for assertions.
 func (f *fakeGit) MoveWorktree(_ context.Context, _, from, to string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.moveErr[from]; err != nil {
 		return err
 	}
@@ -143,6 +160,8 @@ func (f *fakeGit) MoveWorktree(_ context.Context, _, from, to string) error {
 // that is what `worktree list --porcelain` would show and what tidy reads locks
 // from.
 func (f *fakeGit) ListWorktrees(context.Context, string) ([]worktree.Ref, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -166,6 +185,8 @@ func (f *fakeGit) ListWorktrees(context.Context, string) ([]worktree.Ref, error)
 // LockWorktree and UnlockWorktree mutate the fake's lock state the way git
 // would, so a test can assert where a lifted lock ended up.
 func (f *fakeGit) LockWorktree(_ context.Context, _, dir, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.lockErr[dir]; err != nil {
 		return err
 	}
@@ -174,6 +195,8 @@ func (f *fakeGit) LockWorktree(_ context.Context, _, dir, reason string) error {
 }
 
 func (f *fakeGit) UnlockWorktree(_ context.Context, _, dir string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if err := f.unlockErr[dir]; err != nil {
 		return err
 	}
@@ -182,14 +205,20 @@ func (f *fakeGit) UnlockWorktree(_ context.Context, _, dir string) error {
 }
 
 func (f *fakeGit) IsDirty(_ context.Context, dir string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.dirty[dir], nil
 }
 
 func (f *fakeGit) LocalOnlyCommits(_ context.Context, dir string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.localOnly[dir], nil
 }
 
 func (f *fakeGit) DefaultBranch(context.Context, string, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.defaultBranchErr != nil {
 		return "", f.defaultBranchErr
 	}
@@ -200,6 +229,8 @@ func (f *fakeGit) DefaultBranch(context.Context, string, string) (string, error)
 }
 
 func (f *fakeGit) ShowFile(_ context.Context, _, ref, path string) ([]byte, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.showFileErr != nil {
 		return nil, false, f.showFileErr
 	}
@@ -209,22 +240,24 @@ func (f *fakeGit) ShowFile(_ context.Context, _, ref, path string) ([]byte, bool
 
 // fakeGH satisfies GHOps.
 type fakeGH struct {
-	info    github.RepoInfo
-	infoErr error
-	prs     []github.PR
-	prsErr  error
+	mu       sync.Mutex
+	info     github.RepoInfo
+	infoErr  error
+	prs      []github.PR
+	prsErr   error
+	prTokens []string
+	listHook func()
 	// merged reports, per PR number, whether PRMerged answers true; mergedErr
 	// forces the lookup to fail.
 	merged    map[int64]bool
 	mergedErr error
 	user      string
 	userErr   error
-	// active is the account gh reports as currently signed in; switchErr forces
-	// SwitchAccount to fail. switches records each (host, login) switch made.
+	// active is the account gh reports as currently signed in.
 	active    string
 	activeErr error
-	switchErr error
-	switches  [][2]string
+	tokenErr  error
+	tokens    [][2]string
 	// logins is what ListLogins reports for any host; loginsErr forces it to
 	// fail. A nil logins slice means gh has no accounts.
 	logins    []string
@@ -237,14 +270,24 @@ type fakeGH struct {
 }
 
 func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.info, f.infoErr
 }
 
-func (f *fakeGH) ListOpenPRs(context.Context, github.RepoInfo) ([]github.PR, error) {
+func (f *fakeGH) ListOpenPRs(ctx context.Context, _ github.RepoInfo) ([]github.PR, error) {
+	if f.listHook != nil {
+		f.listHook()
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.prTokens = append(f.prTokens, ctxToken(ctx))
 	return f.prs, f.prsErr
 }
 
 func (f *fakeGH) PRMerged(_ context.Context, _ github.RepoInfo, number int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.mergedErr != nil {
 		return false, f.mergedErr
 	}
@@ -252,30 +295,46 @@ func (f *fakeGH) PRMerged(_ context.Context, _ github.RepoInfo, number int64) (b
 }
 
 func (f *fakeGH) AuthenticatedUser(context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.user, f.userErr
 }
 
 func (f *fakeGH) ActiveLogin(context.Context, string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.active, f.activeErr
 }
 
-func (f *fakeGH) SwitchAccount(_ context.Context, host, login string) error {
-	if f.switchErr != nil {
-		return f.switchErr
+func (f *fakeGH) Token(_ context.Context, host, login string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.tokenErr != nil {
+		return "", f.tokenErr
 	}
-	f.switches = append(f.switches, [2]string{host, login})
-	f.active = login
-	return nil
+	f.tokens = append(f.tokens, [2]string{host, login})
+	return "tok-" + login, nil
+}
+
+func ctxToken(ctx context.Context) string {
+	for _, kv := range ghauth.Env(ctx, nil) {
+		if v, ok := strings.CutPrefix(kv, "GH_TOKEN="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func (f *fakeGH) ListLogins(context.Context, string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.logins, f.loginsErr
 }
 
-func (f *fakeGH) CheckRepoAccess(context.Context, github.RepoInfo) error {
-	// Record the account active at check time so tests can assert the check ran
-	// under the candidate login rather than whatever was active before.
-	f.accessChecks = append(f.accessChecks, f.active)
+func (f *fakeGH) CheckRepoAccess(ctx context.Context, _ github.RepoInfo) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.accessChecks = append(f.accessChecks, ctxToken(ctx))
 	return f.accessErr
 }
 
@@ -597,14 +656,15 @@ func TestSetLoginPersistsAndTakesEffect(t *testing.T) {
 		t.Errorf("persisted Login = %q, want work", got.Login)
 	}
 
-	// A subsequent operation on the reloaded repo now switches accounts.
+	// A subsequent operation on the reloaded repo now authenticates as work.
 	h.gh.active = "personal"
+	h.gh.tokens = nil
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
 	if _, _, err := h.svc.SyncRepository(context.Background(), got, nil); err != nil {
 		t.Fatalf("SyncRepository: %v", err)
 	}
-	if len(h.gh.switches) == 0 || h.gh.switches[0] != [2]string{"github.com", "work"} {
-		t.Errorf("expected switch to work, got %v", h.gh.switches)
+	if len(h.gh.tokens) == 0 || h.gh.tokens[0] != [2]string{"github.com", "work"} {
+		t.Errorf("expected the work token to be resolved, got %v", h.gh.tokens)
 	}
 }
 
@@ -650,16 +710,13 @@ func TestSetLoginUnreachableRepoRejected(t *testing.T) {
 		t.Errorf("error should explain the access failure, got %v", err)
 	}
 	// The check must have run under the candidate account, not the prior one.
-	if len(h.gh.accessChecks) != 1 || h.gh.accessChecks[0] != "work" {
-		t.Errorf("access check ran under %v, want [work]", h.gh.accessChecks)
+	if len(h.gh.accessChecks) != 1 || h.gh.accessChecks[0] != "tok-work" {
+		t.Errorf("access check ran under %v, want [tok-work]", h.gh.accessChecks)
 	}
-	// Nothing persisted, and the prior account is restored.
+	// Nothing persisted.
 	got, _ := h.db.FindRepository(context.Background(), repo.LocalPath)
 	if got.Login != "" {
 		t.Errorf("login should be unchanged, got %q", got.Login)
-	}
-	if h.gh.active != "personal" {
-		t.Errorf("active account should be restored to personal, got %q", h.gh.active)
 	}
 }
 
@@ -677,7 +734,7 @@ func TestListLoginsReportsAccountsAndCurrent(t *testing.T) {
 	}
 }
 
-func TestSyncSwitchesToRepoLoginAndRestores(t *testing.T) {
+func TestSyncResolvesRepoLoginToken(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repoWithLogin(t, "work")
 	h.gh.active = "personal" // a different account is active
@@ -686,17 +743,19 @@ func TestSyncSwitchesToRepoLoginAndRestores(t *testing.T) {
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
 		t.Fatalf("SyncRepository: %v", err)
 	}
-	// Switched to the repo's login for the operation, then back to personal.
-	want := [][2]string{{"github.com", "work"}, {"github.com", "personal"}}
-	if !reflect.DeepEqual(h.gh.switches, want) {
-		t.Errorf("switches = %v, want %v", h.gh.switches, want)
+	want := [][2]string{{"github.com", "work"}}
+	if !reflect.DeepEqual(h.gh.tokens, want) {
+		t.Errorf("tokens = %v, want %v", h.gh.tokens, want)
+	}
+	if !reflect.DeepEqual(h.gh.prTokens, []string{"tok-work"}) {
+		t.Errorf("gh calls ran with %v, want [tok-work]", h.gh.prTokens)
 	}
 	if h.gh.active != "personal" {
-		t.Errorf("active account not restored: %q", h.gh.active)
+		t.Errorf("active account must be left alone, got %q", h.gh.active)
 	}
 }
 
-func TestSyncNoSwitchWhenAlreadyActive(t *testing.T) {
+func TestSyncResolvesTokenRegardlessOfActiveAccount(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repoWithLogin(t, "work")
 	h.gh.active = "work" // already the right account
@@ -705,12 +764,12 @@ func TestSyncNoSwitchWhenAlreadyActive(t *testing.T) {
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
 		t.Fatalf("SyncRepository: %v", err)
 	}
-	if len(h.gh.switches) != 0 {
-		t.Errorf("expected no account switches, got %v", h.gh.switches)
+	if !reflect.DeepEqual(h.gh.prTokens, []string{"tok-work"}) {
+		t.Errorf("gh calls ran with %v, want [tok-work]", h.gh.prTokens)
 	}
 }
 
-func TestSyncNoSwitchWhenLoginUnset(t *testing.T) {
+func TestSyncNoTokenWhenLoginUnset(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t) // empty Login (pre-capture repo)
 	h.gh.active = "personal"
@@ -719,23 +778,26 @@ func TestSyncNoSwitchWhenLoginUnset(t *testing.T) {
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
 		t.Fatalf("SyncRepository: %v", err)
 	}
-	if len(h.gh.switches) != 0 {
-		t.Errorf("empty-login repo must not switch accounts, got %v", h.gh.switches)
+	if len(h.gh.tokens) != 0 {
+		t.Errorf("empty-login repo must not resolve a token, got %v", h.gh.tokens)
+	}
+	if !reflect.DeepEqual(h.gh.prTokens, []string{""}) {
+		t.Errorf("gh calls should inherit ambient auth, got %v", h.gh.prTokens)
 	}
 }
 
-func TestSyncSwitchFailureAborts(t *testing.T) {
+func TestSyncTokenFailureAborts(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repoWithLogin(t, "work")
 	h.gh.active = "personal"
-	h.gh.switchErr = errors.New("account not found")
+	h.gh.tokenErr = errors.New("account not found")
 
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err == nil {
-		t.Error("expected sync to fail when the account switch fails")
+		t.Error("expected sync to fail when the token cannot be resolved")
 	}
 }
 
-func TestDeleteWorktreeSwitchesLogin(t *testing.T) {
+func TestDeleteWorktreeUsesRepoLoginToken(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repoWithLogin(t, "work")
 	h.gh.active = "personal"
@@ -743,17 +805,17 @@ func TestDeleteWorktreeSwitchesLogin(t *testing.T) {
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
 		t.Fatalf("seed sync: %v", err)
 	}
-	h.gh.switches = nil // ignore the switches from seeding
+	h.gh.tokens = nil // ignore the tokens from seeding
 
 	if _, err := h.svc.DeleteWorktree(context.Background(), repo, "a", false); err != nil {
 		t.Fatalf("DeleteWorktree: %v", err)
 	}
-	if len(h.gh.switches) != 2 || h.gh.active != "personal" {
-		t.Errorf("delete should switch to work then restore personal, switches=%v active=%q", h.gh.switches, h.gh.active)
+	if !reflect.DeepEqual(h.gh.tokens, [][2]string{{"github.com", "work"}}) {
+		t.Errorf("delete should resolve the work token, got %v", h.gh.tokens)
 	}
 }
 
-func TestWorktreeViewsSwitchesLogin(t *testing.T) {
+func TestWorktreeViewsUsesRepoLoginToken(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repoWithLogin(t, "work")
 	h.gh.active = "personal"
@@ -761,13 +823,14 @@ func TestWorktreeViewsSwitchesLogin(t *testing.T) {
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
 		t.Fatalf("seed sync: %v", err)
 	}
-	h.gh.switches = nil
+	h.gh.tokens = nil
+	h.gh.prTokens = nil
 
 	if _, err := h.svc.WorktreeViews(context.Background(), repo); err != nil {
 		t.Fatalf("WorktreeViews: %v", err)
 	}
-	if len(h.gh.switches) != 2 || h.gh.active != "personal" {
-		t.Errorf("views should switch to work then restore personal, switches=%v active=%q", h.gh.switches, h.gh.active)
+	if !reflect.DeepEqual(h.gh.prTokens, []string{"tok-work"}) {
+		t.Errorf("views should run under the work token, got %v", h.gh.prTokens)
 	}
 }
 

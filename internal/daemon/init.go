@@ -63,8 +63,7 @@ func (s *Service) InitRepository(ctx context.Context, localPath string) (*schema
 
 	// Serialise the repo insert and worktree adoption with the daemon's other
 	// worktree mutations: the daemon is the single writer (AGENTS.md).
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockAllRepositories()()
 	if err := s.db.CreateRepository(ctx, repo); err != nil {
 		return nil, nil, err
 	}

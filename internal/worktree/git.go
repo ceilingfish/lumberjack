@@ -3,22 +3,33 @@ package worktree
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/ceilingfish/lumberjack/internal/ghauth"
 )
 
 // EnvGitPath overrides the git executable location; otherwise git is found on
 // PATH (see docs/prd.md environment variables).
 const EnvGitPath = "LUMBERJACK_GIT_PATH"
 
+const envGitTimeout = "LUMBERJACK_GIT_TIMEOUT"
+
+const defaultCommandTimeout = 5 * time.Minute
+
+const commandWaitDelay = 10 * time.Second
+
 // Git runs the system git binary. Lumberjack shells out rather than linking a
 // git library so the binary stays self-contained and inherits the user's git
 // configuration (AGENTS.md, "single self-contained binary").
 type Git struct {
-	bin string
+	bin     string
+	timeout time.Duration
 }
 
 // NewGit resolves the git executable, honouring LUMBERJACK_GIT_PATH and
@@ -29,7 +40,41 @@ func NewGit() (*Git, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Git{bin: bin}, nil
+	return &Git{bin: bin, timeout: timeoutFromEnv()}, nil
+}
+
+func timeoutFromEnv() time.Duration {
+	raw, ok := os.LookupEnv(envGitTimeout)
+	if !ok {
+		return defaultCommandTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultCommandTimeout
+	}
+	return d
+}
+
+func (g *Git) command(
+	ctx context.Context, dir string, args ...string,
+) (*exec.Cmd, context.Context, context.CancelFunc) {
+	timeout := g.timeout
+	if timeout <= 0 {
+		timeout = defaultCommandTimeout
+	}
+	cctx, cancel := context.WithTimeout(ctx, timeout)
+	cmd := exec.CommandContext(cctx, g.bin, args...)
+	cmd.Dir = dir
+	cmd.Env = ghauth.Env(ctx, os.Environ())
+	cmd.WaitDelay = commandWaitDelay
+	return cmd, cctx, cancel
+}
+
+func timeoutError(cctx context.Context, timeout time.Duration, what string) error {
+	if !errors.Is(cctx.Err(), context.DeadlineExceeded) {
+		return nil
+	}
+	return fmt.Errorf("git %s: timed out after %s", what, timeout)
 }
 
 // Path is the resolved absolute path to the git binary (surfaced by doctor).
@@ -39,17 +84,21 @@ func (g *Git) Path() string { return g.bin }
 // returning trimmed stdout. On failure the error carries git's stderr, which
 // is where git writes its diagnostics.
 func (g *Git) run(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, g.bin, args...)
-	cmd.Dir = dir
+	cmd, cctx, cancel := g.command(ctx, dir, args...)
+	defer cancel()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		joined := strings.Join(args, " ")
+		if tErr := timeoutError(cctx, g.timeout, joined); tErr != nil {
+			return "", tErr
+		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+		return "", fmt.Errorf("git %s: %s", joined, msg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
@@ -207,8 +256,8 @@ func (g *Git) DefaultBranch(ctx context.Context, repoPath, remote string) (strin
 // path does not — the caller's config file is simply absent there, which is
 // not itself a failure.
 func (g *Git) ShowFile(ctx context.Context, repoPath, ref, path string) (data []byte, found bool, err error) {
-	cmd := exec.CommandContext(ctx, g.bin, "show", ref+":"+path)
-	cmd.Dir = repoPath
+	cmd, cctx, cancel := g.command(ctx, repoPath, "show", ref+":"+path)
+	defer cancel()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -216,6 +265,9 @@ func (g *Git) ShowFile(ctx context.Context, repoPath, ref, path string) (data []
 		msg := strings.TrimSpace(stderr.String())
 		if strings.Contains(msg, "does not exist in") || strings.Contains(msg, "exists on disk, but not in") {
 			return nil, false, nil
+		}
+		if tErr := timeoutError(cctx, g.timeout, "show "+ref+":"+path); tErr != nil {
+			return nil, false, tErr
 		}
 		if msg == "" {
 			msg = err.Error()

@@ -3,16 +3,20 @@ package daemon
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"go.uber.org/fx"
 
 	"github.com/ceilingfish/lumberjack/internal/database"
+	"github.com/ceilingfish/lumberjack/internal/database/schema"
 )
 
 // SyncInterval is how often the background loop reconciles every tracked
 // repository (docs/prd.md: "on an hourly basis").
 const SyncInterval = time.Hour
+
+const syncConcurrency = 3
 
 // runSyncLoop starts the hourly background sync under fx's lifecycle: it runs
 // once shortly after startup, then on every tick, until the daemon stops.
@@ -63,15 +67,38 @@ func syncAll(ctx context.Context, svc *Service, db *database.Client) {
 		log.Printf("sync loop: listing repositories: %v", err)
 		return
 	}
+
+	queue := make(chan *schema.Repository)
+	var wg sync.WaitGroup
+	for range min(syncConcurrency, len(repos)) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for repo := range queue {
+				syncOne(ctx, svc, repo)
+			}
+		}()
+	}
+
+feed:
 	for i := range repos {
-		repo := &repos[i]
-		created, removed, err := svc.SyncRepository(ctx, repo, nil)
-		if err != nil {
-			log.Printf("sync loop: %s: %v", displayName(repo), err)
-			continue
+		select {
+		case <-ctx.Done():
+			break feed
+		case queue <- &repos[i]:
 		}
-		if created > 0 || removed > 0 {
-			log.Printf("sync loop: %s: +%d worktree(s), -%d", displayName(repo), created, removed)
-		}
+	}
+	close(queue)
+	wg.Wait()
+}
+
+func syncOne(ctx context.Context, svc *Service, repo *schema.Repository) {
+	created, removed, err := svc.SyncRepository(ctx, repo, nil)
+	if err != nil {
+		log.Printf("sync loop: %s: %v", displayName(repo), err)
+		return
+	}
+	if created > 0 || removed > 0 {
+		log.Printf("sync loop: %s: +%d worktree(s), -%d", displayName(repo), created, removed)
 	}
 }

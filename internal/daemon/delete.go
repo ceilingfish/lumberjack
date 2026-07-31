@@ -24,11 +24,10 @@ type DeleteResult struct {
 // deleting, so the CLI can warn the user; a second call with force=true then
 // performs the deletion (see DeleteWorktreeRequest.force in the proto).
 func (s *Service) DeleteWorktree(ctx context.Context, repo *schema.Repository, ref string, force bool) (DeleteResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
 	var res DeleteResult
-	err := s.withRepoLogin(ctx, repo, func() error {
+	err := s.withRepoLogin(ctx, repo, func(ctx context.Context) error {
 		var derr error
 		res, derr = s.deleteWorktreeLocked(ctx, repo, ref, force)
 		return derr
