@@ -303,6 +303,131 @@ func TestTouchWorktreesSyncedAt(t *testing.T) {
 	}
 }
 
+func TestUpdateSetupConsent(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	if err := c.CreateRepository(ctx, repo); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	got, _ := c.repositoryByID(ctx, repo.ID)
+	if got.SetupConsentFingerprint != "" {
+		t.Fatalf("expected no consent before it is granted, got %q", got.SetupConsentFingerprint)
+	}
+
+	if err := c.UpdateSetupConsent(ctx, repo.ID, "sha256:abc"); err != nil {
+		t.Fatalf("UpdateSetupConsent: %v", err)
+	}
+	got, _ = c.repositoryByID(ctx, repo.ID)
+	if got.SetupConsentFingerprint != "sha256:abc" {
+		t.Errorf("SetupConsentFingerprint = %q, want sha256:abc", got.SetupConsentFingerprint)
+	}
+
+	if err := c.UpdateSetupConsent(ctx, repo.ID, ""); err != nil {
+		t.Fatalf("UpdateSetupConsent(clear): %v", err)
+	}
+	got, _ = c.repositoryByID(ctx, repo.ID)
+	if got.SetupConsentFingerprint != "" {
+		t.Errorf("an empty fingerprint should clear consent, got %q", got.SetupConsentFingerprint)
+	}
+}
+
+func TestSetWorktreePR(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	wt := &schema.Worktree{
+		RepositoryID: repo.ID, BranchName: "feature/x", DirectoryPath: "/parent/a-x",
+	}
+	if err := c.CreateWorktree(ctx, wt); err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	num := int64(7)
+	if err := c.SetWorktreePR(ctx, wt.ID, &num, "feature/x-renamed"); err != nil {
+		t.Fatalf("SetWorktreePR: %v", err)
+	}
+	got, err := c.FindWorktree(ctx, repo.ID, "feature/x-renamed")
+	if err != nil {
+		t.Fatalf("FindWorktree: %v", err)
+	}
+	if got.GithubPRNumber == nil || *got.GithubPRNumber != num {
+		t.Errorf("GithubPRNumber = %v, want %d", got.GithubPRNumber, num)
+	}
+
+	if err := c.SetWorktreePR(ctx, wt.ID, nil, "feature/x"); err != nil {
+		t.Fatalf("SetWorktreePR(nil): %v", err)
+	}
+	got, err = c.FindWorktree(ctx, repo.ID, "feature/x")
+	if err != nil {
+		t.Fatalf("FindWorktree: %v", err)
+	}
+	if got.GithubPRNumber != nil {
+		t.Errorf("GithubPRNumber = %v, want nil after unlinking", got.GithubPRNumber)
+	}
+}
+
+func TestSetWorktreeDirectory(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	wt := &schema.Worktree{
+		RepositoryID: repo.ID, BranchName: "feature/x", DirectoryPath: "/parent/a-x",
+	}
+	_ = c.CreateWorktree(ctx, wt)
+
+	if err := c.SetWorktreeDirectory(ctx, wt.ID, "/parent/a-feature-x"); err != nil {
+		t.Fatalf("SetWorktreeDirectory: %v", err)
+	}
+
+	got, err := c.FindWorktree(ctx, repo.ID, "/parent/a-feature-x")
+	if err != nil {
+		t.Fatalf("FindWorktree at the new directory: %v", err)
+	}
+	if got.ID != wt.ID {
+		t.Errorf("FindWorktree returned id %d, want %d", got.ID, wt.ID)
+	}
+	if _, err := c.FindWorktree(ctx, repo.ID, "/parent/a-x"); !errors.Is(err, ErrWorktreeNotFound) {
+		t.Errorf("the old directory should no longer resolve, got %v", err)
+	}
+}
+
+func TestSetWorktreeSetupError(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	wt := &schema.Worktree{
+		RepositoryID: repo.ID, BranchName: "feature/x", DirectoryPath: "/parent/a-x",
+	}
+	_ = c.CreateWorktree(ctx, wt)
+
+	list, _ := c.ListWorktrees(ctx, repo.ID)
+	if list[0].SetupError != nil {
+		t.Fatalf("expected no setup error initially, got %v", list[0].SetupError)
+	}
+
+	msg := "step 2 (run-command): exit status 1"
+	if err := c.SetWorktreeSetupError(ctx, wt.ID, &msg); err != nil {
+		t.Fatalf("SetWorktreeSetupError: %v", err)
+	}
+	list, _ = c.ListWorktrees(ctx, repo.ID)
+	if list[0].SetupError == nil || *list[0].SetupError != msg {
+		t.Errorf("SetupError = %v, want %q", list[0].SetupError, msg)
+	}
+
+	if err := c.SetWorktreeSetupError(ctx, wt.ID, nil); err != nil {
+		t.Fatalf("SetWorktreeSetupError(nil): %v", err)
+	}
+	list, _ = c.ListWorktrees(ctx, repo.ID)
+	if list[0].SetupError != nil {
+		t.Errorf("SetupError = %v, want nil after clearing", list[0].SetupError)
+	}
+}
+
 func TestDeleteRepository(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
