@@ -7,8 +7,8 @@ import Foundation
 enum SocketPath {
     static let envOverride = "LUMBERJACK_SOCKET_PATH"
 
-    static func resolve() -> String {
-        if let override = ProcessInfo.processInfo.environment[envOverride], !override.isEmpty {
+    static func resolve(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        if let override = environment[envOverride], !override.isEmpty {
             return override
         }
         // Go's os.UserHomeDir() (used by pkg/client.DefaultSocketPath and the
@@ -17,7 +17,7 @@ enum SocketPath {
         // the current user — so it can disagree with the Go side whenever
         // $HOME is overridden (containers, some CI, `su`/`sudo -u`). Check
         // $HOME first to keep the two resolutions in agreement.
-        if let home = ProcessInfo.processInfo.environment["HOME"], !home.isEmpty {
+        if let home = environment["HOME"], !home.isEmpty {
             return URL(fileURLWithPath: home).appendingPathComponent(".lumberjack/daemon.sock").path
         }
         let home = FileManager.default.homeDirectoryForCurrentUser
