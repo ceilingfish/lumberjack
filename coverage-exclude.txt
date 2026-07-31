@@ -1,5 +1,5 @@
-# Coverage exclusion list, shared by the Go coverage gate
-# (scripts/coverage.sh) and the Swift coverage mechanism.
+# Coverage exclusion list, applied to both codebases by the per-package
+# coverage gate (scripts/coverage-gate.ps1).
 #
 # One glob pattern per line. Blank lines and "#" comments are ignored.
 # A leading "/" anchors the pattern to the repository root; patterns with no

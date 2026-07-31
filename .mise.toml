@@ -8,6 +8,7 @@ uv = "0.9.28"
 "pipx:sqlfluff" = "3.4.2"
 buf = "1.71.0"
 "github:gastownhall/beads" = "latest"
+powershell = "7.6.4"
 # node provides npx, used by the `skills` task to install agent skills.
 node = "24.10.0"
 
@@ -38,17 +39,51 @@ run = "go run ."
 description = 'Print the shell completion script, e.g. eval "$(mise run shell-completion zsh)"'
 run = "go run . completion"
 
-[tasks.test]
-description = "Run the test suite"
-run = "go test ./..."
+# The two codebases are formatted, linted and tested independently: `cli:*`
+# acts on the Go CLI/daemon, `osx:*` on the Swift menu-bar app under macos/.
+# They deliberately share no task — different toolchains, different file sets,
+# different failure modes. The one place they meet is `coverage`, which reads
+# the profiles `cli:test` and `osx:test` leave behind.
 
-[tasks.format]
+[tasks."cli:test"]
+description = "Run the Go test suite, writing the coverage profile `cli:lcov` reads"
+run = "go test -covermode=atomic -coverprofile=coverage.out ./..."
+
+[tasks."cli:format"]
 description = "Format all Go source with gofumpt"
 run = "gofumpt -w ."
 
-[tasks.lint]
+# Check-only counterpart to `cli:format`, for CI: fails on a diff instead of
+# writing one, so the release workflow never pushes a reformatting commit.
+[tasks."cli:format-check"]
+description = "Check Go formatting with gofumpt; fails on a diff without writing"
+run = "scripts/format-check.sh"
+
+[tasks."cli:lint"]
 description = "Run golangci-lint"
 run = "golangci-lint run"
+
+# swift-format ships with the Swift 6 toolchain the app already requires (see
+# macos/README.md), so linting and formatting Swift adds no new dependency.
+[tasks."osx:test"]
+description = "Run the Swift test suite, emitting the coverage data `osx:lcov` reads"
+run = "scripts/osx-test.sh"
+
+[tasks."osx:format"]
+description = "Format all Swift source with swift-format"
+dir = "macos"
+run = "swift format --in-place --recursive Sources Tests"
+
+# Check-only counterpart to `osx:format`, the parallel of `cli:format-check`.
+[tasks."osx:format-check"]
+description = "Check Swift formatting with swift-format; fails on a diff without writing"
+dir = "macos"
+run = "swift format lint --recursive --strict Sources Tests"
+
+[tasks."osx:lint"]
+description = "Lint Swift source with swift-format"
+dir = "macos"
+run = "swift format lint --recursive Sources Tests"
 
 [tasks.format-sql]
 description = "Auto-fix SQL migration formatting with sqlfluff"
@@ -74,17 +109,29 @@ run = "buf lint"
 description = "Check protobuf for breaking changes against main"
 run = "buf breaking --against '.git#branch=main'"
 
-# The floor is per package, not a global average, and it ratchets: it sits at
-# the current passing floor (pkg/client, the least-covered package) and each
-# coverage child of issue #6 raises it as that package is brought up to
-# standard, until 95% can be committed last. The gate must never land on main
-# in a state that fails there.
-[tasks.coverage]
-description = "Run tests with per-package coverage; fail if any package is below 48%"
-run = "scripts/coverage.sh 48"
+[tasks."cli:lcov"]
+description = "Convert the cli:test Go profile to lcov"
+wait_for = ["cli:test"]
+run = "scripts/go-lcov.sh"
 
-# Restores the agent skills pinned in skills-lock.json (see https://skills.sh).
-# Run after cloning to install project skills such as go-code-review.
+[tasks."osx:lcov"]
+description = "Export the osx:test Swift coverage to lcov"
+wait_for = ["osx:test"]
+run = "scripts/osx-lcov.sh"
+
+[tasks."coverage:check"]
+description = "Merge the Go and Swift lcov reports; fail if any package is below 80%"
+wait_for = ["cli:lcov", "osx:lcov"]
+run = "pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 80"
+
+[tasks.coverage]
+description = "Run both suites and check every package against the per-package floor"
+depends = ["cli:test", "osx:test", "cli:lcov", "osx:lcov", "coverage:check"]
+
+[tasks."coverage:gate-test"]
+description = "Run the Pester tests for the coverage gate"
+run = "pwsh -NoProfile -File scripts/coverage-gate-test.ps1"
+
 [tasks.skills]
 description = "Install agent skills pinned in skills-lock.json"
 run = "npx --yes skills experimental_install"

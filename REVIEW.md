@@ -18,11 +18,16 @@ in [AGENTS.md](AGENTS.md). In particular:
 
 ## 2. Format & lint
 
-Run the formatter and linter, and resolve any issues:
+The two codebases are formatted and linted separately — `cli:*` for the Go
+CLI/daemon, `osx:*` for the Swift menu-bar app. Run the pair for whichever the
+branch touches, and resolve any issues:
 
 ```sh
-mise run format
-mise run lint
+mise run cli:format    # Go
+mise run cli:lint
+
+mise run osx:format    # Swift, under macos/
+mise run osx:lint
 ```
 
 If the current branch changes any SQL files, also run the SQL formatter and
@@ -62,7 +67,8 @@ alongside the `.proto` change.
 Run the test suite and ensure **all tests pass**:
 
 ```sh
-mise run test
+mise run cli:test    # Go
+mise run osx:test    # Swift, under macos/
 ```
 
 ## 4. Coverage
@@ -80,22 +86,34 @@ containing code but no test files **fails** — packages with no tests are absen
 from Go's coverage profile entirely, and that absence is exactly what the gate
 exists to catch.
 
-The threshold is the script's single positional argument, so it can be
-ratcheted upward as packages are brought up to standard:
+It covers both codebases, with the Swift app treated as a package
+(`macos/Sources/LumberjackMenuBar`) alongside the Go ones. Both halves reach
+the gate as lcov, produced by `cli:lcov` and `osx:lcov`; the per-language
+subtotals and merged total the run prints are information only, not the gate.
+
+The threshold is the gate's `-Threshold` argument, so it can be ratcheted
+upward as packages are brought up to standard:
 
 ```sh
-scripts/coverage.sh 48    # what `mise run coverage` runs today
+pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 80   # what `mise run coverage` runs today
 ```
 
-It sits at the current passing floor rather than the 95% target, and each
-coverage child of issue #6 raises it as its package lands. **Never commit a
-threshold that fails on `main`.**
+It sits below the 95% target, and each coverage child of issue #6 raises it as
+its package lands. **The floor currently fails on `main`**, and that is
+deliberate: releases are gated on the tests passing, not on the floor being
+met, so the `coverage` job in
+[the release workflow](.github/workflows/release.yml) reports the gate without
+blocking `release-please`. Do not lower the threshold to make a change pass;
+raise the coverage of what you touched instead.
 
 Files listed in [`coverage-exclude.txt`](coverage-exclude.txt) count toward
 neither numerator nor denominator. Add an entry only with a comment justifying
 it, and prefer making code testable over exempting it. A leading `/` anchors a
 pattern to the repository root, a pattern with no `/` matches a base name at
 any depth, and `**` matches zero or more path segments.
+
+The gate's own logic is tested — run `mise run coverage:gate-test` (Pester)
+when changing it.
 
 ## 5. Stylistic review
 

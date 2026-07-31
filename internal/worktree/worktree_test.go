@@ -134,6 +134,26 @@ func TestReconcileClosedButClean(t *testing.T) {
 	}
 }
 
+// A directory that exists but holds no .git entry is a husk left behind by an
+// out-of-band removal (e.g. ignored build artifacts that survived `git
+// worktree remove`). It must reconcile as Missing rather than fail the sync
+// with "not a git repository".
+func TestReconcileHuskDir(t *testing.T) {
+	g, main := setupRepos(t)
+	dir := filepath.Join(filepath.Dir(main), "husk")
+	if err := os.MkdirAll(filepath.Join(dir, ".next"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Reconcile(context.Background(), g, dir, PROpen)
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if !st.Missing || st.Note != "directory is no longer a git worktree" {
+		t.Errorf("expected Missing husk: %+v", st)
+	}
+}
+
 func TestReconcileMissingDir(t *testing.T) {
 	g, main := setupRepos(t)
 	st, err := Reconcile(context.Background(), g, filepath.Join(filepath.Dir(main), "gone"), PROpen)
