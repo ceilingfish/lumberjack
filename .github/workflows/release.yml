@@ -41,7 +41,7 @@ jobs:
       - uses: ./.github/actions/coverage-gate
 
   release-please:
-    needs: [cli-checks, osx-checks]
+    needs: [coverage]
     runs-on: ubuntu-latest
     outputs:
       cli_release_created: ${{ steps.release.outputs.release_created }}
