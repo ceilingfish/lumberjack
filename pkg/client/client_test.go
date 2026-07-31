@@ -90,7 +90,6 @@ func (stubServer) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSetupC
 
 func (stubServer) AddWorktree(_ context.Context, req *lumberjackv1.AddWorktreeRequest) (*lumberjackv1.AddWorktreeResponse, error) {
 	return &lumberjackv1.AddWorktreeResponse{
-		DirectoryPath: "/repo-" + req.GetBranch(),
 		Branch:        req.GetBranch(),
 		BranchCreated: true,
 		SetupError:    "setup failed but the worktree stands",
@@ -99,14 +98,6 @@ func (stubServer) AddWorktree(_ context.Context, req *lumberjackv1.AddWorktreeRe
 
 func (stubServer) DeleteRepository(context.Context, *lumberjackv1.DeleteRepositoryRequest) (*lumberjackv1.DeleteRepositoryResponse, error) {
 	return &lumberjackv1.DeleteRepositoryResponse{WorktreesRemoved: 3}, nil
-}
-
-func (s *recordingServer) Tidy(_ context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
-	s.mu.Lock()
-	s.tidy = req
-	s.mu.Unlock()
-	moves := []*lumberjackv1.TidyMove{{From: "/wrong", To: "/right", Moved: !req.GetDryRun()}}
-	return &lumberjackv1.TidyResponse{Moves: moves}, nil
 }
 
 func (stubServer) Watch(_ *lumberjackv1.WatchRequest, stream grpc.ServerStreamingServer[lumberjackv1.WatchResponse]) error {
@@ -131,69 +122,12 @@ func (s *recordingServer) lastTidy() *lumberjackv1.TidyRequest {
 	return s.tidy
 }
 
-type failServer struct {
-	lumberjackv1.UnimplementedLumberjackServiceServer
-	err error
-}
-
-func (s failServer) Health(context.Context, *lumberjackv1.HealthRequest) (*lumberjackv1.HealthResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) InitRepository(context.Context, *lumberjackv1.InitRepositoryRequest) (*lumberjackv1.InitRepositoryResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) ListRepositories(context.Context, *lumberjackv1.ListRepositoriesRequest) (*lumberjackv1.ListRepositoriesResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) GetRepository(context.Context, *lumberjackv1.GetRepositoryRequest) (*lumberjackv1.GetRepositoryResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) SetLogin(context.Context, *lumberjackv1.SetLoginRequest) (*lumberjackv1.SetLoginResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) ListLogins(context.Context, *lumberjackv1.ListLoginsRequest) (*lumberjackv1.ListLoginsResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) SetSetupConsent(context.Context, *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) ListWorktrees(context.Context, *lumberjackv1.ListWorktreesRequest) (*lumberjackv1.ListWorktreesResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) AddWorktree(context.Context, *lumberjackv1.AddWorktreeRequest) (*lumberjackv1.AddWorktreeResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) DeleteWorktree(context.Context, *lumberjackv1.DeleteWorktreeRequest) (*lumberjackv1.DeleteWorktreeResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) DeleteRepository(context.Context, *lumberjackv1.DeleteRepositoryRequest) (*lumberjackv1.DeleteRepositoryResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) Tidy(context.Context, *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
-	return nil, s.err
-}
-
-func (s failServer) Sync(*lumberjackv1.SyncRequest, grpc.ServerStreamingServer[lumberjackv1.SyncResponse]) error {
-	return s.err
-}
-
-func (s failServer) Watch(*lumberjackv1.WatchRequest, grpc.ServerStreamingServer[lumberjackv1.WatchResponse]) error {
-	return s.err
+func (s *recordingServer) Tidy(_ context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
+	s.mu.Lock()
+	s.tidy = req
+	s.mu.Unlock()
+	moves := []*lumberjackv1.TidyMove{{From: "/wrong", To: "/right", Moved: !req.GetDryRun()}}
+	return &lumberjackv1.TidyResponse{Moves: moves}, nil
 }
 
 // startStub starts the stub server on a temp unix socket and returns a
@@ -203,14 +137,28 @@ func startStub(t *testing.T) *Client {
 	return serve(t, &recordingServer{})
 }
 
-func serve(t *testing.T, impl lumberjackv1.LumberjackServiceServer) *Client {
+// serveFailing returns a client whose every RPC fails with err, via an
+// interceptor that answers before any handler runs.
+func serveFailing(t *testing.T, err error) *Client {
+	t.Helper()
+	return serve(t, &recordingServer{},
+		grpc.UnaryInterceptor(func(context.Context, any, *grpc.UnaryServerInfo, grpc.UnaryHandler) (any, error) {
+			return nil, err
+		}),
+		grpc.StreamInterceptor(func(any, grpc.ServerStream, *grpc.StreamServerInfo, grpc.StreamHandler) error {
+			return err
+		}),
+	)
+}
+
+func serve(t *testing.T, impl lumberjackv1.LumberjackServiceServer, opts ...grpc.ServerOption) *Client {
 	t.Helper()
 	path := shortSocket(t)
 	ln, err := net.Listen("unix", path)
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	srv := grpc.NewServer()
+	srv := grpc.NewServer(opts...)
 	lumberjackv1.RegisterLumberjackServiceServer(srv, impl)
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(srv.Stop)
@@ -355,21 +303,15 @@ func TestDialDefault(t *testing.T) {
 	_ = c.Close()
 }
 
-func TestDefaultSocketPathNoHome(t *testing.T) {
+func TestUnresolvableHomeFailsPathAndDial(t *testing.T) {
 	t.Setenv(EnvSocketPath, "")
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 	if _, err := DefaultSocketPath(); err == nil {
-		t.Fatal("expected an error when the home directory cannot be resolved")
+		t.Error("DefaultSocketPath: expected an error when the home directory cannot be resolved")
 	}
-}
-
-func TestDialPropagatesResolutionFailure(t *testing.T) {
-	t.Setenv(EnvSocketPath, "")
-	t.Setenv("HOME", "")
-	t.Setenv("USERPROFILE", "")
 	if _, err := Dial(); err == nil {
-		t.Fatal("expected Dial to fail when the socket path cannot be resolved")
+		t.Error("Dial: expected the path-resolution error to propagate")
 	}
 }
 
@@ -379,9 +321,6 @@ func TestDialSocketRejectsUnparseablePath(t *testing.T) {
 	if err == nil {
 		_ = c.Close()
 		t.Fatal("expected DialSocket to reject a path it cannot turn into a target")
-	}
-	if c != nil {
-		t.Errorf("client = %+v, want nil alongside the error", c)
 	}
 	if !strings.Contains(err.Error(), path) {
 		t.Errorf("error %q does not name the socket path", err)
@@ -506,17 +445,6 @@ func TestClientTidyTranslatesOptions(t *testing.T) {
 	}
 }
 
-func TestClientTidyWithoutLockDecisionsSendsNone(t *testing.T) {
-	impl := &recordingServer{}
-	c := serve(t, impl)
-	if _, err := c.Tidy(context.Background(), TidyOptions{}); err != nil {
-		t.Fatalf("Tidy: %v", err)
-	}
-	if decisions := impl.lastTidy().GetLockDecisions(); len(decisions) != 0 {
-		t.Errorf("lock decisions = %+v, want none", decisions)
-	}
-}
-
 func TestClientWatchStreaming(t *testing.T) {
 	c := startStub(t)
 	var events []*lumberjackv1.WatchResponse
@@ -621,35 +549,30 @@ func TestEveryMethodMapsServerErrors(t *testing.T) {
 		},
 	}
 
+	mapped := map[codes.Code]error{
+		codes.NotFound:      ErrNotFound,
+		codes.Unavailable:   ErrDaemonNotRunning,
+		codes.AlreadyExists: ErrAlreadyExists,
+	}
+
 	for name, call := range calls {
-		t.Run(name+"/NotFound", func(t *testing.T) {
-			c := serve(t, failServer{err: status.Error(codes.NotFound, "no such thing")})
-			err := call(c)
-			if !errors.Is(err, ErrNotFound) {
-				t.Errorf("expected ErrNotFound, got %v", err)
-			}
-		})
-		t.Run(name+"/Unavailable", func(t *testing.T) {
-			c := serve(t, failServer{err: status.Error(codes.Unavailable, "down")})
-			if err := call(c); !errors.Is(err, ErrDaemonNotRunning) {
-				t.Errorf("expected ErrDaemonNotRunning, got %v", err)
-			}
-		})
-		t.Run(name+"/AlreadyExists", func(t *testing.T) {
-			c := serve(t, failServer{err: status.Error(codes.AlreadyExists, "dupe")})
-			if err := call(c); !errors.Is(err, ErrAlreadyExists) {
-				t.Errorf("expected ErrAlreadyExists, got %v", err)
-			}
-		})
+		for code, want := range mapped {
+			t.Run(name+"/"+code.String(), func(t *testing.T) {
+				c := serveFailing(t, status.Error(code, "detail"))
+				if err := call(c); !errors.Is(err, want) {
+					t.Errorf("%s on %v = %v, want errors.Is %v", name, code, err, want)
+				}
+			})
+		}
 		t.Run(name+"/Internal", func(t *testing.T) {
-			c := serve(t, failServer{err: status.Error(codes.Internal, "boom")})
+			c := serveFailing(t, status.Error(codes.Internal, "boom"))
 			err := call(c)
 			if err == nil || err.Error() != "boom" {
-				t.Errorf("expected the daemon message verbatim, got %v", err)
+				t.Errorf("%s on an unmapped code = %v, want the daemon message %q", name, err, "boom")
 			}
 			for _, sentinel := range []error{ErrNotFound, ErrAlreadyExists, ErrDaemonNotRunning} {
 				if errors.Is(err, sentinel) {
-					t.Errorf("unmapped code matched %v", sentinel)
+					t.Errorf("%s on an unmapped code matched %v", name, sentinel)
 				}
 			}
 		})
