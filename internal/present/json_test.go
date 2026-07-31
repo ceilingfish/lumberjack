@@ -111,9 +111,12 @@ func TestWriteJSONListSeparatesElementsAndEndsWithNewline(t *testing.T) {
 
 func TestWriteJSONListMarshalError(t *testing.T) {
 	var buf bytes.Buffer
-	err := WriteJSONList(&buf, []*lumberjackv1.Repository{invalidUTF8Repo()})
-	if err == nil {
+	repos := []*lumberjackv1.Repository{{DirPrefix: "a"}, invalidUTF8Repo()}
+	if err := WriteJSONList(&buf, repos); err == nil {
 		t.Fatalf("expected an error for an unmarshalable message, wrote %q", buf.String())
+	}
+	if buf.Len() != 0 {
+		t.Errorf("wrote %q, want nothing: a failed list must not emit truncated JSON", buf.String())
 	}
 }
 
