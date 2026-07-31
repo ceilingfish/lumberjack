@@ -405,6 +405,16 @@ nonisolated struct Lumberjack_V1_Worktree: Sendable {
   /// reconciliation_note is a human-readable summary; empty when in sync.
   var reconciliationNote: String = String()
 
+  /// branch_disparity is true when the branch checked out in the directory is
+  /// not the branch of its pull request. Such a worktree is never cleaned up
+  /// automatically, and no worktree is created for a PR whose branch is checked
+  /// out somewhere else.
+  var branchDisparity: Bool = false
+
+  /// checked_out_branch is the branch git reports in the directory, empty for a
+  /// detached HEAD. It differs from branch_name exactly when branch_disparity.
+  var checkedOutBranch: String = String()
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
@@ -1269,7 +1279,7 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension Lumberjack_V1_Worktree: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".Worktree"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}branch_name\0\u{3}directory_path\0\u{3}github_pr_number\0\u{4}\u{2}last_synced_at\0\u{3}needs_reconciliation\0\u{1}dirty\0\u{1}orphaned\0\u{3}local_only_commits\0\u{3}reconciliation_note\0\u{b}created_by\0\u{c}\u{4}\u{1}")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}branch_name\0\u{3}directory_path\0\u{3}github_pr_number\0\u{4}\u{2}last_synced_at\0\u{3}needs_reconciliation\0\u{1}dirty\0\u{1}orphaned\0\u{3}local_only_commits\0\u{3}reconciliation_note\0\u{3}branch_disparity\0\u{3}checked_out_branch\0\u{b}created_by\0\u{c}\u{4}\u{1}")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1286,6 +1296,8 @@ nonisolated extension Lumberjack_V1_Worktree: SwiftProtobuf.Message, SwiftProtob
       case 8: try { try decoder.decodeSingularBoolField(value: &self.orphaned) }()
       case 9: try { try decoder.decodeSingularInt64Field(value: &self.localOnlyCommits) }()
       case 10: try { try decoder.decodeSingularStringField(value: &self.reconciliationNote) }()
+      case 11: try { try decoder.decodeSingularBoolField(value: &self.branchDisparity) }()
+      case 12: try { try decoder.decodeSingularStringField(value: &self.checkedOutBranch) }()
       default: break
       }
     }
@@ -1323,6 +1335,12 @@ nonisolated extension Lumberjack_V1_Worktree: SwiftProtobuf.Message, SwiftProtob
     if !self.reconciliationNote.isEmpty {
       try visitor.visitSingularStringField(value: self.reconciliationNote, fieldNumber: 10)
     }
+    if self.branchDisparity != false {
+      try visitor.visitSingularBoolField(value: self.branchDisparity, fieldNumber: 11)
+    }
+    if !self.checkedOutBranch.isEmpty {
+      try visitor.visitSingularStringField(value: self.checkedOutBranch, fieldNumber: 12)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1336,6 +1354,8 @@ nonisolated extension Lumberjack_V1_Worktree: SwiftProtobuf.Message, SwiftProtob
     if lhs.orphaned != rhs.orphaned {return false}
     if lhs.localOnlyCommits != rhs.localOnlyCommits {return false}
     if lhs.reconciliationNote != rhs.reconciliationNote {return false}
+    if lhs.branchDisparity != rhs.branchDisparity {return false}
+    if lhs.checkedOutBranch != rhs.checkedOutBranch {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

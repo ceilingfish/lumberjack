@@ -376,7 +376,8 @@ struct MenuBarView: View {
                     ForEach(visibleWorktrees, id: \.directoryPath) { worktree in
                         WorktreeRow(
                             worktree: worktree,
-                            prURL: prURL(for: worktree),
+                            prURL: MenuBarPresentation.prURL(
+                                repository: state.selectedRepositoryObject, worktree: worktree),
                             isSyncing: state.syncing
                         )
                     }
@@ -510,14 +511,8 @@ struct MenuBarView: View {
 
     @ViewBuilder
     private var statusArea: some View {
-        let (text, symbol): (String, String) = {
-            switch state.connectionState {
-            case .connecting: return ("Connecting to daemon…", "arrow.triangle.2.circlepath")
-            case .daemonNotRunning: return ("Daemon not running", "exclamationmark.triangle")
-            case .connected: return ("No repositories tracked", "tray")
-            }
-        }()
-        Label(text, systemImage: symbol)
+        let status = MenuBarPresentation.statusMessage(state.connectionState)
+        Label(status.text, systemImage: status.symbol)
             .font(.system(size: 12))
             .foregroundStyle(Palette.subtleText)
             .frame(maxWidth: .infinity)
@@ -528,62 +523,27 @@ struct MenuBarView: View {
     // MARK: Derived values
 
     private var selectedRepositoryName: String {
-        state.selectedRepositoryObject?.githubName ?? "Select repository"
+        MenuBarPresentation.selectedRepositoryName(state.selectedRepositoryObject)
     }
 
     private var headerSubtitle: String {
-        switch state.connectionState {
-        case .connecting:
-            return "Connecting to daemon…"
-        case .daemonNotRunning:
-            return "Daemon not running"
-        case .connected:
-            let n = state.repositories.count
-            var s = "Watching \(n) \(n == 1 ? "repository" : "repositories")"
-            if let synced = latestSyncText { s += " · synced \(synced)" }
-            return s
-        }
-    }
-
-    private var latestSyncText: String? {
-        let dates = state.repositories.compactMap { repo -> Date? in
-            guard repo.hasLastSyncedAt else { return nil }
-            return date(from: repo.lastSyncedAt)
-        }
-        guard let newest = dates.max() else { return nil }
-        return newest.formatted(.relative(presentation: .named))
+        MenuBarPresentation.headerSubtitle(state.connectionState, repositories: state.repositories)
     }
 
     private var worktreeSummary: String {
-        let inSync = state.worktrees.filter { !$0.needsReconciliation && !$0.orphaned }.count
-        let attention = state.worktrees.filter { $0.needsReconciliation }.count
-        let orphaned = state.worktrees.filter { $0.orphaned && !$0.needsReconciliation }.count
-        var parts: [String] = []
-        if inSync > 0 { parts.append("\(inSync) in sync") }
-        if attention > 0 { parts.append("\(attention) needs attention") }
-        if orphaned > 0 { parts.append("\(orphaned) orphaned") }
-        return parts.joined(separator: " · ")
+        MenuBarPresentation.worktreeSummary(state.worktrees)
     }
 
     private var connectionPillStyle: (dot: Color, text: Color, background: Color, border: Color, label: String) {
+        let label = MenuBarPresentation.pillLabel(state.connectionState)
         switch state.connectionState {
         case .connected:
-            return (Palette.treeGreen, Palette.treeGreen, Palette.pillGreenBg, Palette.pillGreenBorder, "Connected")
+            return (Palette.treeGreen, Palette.treeGreen, Palette.pillGreenBg, Palette.pillGreenBorder, label)
         case .connecting:
-            return (Palette.warnDot, Palette.warnText, Palette.pillWarnBg, Palette.pillWarnBorder, "Connecting")
+            return (Palette.warnDot, Palette.warnText, Palette.pillWarnBg, Palette.pillWarnBorder, label)
         case .daemonNotRunning:
-            return (Palette.destructive, Palette.destructive, Palette.destructiveTint, Palette.destructiveBorder, "Offline")
+            return (Palette.destructive, Palette.destructive, Palette.destructiveTint, Palette.destructiveBorder, label)
         }
-    }
-
-    private func prURL(for worktree: Lumberjack_V1_Worktree) -> URL? {
-        guard worktree.hasGithubPrNumber, let repo = state.selectedRepositoryObject else { return nil }
-        let host = repo.host.isEmpty ? "github.com" : repo.host
-        return URL(string: "https://\(host)/\(repo.githubOwner)/\(repo.githubName)/pull/\(worktree.githubPrNumber)")
-    }
-
-    private func date(from ts: Google_Protobuf_Timestamp) -> Date {
-        Date(timeIntervalSince1970: TimeInterval(ts.seconds) + TimeInterval(ts.nanos) / 1e9)
     }
 }
 
@@ -680,22 +640,17 @@ private struct WorktreeRow: View {
     }
 
     private var subtitle: String? {
-        if worktree.needsReconciliation {
-            return worktree.reconciliationNote.isEmpty
-                ? "Needs reconciliation"
-                : worktree.reconciliationNote
-        }
-        guard worktree.hasLastSyncedAt else { return nil }
-        let ts = worktree.lastSyncedAt
-        let date = Date(timeIntervalSince1970: TimeInterval(ts.seconds) + TimeInterval(ts.nanos) / 1e9)
-        return "Synced \(date.formatted(.relative(presentation: .named)))"
+        MenuBarPresentation.rowSubtitle(worktree)
     }
 
     private var style: StatusStyle {
-        if isSyncing { return .syncing }
-        if worktree.needsReconciliation { return .attention }
-        if worktree.orphaned { return .orphaned }
-        return .inSync
+        switch MenuBarPresentation.status(of: worktree, isSyncing: isSyncing) {
+        case .inSync: return .inSync
+        case .attention: return .attention
+        case .disparity: return .disparity
+        case .orphaned: return .orphaned
+        case .syncing: return .syncing
+        }
     }
 }
 
@@ -713,6 +668,9 @@ private struct StatusStyle {
     static let attention = StatusStyle(
         label: "Needs attention", dot: Palette.dotAmber,
         pillFg: Palette.warnText, pillBg: Palette.pillWarnBg, subColor: Palette.warnText)
+    static let disparity = StatusStyle(
+        label: "Branch disparity", dot: Palette.destructive,
+        pillFg: Palette.destructiveDeep, pillBg: Palette.destructiveTint, subColor: Palette.destructiveDeep)
     static let syncing = StatusStyle(
         label: "Syncing", dot: Palette.dotBlue,
         pillFg: Palette.primary, pillBg: Palette.pillBlueBg, subColor: Palette.faintText)

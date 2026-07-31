@@ -190,6 +190,14 @@ message Worktree {
   int64 local_only_commits = 9;
   // reconciliation_note is a human-readable summary; empty when in sync.
   string reconciliation_note = 10;
+  // branch_disparity is true when the branch checked out in the directory is
+  // not the branch of its pull request. Such a worktree is never cleaned up
+  // automatically, and no worktree is created for a PR whose branch is checked
+  // out somewhere else.
+  bool branch_disparity = 11;
+  // checked_out_branch is the branch git reports in the directory, empty for a
+  // detached HEAD. It differs from branch_name exactly when branch_disparity.
+  string checked_out_branch = 12;
 }
 
 message HealthRequest {}

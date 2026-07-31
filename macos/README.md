@@ -51,6 +51,30 @@ swift build                 # debug build, for development
 open Package.swift          # or: open this folder in Xcode
 ```
 
+## Testing and coverage
+
+The Swift tasks are driven from the repository root by `mise`, alongside the Go
+ones (`osx:*` acts on this package, `cli:*` on the Go CLI/daemon):
+
+```sh
+mise run osx:test        # swift test --enable-code-coverage
+mise run osx:lcov        # export that coverage to coverage-swift.lcov
+mise run coverage        # both codebases, then the per-package floor
+```
+
+`mise run coverage` runs the two suites, exports both lcov reports and hands
+them to `scripts/coverage-gate.ps1`, which prints a per-package percentage
+lowest-first and exits non-zero if any package is under the floor. Generated
+stubs (`*.pb.swift`, `*.grpc.swift`) and `MenuBarView.swift` are exempt via the
+repository-wide `coverage-exclude.txt` — the view exemption covers SwiftUI
+*rendering*, so anything testable belongs in a type outside the view (see
+`MenuBarPresentation`) rather than in the exclusion list.
+
+The tests never touch a real daemon: `AppState` takes the connection it dials as
+a closure (`DaemonConnection`), `Notifier` and `WorktreeActions` take overrides
+in place of the notification centre and Launch Services, and
+`SocketPath.resolve` takes the environment to resolve against.
+
 ### Regenerating the gRPC stubs
 
 Only needed after `proto/lumberjack/v1/lumberjack.proto` changes. Requires
