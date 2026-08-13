@@ -1,0 +1,85 @@
+name: CI
+
+# Gates pull requests on the same checks the release path runs — the step
+# sequences live in .github/actions/, shared with release.yml — plus the checks
+# that only make sense against a base ref: SQL linting and the protobuf
+# lint/compatibility pair. See issue #10.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # Split by language so only the Swift half needs a macOS runner.
+  cli-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/cli-checks
+
+  osx-checks:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/osx-checks
+
+  # The gate covers both codebases, so it needs both halves on one machine. It
+  # reports but never blocks: the per-package floor is not met yet (see #6), so
+  # making it blocking would block every pull request. Deleting the
+  # `continue-on-error` below is the one-line change once the floor is met.
+  coverage:
+    needs: [cli-checks, osx-checks]
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/coverage-gate
+
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      sql: ${{ steps.filter.outputs.sql }}
+      proto: ${{ steps.filter.outputs.proto }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          files=$(git diff --name-only "$BASE_SHA" HEAD)
+          grep -q '\.sql$'   <<<"$files" && echo "sql=true"   >>"$GITHUB_OUTPUT" || true
+          grep -q '\.proto$' <<<"$files" && echo "proto=true" >>"$GITHUB_OUTPUT" || true
+
+  sql-checks:
+    needs: changes
+    if: needs.changes.outputs.sql == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jdx/mise-action@v2
+      - run: mise run lint-sql
+
+  # `lint-proto-breaking` compares against `.git#branch=main`, so it needs the
+  # full history and a local `main` ref — the default shallow, single-branch
+  # checkout resolves neither.
+  proto-checks:
+    needs: changes
+    if: needs.changes.outputs.proto == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: git fetch --no-tags origin +refs/heads/main:refs/heads/main
+      - uses: jdx/mise-action@v2
+      - run: mise run format-check-proto
+      - run: mise run lint-proto
+      - run: mise run lint-proto-breaking

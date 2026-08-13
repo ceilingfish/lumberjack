@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // PRState is the state of a worktree's source pull request as far as
@@ -47,8 +49,11 @@ type Status struct {
 	// tip sits on no remote-tracking ref.
 	Merged bool
 	// NeedsReconciliation is true when the worktree cannot be safely
-	// auto-removed: it is dirty or holds local-only commits.
+	// auto-removed: it is dirty, holds local-only commits, or has a branch
+	// disparity.
 	NeedsReconciliation bool
+	BranchDisparity     bool
+	CheckedOutBranch    string
 	// Orphaned is true when the source PR is gone (merged/closed) but the
 	// worktree was retained because it still needs reconciliation.
 	Orphaned bool
@@ -64,6 +69,36 @@ type Status struct {
 type Prober interface {
 	IsDirty(ctx context.Context, dir string) (bool, error)
 	LocalOnlyCommits(ctx context.Context, dir string) (int64, error)
+	CurrentBranch(ctx context.Context, dir string) (string, error)
+}
+
+// Missing reports whether the worktree at dir is gone from disk, along with a
+// human-readable note saying how. A worktree is missing when its directory does
+// not exist, when the path is not a directory, or when the directory no longer
+// holds a .git entry.
+//
+// That last case is a husk: a worktree directory always contains a .git gitdir
+// pointer file, so its absence means the worktree was removed out-of-band and
+// only ignored build artifacts survived `git worktree remove`. Probing it with
+// git would fail ("not a git repository"), so it counts as missing — prunable
+// from tracking, with the husk left on disk for the user.
+//
+// A permission or transient I/O error is not the same as missing and is
+// returned as an error, so it can never masquerade as a prunable worktree.
+func Missing(dir string) (bool, string, error) {
+	info, err := os.Stat(dir)
+	switch {
+	case os.IsNotExist(err):
+		return true, "worktree directory is missing", nil
+	case err != nil:
+		return false, "", fmt.Errorf("stat worktree directory: %w", err)
+	case !info.IsDir():
+		return true, "worktree path is not a directory", nil
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+		return true, "directory is no longer a git worktree", nil
+	}
+	return false, "", nil
 }
 
 // Reconcile computes the live status of the worktree at dir. pr is the state of
@@ -73,18 +108,13 @@ type Prober interface {
 // branch).
 //
 // p must have fetched the repo first so remote-tracking refs are current.
-func Reconcile(ctx context.Context, p Prober, dir string, pr PRState) (Status, error) {
-	info, err := os.Stat(dir)
-	switch {
-	case os.IsNotExist(err):
-		// Genuinely gone from disk — safe to prune from tracking.
-		return Status{Missing: true, Note: "worktree directory is missing"}, nil
-	case err != nil:
-		// A permission or transient I/O error is not the same as missing; do
-		// not let it masquerade as a prunable worktree.
-		return Status{}, fmt.Errorf("stat worktree directory: %w", err)
-	case !info.IsDir():
-		return Status{Missing: true, Note: "worktree path is not a directory"}, nil
+func Reconcile(ctx context.Context, p Prober, dir, prBranch string, pr PRState) (Status, error) {
+	missing, why, err := Missing(dir)
+	if err != nil {
+		return Status{}, err
+	}
+	if missing {
+		return Status{Missing: true, Note: why}, nil
 	}
 
 	dirty, err := p.IsDirty(ctx, dir)
@@ -96,20 +126,29 @@ func Reconcile(ctx context.Context, p Prober, dir string, pr PRState) (Status, e
 		return Status{}, fmt.Errorf("counting local-only commits: %w", err)
 	}
 
-	st := Status{Dirty: dirty, LocalOnlyCommits: localOnly, Merged: pr == PRMerged}
+	current, err := p.CurrentBranch(ctx, dir)
+	if err != nil {
+		return Status{}, fmt.Errorf("reading checked-out branch: %w", err)
+	}
+
+	st := Status{
+		Dirty: dirty, LocalOnlyCommits: localOnly,
+		Merged: pr == PRMerged, CheckedOutBranch: current,
+	}
+	st.BranchDisparity = prBranch != "" && current != "" && current != prBranch
 	if st.Merged {
 		// A merged PR's commits live on the base branch, so they are not local
 		// work at risk — only uncommitted changes still warrant keeping the tree.
 		st.LocalOnlyCommits = 0
 	}
-	st.NeedsReconciliation = st.Dirty || st.LocalOnlyCommits > 0
+	st.NeedsReconciliation = st.Dirty || st.LocalOnlyCommits > 0 || st.BranchDisparity
 	st.Orphaned = pr == PRGone && st.NeedsReconciliation
-	st.Note = note(st, pr)
+	st.Note = note(st, pr, prBranch)
 	return st, nil
 }
 
 // note renders a human-readable one-liner for a Status.
-func note(st Status, pr PRState) string {
+func note(st Status, pr PRState, prBranch string) string {
 	switch {
 	case !st.NeedsReconciliation && (pr == PROpen || pr == PRNone):
 		return ""
@@ -120,22 +159,29 @@ func note(st Status, pr PRState) string {
 		return "PR closed; safe to remove"
 	case st.Merged:
 		// Merged but the working tree still has uncommitted changes to resolve.
-		return "PR merged but " + reason(st)
+		return "PR merged but " + reason(st, prBranch)
 	case st.Orphaned:
-		return "orphaned: PR closed but " + reason(st)
+		return "orphaned: PR closed but " + reason(st, prBranch)
 	default:
-		return "needs reconciliation: " + reason(st)
+		return "needs reconciliation: " + reason(st, prBranch)
 	}
 }
 
 // reason describes why a worktree needs reconciliation.
-func reason(st Status) string {
-	switch {
-	case st.Dirty && st.LocalOnlyCommits > 0:
-		return fmt.Sprintf("uncommitted changes and %d local-only commit(s)", st.LocalOnlyCommits)
-	case st.Dirty:
-		return "uncommitted changes"
-	default:
-		return fmt.Sprintf("%d local-only commit(s)", st.LocalOnlyCommits)
+func reason(st Status, prBranch string) string {
+	var parts []string
+	if st.Dirty {
+		parts = append(parts, "uncommitted changes")
 	}
+	if st.LocalOnlyCommits > 0 {
+		parts = append(parts, fmt.Sprintf("%d local-only commit(s)", st.LocalOnlyCommits))
+	}
+	if st.BranchDisparity {
+		parts = append(parts, disparityReason(st.CheckedOutBranch, prBranch))
+	}
+	return strings.Join(parts, " and ")
+}
+
+func disparityReason(checkedOut, prBranch string) string {
+	return fmt.Sprintf("disparity between local branch %s and PR branch %s", checkedOut, prBranch)
 }

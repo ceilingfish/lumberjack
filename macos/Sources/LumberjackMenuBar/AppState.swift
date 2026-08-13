@@ -53,7 +53,8 @@ final class AppState: ObservableObject {
     }
 
     private let pollInterval: UInt64
-    private var client: DaemonClient?
+    private let connect: () throws -> any DaemonConnection
+    private var client: (any DaemonConnection)?
     /// Last-seen worktrees per repository, keyed by directory path, used to
     /// detect clone/delete since the previous refresh. Storing the branch
     /// name (not just the path) means a deleted worktree's branch is still
@@ -61,8 +62,12 @@ final class AppState: ObservableObject {
     private var knownWorktrees: [String: [String: String]] = [:]
     private var loopTask: Task<Void, Never>?
 
-    init(pollIntervalSeconds: UInt64 = 2) {
+    init(
+        pollIntervalSeconds: UInt64 = 2,
+        connect: @escaping () throws -> any DaemonConnection = { try DaemonClient(socketPath: SocketPath.resolve()) }
+    ) {
         self.pollInterval = pollIntervalSeconds
+        self.connect = connect
     }
 
     func start() {
@@ -102,9 +107,9 @@ final class AppState: ObservableObject {
         }
     }
 
-    private func refreshOnce() async {
+    func refreshOnce() async {
         if client == nil {
-            client = try? DaemonClient(socketPath: SocketPath.resolve())
+            client = try? connect()
         }
         guard let client else {
             connectionState = .daemonNotRunning

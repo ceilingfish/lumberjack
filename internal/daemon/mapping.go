@@ -48,6 +48,8 @@ func toProtoWorktree(v WorktreeView) *lumberjackv1.Worktree {
 		Orphaned:            v.Status.Orphaned,
 		LocalOnlyCommits:    v.Status.LocalOnlyCommits,
 		ReconciliationNote:  v.Status.Note,
+		BranchDisparity:     v.Status.BranchDisparity,
+		CheckedOutBranch:    v.Status.CheckedOutBranch,
 	}
 	pb.LastSyncedAt = toProtoTimestamp(wt.LastSyncedAt)
 	return pb

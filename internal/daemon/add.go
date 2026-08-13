@@ -34,11 +34,10 @@ type AddResult struct {
 // tracking it, an existing local branch is checked out as-is, and otherwise a
 // new branch is created off the default branch.
 func (s *Service) AddWorktree(ctx context.Context, repo *schema.Repository, branch string) (AddResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
 	var res AddResult
-	err := s.withRepoLogin(ctx, repo, func() error {
+	err := s.withRepoLogin(ctx, repo, func(ctx context.Context) error {
 		var aerr error
 		res, aerr = s.addWorktreeLocked(ctx, repo, branch)
 		return aerr

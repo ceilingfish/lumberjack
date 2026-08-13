@@ -451,6 +451,25 @@ func TestCmdWorktreesNamedRepository(t *testing.T) {
 	}
 }
 
+func TestCmdWorktreesBranchDisparity(t *testing.T) {
+	num := int64(7)
+	note := "needs reconciliation: disparity between local branch feature/y and PR branch feature/x"
+	serveStub(t, &stubService{worktrees: []*lumberjackv1.Worktree{
+		{
+			DirectoryPath: "/p/n-x", BranchName: "feature/x", GithubPrNumber: &num,
+			NeedsReconciliation: true, ReconciliationNote: note,
+			BranchDisparity: true, CheckedOutBranch: "feature/y",
+		},
+	}})
+	out, err := run(t, "", "worktrees", "--repository", "n")
+	if err != nil {
+		t.Fatalf("worktrees: %v", err)
+	}
+	if !strings.Contains(out, "⚠") || !strings.Contains(out, note) {
+		t.Errorf("out = %q", out)
+	}
+}
+
 func TestCmdWorktreesEmpty(t *testing.T) {
 	serveStub(t, &stubService{})
 	out, err := run(t, "", "worktrees", "--repository", "n")

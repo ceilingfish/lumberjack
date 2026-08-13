@@ -27,6 +27,10 @@ type lifecycle interface {
 	Uninstall() error
 }
 
+var newLifecycle = func(socketPath, executable string) (lifecycle, error) {
+	return newService(socketPath, executable)
+}
+
 // newDaemonCmd is the `daemon` parent. It owns no behaviour itself; its
 // subcommands manage the daemon's lifecycle (run/start/stop/status). Use the
 // top-level `install`/`uninstall` commands to register or remove the daemon.

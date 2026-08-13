@@ -543,8 +543,16 @@ type Worktree struct {
 	LocalOnlyCommits int64 `protobuf:"varint,9,opt,name=local_only_commits,json=localOnlyCommits,proto3" json:"local_only_commits,omitempty"`
 	// reconciliation_note is a human-readable summary; empty when in sync.
 	ReconciliationNote string `protobuf:"bytes,10,opt,name=reconciliation_note,json=reconciliationNote,proto3" json:"reconciliation_note,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// branch_disparity is true when the branch checked out in the directory is
+	// not the branch of its pull request. Such a worktree is never cleaned up
+	// automatically, and no worktree is created for a PR whose branch is checked
+	// out somewhere else.
+	BranchDisparity bool `protobuf:"varint,11,opt,name=branch_disparity,json=branchDisparity,proto3" json:"branch_disparity,omitempty"`
+	// checked_out_branch is the branch git reports in the directory, empty for a
+	// detached HEAD. It differs from branch_name exactly when branch_disparity.
+	CheckedOutBranch string `protobuf:"bytes,12,opt,name=checked_out_branch,json=checkedOutBranch,proto3" json:"checked_out_branch,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *Worktree) Reset() {
@@ -636,6 +644,20 @@ func (x *Worktree) GetLocalOnlyCommits() int64 {
 func (x *Worktree) GetReconciliationNote() string {
 	if x != nil {
 		return x.ReconciliationNote
+	}
+	return ""
+}
+
+func (x *Worktree) GetBranchDisparity() bool {
+	if x != nil {
+		return x.BranchDisparity
+	}
+	return false
+}
+
+func (x *Worktree) GetCheckedOutBranch() string {
+	if x != nil {
+		return x.CheckedOutBranch
 	}
 	return ""
 }
@@ -2520,7 +2542,7 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\x05login\x18\r \x01(\tR\x05login\x122\n" +
 	"\x15setup_consent_pending\x18\x0e \x01(\bR\x13setupConsentPendingB\x11\n" +
 	"\x0f_last_synced_atB\x12\n" +
-	"\x10_last_sync_error\"\xc6\x03\n" +
+	"\x10_last_sync_error\"\x9f\x04\n" +
 	"\bWorktree\x12\x1f\n" +
 	"\vbranch_name\x18\x01 \x01(\tR\n" +
 	"branchName\x12%\n" +
@@ -2532,7 +2554,9 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\borphaned\x18\b \x01(\bR\borphaned\x12,\n" +
 	"\x12local_only_commits\x18\t \x01(\x03R\x10localOnlyCommits\x12/\n" +
 	"\x13reconciliation_note\x18\n" +
-	" \x01(\tR\x12reconciliationNoteB\x13\n" +
+	" \x01(\tR\x12reconciliationNote\x12)\n" +
+	"\x10branch_disparity\x18\v \x01(\bR\x0fbranchDisparity\x12,\n" +
+	"\x12checked_out_branch\x18\f \x01(\tR\x10checkedOutBranchB\x13\n" +
 	"\x11_github_pr_numberB\x11\n" +
 	"\x0f_last_synced_atJ\x04\b\x04\x10\x05R\n" +
 	"created_by\"\x0f\n" +

@@ -118,7 +118,7 @@ func runInstall(out io.Writer, opts installOptions) error {
 			}
 			daemonExe = resolved
 		}
-		svc, err := newService(opts.socketPath, daemonExe)
+		svc, err := newLifecycle(opts.socketPath, daemonExe)
 		if err != nil {
 			return err
 		}

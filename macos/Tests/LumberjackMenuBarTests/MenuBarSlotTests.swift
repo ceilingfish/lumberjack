@@ -1,4 +1,5 @@
 import Testing
+
 @testable import LumberjackMenuBar
 
 /// The slot the status item claims on first launch. The rule that matters is

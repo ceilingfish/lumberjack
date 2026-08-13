@@ -194,3 +194,32 @@ func TestAddWorktreePublishesChange(t *testing.T) {
 		t.Errorf("change = %+v", ev.Change)
 	}
 }
+
+func TestAddWorktreeReportsBothFailuresWhenTheBaseIsUnknown(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.addErr["feature/x"] = errors.New("fatal: invalid reference")
+	h.git.defaultBranchErr = errors.New("fatal: no upstream configured")
+
+	_, err := h.svc.AddWorktree(context.Background(), repo, "feature/x")
+	if err == nil {
+		t.Fatal("expected an error when neither checkout nor branching is possible")
+	}
+	if !strings.Contains(err.Error(), "checking out feature/x") ||
+		!strings.Contains(err.Error(), "determining default branch") {
+		t.Errorf("err = %v, want both attempts reported", err)
+	}
+}
+
+func TestAddWorktreeFetchFailureAborts(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.git.fetchErr = errors.New("network is unreachable")
+
+	if _, err := h.svc.AddWorktree(context.Background(), repo, "feature/x"); err == nil {
+		t.Error("expected an error when the fetch fails")
+	}
+	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 0 {
+		t.Errorf("worktrees = %d, want none recorded", len(wts))
+	}
+}

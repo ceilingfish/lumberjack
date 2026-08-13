@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log"
 	"maps"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
+	"github.com/ceilingfish/lumberjack/internal/ghauth"
 	"github.com/ceilingfish/lumberjack/internal/github"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
@@ -64,7 +66,7 @@ type GHOps interface {
 	// changes it. Together they let the daemon operate on a repo under the
 	// account it was registered with and restore the prior account afterwards.
 	ActiveLogin(ctx context.Context, host string) (string, error)
-	SwitchAccount(ctx context.Context, host, login string) error
+	Token(ctx context.Context, host, login string) (string, error)
 	// ListLogins reports every gh account authenticated for a host — the logins
 	// set-login accepts and the picker offers.
 	ListLogins(ctx context.Context, host string) ([]string, error)
@@ -85,10 +87,10 @@ type Service struct {
 	git GitOps
 	gh  GHOps
 	now func() time.Time
-	// mu serialises worktree mutations so the hourly loop and an on-demand
-	// Sync/Delete RPC can never operate on the trees at the same time. The
-	// daemon is the single writer; this keeps that guarantee within it too.
-	mu sync.Mutex
+
+	global    sync.RWMutex
+	repoLocks sync.Map
+
 	// events fans out worktree/sync changes to Watch subscribers. Publishing
 	// is a side effect of a mutation that already happened under mu — it never
 	// creates new state of its own, so the daemon remains the single writer.
@@ -163,43 +165,43 @@ func repoInfo(repo *schema.Repository) github.RepoInfo {
 	return github.RepoInfo{Owner: repo.GithubOwner, Name: repo.GithubName, Host: repo.Host}
 }
 
-// withRepoLogin runs fn with gh's active account switched to the one the
-// repository was registered under, restoring the previously-active account
-// afterwards. Both git (via gh's credential helper) and gh calls inherit the
-// active account, so any operation on a repo must run under its own login.
-//
-// Repos tracked before login capture (empty Login) run fn unchanged. gh's
-// active account is process-global, so callers must hold s.mu.
-func (s *Service) withRepoLogin(ctx context.Context, repo *schema.Repository, fn func() error) error {
+func (s *Service) lockRepository(id int64) func() {
+	s.global.RLock()
+	v, _ := s.repoLocks.LoadOrStore(id, &sync.Mutex{})
+	m, ok := v.(*sync.Mutex)
+	if !ok {
+		s.global.RUnlock()
+		panic("daemon: repository lock of unexpected type")
+	}
+	m.Lock()
+	return func() {
+		m.Unlock()
+		s.global.RUnlock()
+	}
+}
+
+func (s *Service) lockAllRepositories() func() {
+	s.global.Lock()
+	return s.global.Unlock
+}
+
+func (s *Service) withRepoLogin(
+	ctx context.Context, repo *schema.Repository, fn func(context.Context) error,
+) error {
 	return s.withLogin(ctx, repo.Host, repo.Login, fn)
 }
 
-// withLogin runs fn with gh's active account switched to login for host,
-// restoring the previously-active account afterwards. An empty login (or one
-// already active) runs fn without switching. gh's active account is
-// process-global, so callers must hold s.mu.
-func (s *Service) withLogin(ctx context.Context, host, login string, fn func() error) (err error) {
+func (s *Service) withLogin(
+	ctx context.Context, host, login string, fn func(context.Context) error,
+) error {
 	if login == "" {
-		return fn()
+		return fn(ctx)
 	}
-	current, aerr := s.gh.ActiveLogin(ctx, host)
-	if aerr != nil {
-		return fmt.Errorf("checking active GitHub account: %w", aerr)
+	token, err := s.gh.Token(ctx, host, login)
+	if err != nil {
+		return fmt.Errorf("resolving GitHub token for account %q: %w", login, err)
 	}
-	if current == login {
-		return fn()
-	}
-	if serr := s.gh.SwitchAccount(ctx, host, login); serr != nil {
-		return fmt.Errorf("switching to GitHub account %q: %w", login, serr)
-	}
-	defer func() {
-		// Restore the account that was active before. A restore failure must not
-		// mask fn's own error, but is surfaced when fn otherwise succeeded.
-		if serr := s.gh.SwitchAccount(ctx, host, current); serr != nil && err == nil {
-			err = fmt.Errorf("restoring GitHub account %q: %w", current, serr)
-		}
-	}()
-	return fn()
+	return fn(ghauth.WithToken(ctx, host, token))
 }
 
 // fetchOpenPRs fetches remote refs and returns the open PRs indexed by number.
@@ -224,11 +226,10 @@ func (s *Service) fetchOpenPRs(ctx context.Context, repo *schema.Repository) (ma
 func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([]WorktreeView, error) {
 	// Serialise with worktree mutations: gh account switching is process-global,
 	// so a concurrent sync must not change the active account mid-read.
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
 	var views []WorktreeView
-	err := s.withRepoLogin(ctx, repo, func() error {
+	err := s.withRepoLogin(ctx, repo, func(ctx context.Context) error {
 		openByNum, err := s.fetchOpenPRs(ctx, repo)
 		if err != nil {
 			return err
@@ -244,7 +245,7 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 			if perr != nil {
 				return fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, perr)
 			}
-			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prState)
+			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), prState)
 			if rerr != nil {
 				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
 			}
@@ -265,10 +266,9 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 // updates the repository's last-sync fields. Per-PR failures are collected and
 // returned as a combined error without aborting the whole sync.
 func (s *Service) SyncRepository(ctx context.Context, repo *schema.Repository, progress progressFn) (created, removed int, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.lockRepository(repo.ID)()
 
-	err = s.withRepoLogin(ctx, repo, func() error {
+	err = s.withRepoLogin(ctx, repo, func(ctx context.Context) error {
 		var serr error
 		created, removed, serr = s.syncRepositoryLocked(ctx, repo, progress)
 		return serr
@@ -333,8 +333,28 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 	}
 
 	var errs []error
-	created += s.createMissing(ctx, repo, openByNum, stored, progress, &errs)
-	removed += s.removeClosed(ctx, repo, openByNum, stored, progress, &errs)
+	// Every worktree git has registered, listed once and shared by both phases:
+	// it tells creation which directories can be adopted, and removal which
+	// tracked rows git no longer knows about. A listing failure is recorded but
+	// non-fatal — creation falls back to adding worktrees, and removal declines
+	// to prune anything, since an empty listing is indistinguishable from a repo
+	// whose worktrees are all gone.
+	refs, wlerr := s.git.ListWorktrees(ctx, repo.LocalPath)
+	if wlerr != nil {
+		errs = append(errs, fmt.Errorf("listing existing worktrees: %w", wlerr))
+	}
+	registered := registeredDirs(refs, wlerr == nil)
+	created += s.createMissing(ctx, repo, openByNum, stored, refs, progress, &errs)
+
+	// Re-read the tracked rows: creation links, adopts and creates, so the
+	// snapshot above is already stale — and removal must not judge a row by a PR
+	// number that was filled in moments ago.
+	stored, lerr = s.db.ListWorktrees(ctx, repo.ID)
+	if lerr != nil {
+		err = errors.Join(append(errs, lerr)...)
+		return created, removed, err
+	}
+	removed += s.removeClosed(ctx, repo, openByNum, stored, registered, progress, &errs)
 
 	err = errors.Join(errs...)
 	return created, removed, err
@@ -344,9 +364,10 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 // PR: which directories are taken, which tracked-but-unlinked branches remain,
 // and which on-disk directories are available to adopt (keyed by branch).
 type reconcileState struct {
-	usedDirs  map[string]bool
-	unlinked  map[string]schema.Worktree
-	adoptable map[string]string
+	usedDirs   map[string]bool
+	unlinked   map[string]schema.Worktree
+	adoptable  map[string]string
+	branchDirs map[string]string
 }
 
 // createMissing gives every open PR that lacks a linked worktree one, then
@@ -355,24 +376,14 @@ type reconcileState struct {
 // (linking an existing row is not counted).
 func (s *Service) createMissing(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
-	stored []schema.Worktree, progress progressFn, errs *[]error,
+	stored []schema.Worktree, refs []worktree.Ref, progress progressFn, errs *[]error,
 ) (created int) {
-	// Every worktree git has registered, listed once: it tells us both the branch
-	// actually checked out in each tracked directory and which untracked
-	// directories can be adopted. A listing failure is recorded but non-fatal —
-	// sync falls back to creation.
-	refs, lerr := s.git.ListWorktrees(ctx, repo.LocalPath)
-	if lerr != nil {
-		*errs = append(*errs, fmt.Errorf("listing existing worktrees: %w", lerr))
-	}
-	branchByDir := make(map[string]string, len(refs))
-	for _, r := range refs {
-		branchByDir[r.Dir] = r.Branch
-	}
+	branchByDir, dirByBranch := indexRefs(refs)
 
 	havePR := make(map[int64]bool, len(stored))
 	st := reconcileState{
-		usedDirs: make(map[string]bool, len(stored)),
+		branchDirs: dirByBranch,
+		usedDirs:   make(map[string]bool, len(stored)),
 		// Worktrees tracked by branch but not yet linked to a PR (e.g. adopted at
 		// init with no PR number). An open PR on such a branch links to the
 		// existing row instead of trying to recreate a branch git already has.
@@ -438,11 +449,35 @@ func (s *Service) adoptOrphans(
 	return adopted
 }
 
+func heldElsewhere(dir, mainPath string) string {
+	if dir == mainPath {
+		return "branch is checked out in the main working tree"
+	}
+	return "branch is already checked out in " + filepath.Base(dir)
+}
+
+func indexRefs(refs []worktree.Ref) (branchByDir, dirByBranch map[string]string) {
+	branchByDir = make(map[string]string, len(refs))
+	dirByBranch = make(map[string]string, len(refs))
+	for _, r := range refs {
+		branchByDir[r.Dir] = r.Branch
+		if r.Branch == "" {
+			continue
+		}
+		if _, seen := dirByBranch[r.Branch]; !seen {
+			dirByBranch[r.Branch] = r.Dir
+		}
+	}
+	return branchByDir, dirByBranch
+}
+
 // reconcilePR ensures one open PR that lacks a linked worktree gets one, in
 // preference order: link an already-tracked branch, adopt an untracked
-// checked-out directory, or create a fresh worktree. It returns 1 when a
-// worktree was created or adopted (linking mutates an existing row and returns
-// 0), maintaining st as branches and directories are consumed.
+// checked-out directory, or create a fresh worktree. A PR whose branch is
+// already checked out somewhere gets none of these — it is reported as retained.
+// It returns 1 when a worktree was created or adopted (linking mutates an
+// existing row and returns 0), maintaining st as branches and directories are
+// consumed.
 func (s *Service) reconcilePR(
 	ctx context.Context, repo *schema.Repository, num int64, pr github.PR,
 	st *reconcileState, progress progressFn, errs *[]error,
@@ -458,6 +493,14 @@ func (s *Service) reconcilePR(
 			st.usedDirs[dir] = true
 			return 1
 		}
+		return 0
+	}
+	if dir, held := st.branchDirs[pr.HeadBranch]; held {
+		n := num
+		s.emitChange(repo, progress, WorktreeChange{
+			Branch: pr.HeadBranch, PRNumber: &n, Action: ActionRetained,
+			DirectoryPath: dir, Detail: heldElsewhere(dir, repo.LocalPath),
+		})
 		return 0
 	}
 	if dir, ok := s.createWorktree(ctx, repo, num, pr, st.usedDirs, progress, errs); ok {
@@ -611,10 +654,13 @@ func (s *Service) resolveDir(repo *schema.Repository, pr github.PR, usedDirs map
 // removeClosed removes worktrees whose PR is no longer open, retaining any
 // that still need reconciliation (dirty or holding local-only commits). Every
 // tracked worktree is a candidate regardless of who created it — removeOne only
-// removes the provably-safe ones. It returns the number removed.
+// removes the provably-safe ones. A worktree with no PR at all is left alone
+// unless it is also a ghost, which pruneGhost decides. registered is the set of
+// directories git has worktrees for, or nil when that listing failed. It returns
+// the number removed.
 func (s *Service) removeClosed(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
-	stored []schema.Worktree, progress progressFn, errs *[]error,
+	stored []schema.Worktree, registered map[string]bool, progress progressFn, errs *[]error,
 ) (removed int) {
 	for i := range stored {
 		wt := stored[i]
@@ -627,13 +673,76 @@ func (s *Service) removeClosed(
 			continue
 		}
 		if state == worktree.PRNone {
-			continue // no associated PR — not a merged/closed cleanup candidate
+			if s.pruneGhost(ctx, repo, wt, registered, progress, errs) {
+				removed++
+			}
+			continue
 		}
 		if s.removeOne(ctx, repo, wt, state, progress, errs) {
 			removed++
 		}
 	}
 	return removed
+}
+
+// registeredDirs indexes the directories git has worktrees registered for. It
+// returns nil when listed is false — a failed listing must not be read as "git
+// knows about nothing", which would make every tracked worktree look like a
+// ghost.
+func registeredDirs(refs []worktree.Ref, listed bool) map[string]bool {
+	if !listed {
+		return nil
+	}
+	dirs := make(map[string]bool, len(refs))
+	for _, r := range refs {
+		dirs[r.Dir] = true
+	}
+	return dirs
+}
+
+// pruneGhost drops a tracked worktree that has neither a PR nor a worktree left
+// behind it: its directory is gone from disk, or git no longer has a worktree
+// registered there. Such a row is pure bookkeeping — there is no branch, no
+// checkout and no PR to reconcile it against, so it would otherwise stay listed
+// forever (removeClosed only ever considers rows with a PR, and adoptOrphans
+// only ever adds).
+//
+// registered is nil when the git listing failed, in which case only a genuinely
+// missing directory is pruned. Nothing is removed from disk: a ghost by
+// definition has nothing there, and a husk of ignored build artifacts is the
+// user's to keep. It returns true when the row was dropped.
+func (s *Service) pruneGhost(
+	ctx context.Context, repo *schema.Repository, wt schema.Worktree,
+	registered map[string]bool, progress progressFn, errs *[]error,
+) bool {
+	missing, why, err := worktree.Missing(wt.DirectoryPath)
+	if err != nil {
+		*errs = append(*errs, fmt.Errorf("checking %s: %w", wt.DirectoryPath, err))
+		return false
+	}
+	switch {
+	case missing:
+	case registered != nil && !registered[wt.DirectoryPath]:
+		why = "git has no worktree registered there"
+	default:
+		return false // a live worktree with no PR — tracked, not managed
+	}
+	if derr := s.db.DeleteWorktree(ctx, wt.ID); derr != nil {
+		*errs = append(*errs, derr)
+		return false
+	}
+	s.emitChange(repo, progress, WorktreeChange{
+		Branch: wt.BranchName, Action: ActionDeleted,
+		Detail: "no PR and " + why,
+	})
+	return true
+}
+
+func prBranchOf(wt schema.Worktree) string {
+	if wt.GithubPRNumber == nil {
+		return ""
+	}
+	return wt.BranchName
 }
 
 // prStillOpen reports whether the worktree's source PR is among the open set.
@@ -698,7 +807,7 @@ func (s *Service) removeOne(
 	ctx context.Context, repo *schema.Repository, wt schema.Worktree, state worktree.PRState,
 	progress progressFn, errs *[]error,
 ) bool {
-	st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, state)
+	st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), state)
 	if rerr != nil {
 		*errs = append(*errs, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr))
 		return false

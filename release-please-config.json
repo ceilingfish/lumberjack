@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "401090d1bd265e999a51a83d2b68f0bfb6d979c9",
+  "separate-pull-requests": true,
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "include-component-in-tag": false,
+      "changelog-path": "CHANGELOG.md"
+    },
+    "macos": {
+      "release-type": "simple",
+      "component": "macos",
+      "tag-separator": "/",
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}

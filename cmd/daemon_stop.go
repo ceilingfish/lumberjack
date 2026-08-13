@@ -21,7 +21,7 @@ func newDaemonStopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			svc, err := newService("", "")
+			svc, err := newLifecycle("", "")
 			if err != nil {
 				return err
 			}
