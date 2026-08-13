@@ -368,15 +368,17 @@ func (g *Git) CurrentBranch(ctx context.Context, dir string) (string, error) {
 	return out, nil
 }
 
-// LocalOnlyCommits counts commits reachable from the worktree's HEAD but from
-// no remote-tracking branch — i.e. local work that exists nowhere on the
-// remote. It is the "commits you would lose" figure used both to decide
-// whether an orphaned worktree needs reconciliation and to warn on delete.
-//
-// The caller must Fetch first so remote-tracking refs are current; otherwise
-// commits already pushed can be miscounted as local-only.
 func (g *Git) LocalOnlyCommits(ctx context.Context, dir string) (int64, error) {
-	out, err := g.run(ctx, dir, "rev-list", "--count", "HEAD", "--not", "--remotes")
+	args := []string{"rev-list", "--count"}
+	if email, err := g.run(ctx, dir, "config", "--get", "user.email"); err == nil && email != "" {
+		// --fixed-strings so metacharacters common in addresses ('.', '+') cannot
+		// widen the match, and the angle brackets pin it to the whole address so
+		// it cannot match one that merely ends with it.
+		args = append(args, "--fixed-strings", "--committer=<"+email+">")
+	}
+	args = append(args, "HEAD", "--not", "--remotes")
+
+	out, err := g.run(ctx, dir, args...)
 	if err != nil {
 		return 0, err
 	}

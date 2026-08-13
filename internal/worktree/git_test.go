@@ -32,14 +32,21 @@ func runGit(t *testing.T, dir string, args ...string) {
 // the wrapper, the working checkout path, and a fetch of origin already done.
 func setupRepos(t *testing.T) (*Git, string) {
 	t.Helper()
+	// LocalOnlyCommits reads user.email from config, so pin it to the test repo:
+	// ignore the developer's own global identity, which would otherwise make
+	// these tests pass or fail depending on whose machine they run on.
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+
 	root := t.TempDir()
 	remote := filepath.Join(root, "remote.git")
 	main := filepath.Join(root, "main")
 
 	runGit(t, root, "init", "--bare", remote)
 	runGit(t, root, "clone", remote, main)
+	// Recorded in the repo itself, not just on runGit's command line, so
+	// LocalOnlyCommits can read it back.
+	runGit(t, main, "config", "user.email", "test@example.com")
 
 	if err := os.WriteFile(filepath.Join(main, "README.md"), []byte("hi\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -271,6 +278,96 @@ func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
 	runGit(t, dir, "commit", "-am", "local work")
 	if n, _ = g.LocalOnlyCommits(ctx, dir); n != 1 {
 		t.Errorf("LocalOnlyCommits = %d, want 1", n)
+	}
+}
+
+// TestLocalOnlyCommitsIgnoresForcePushedHistory covers the phantom-commits case:
+// a colleague rebases a shared branch and force-pushes it, so `fetch --prune`
+// moves the remote-tracking ref onto the new commits and strands the old ones on
+// the local branch. Reachable from HEAD and from no remote, they look exactly
+// like unpushed work — but their committer is the colleague, not this user, so
+// they must not be counted as commits at risk.
+func TestLocalOnlyCommitsIgnoresForcePushedHistory(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+
+	// The branch is entirely the colleague's work. The trailing -c overrides
+	// runGit's own user.email — git takes the last value given for a key — so
+	// they are the committer of everything on it.
+	const asColleague = "user.email=colleague@example.com"
+	runGit(t, main, "checkout", "-b", "colleague", "origin/main")
+	if err := os.WriteFile(filepath.Join(main, "bar.txt"), []byte("bar\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, main, "add", ".")
+	runGit(t, main, "-c", asColleague, "commit", "-m", "bar")
+	runGit(t, main, "push", "origin", "colleague:feature/bar")
+	runGit(t, main, "checkout", "main")
+	if err := g.Fetch(ctx, main, "origin"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	// This user checks it out, so their local branch holds the colleague's tip.
+	dir := filepath.Join(filepath.Dir(main), "wt-bar")
+	if err := g.AddWorktree(ctx, main, dir, "origin", "feature/bar"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+
+	// The colleague then rewrites the branch and force-pushes it, stranding the
+	// commit this user has checked out.
+	runGit(t, main, "checkout", "colleague")
+	runGit(t, main, "-c", asColleague, "commit", "--amend", "-m", "bar, rebased")
+	runGit(t, main, "push", "--force", "origin", "colleague:feature/bar")
+	runGit(t, main, "checkout", "main")
+
+	if err := g.Fetch(ctx, dir, "origin"); err != nil {
+		t.Fatalf("Fetch after force-push: %v", err)
+	}
+
+	// Guard the premise: the stranded commit really is on no remote, so this
+	// stays a test of the committer filter rather than of an empty range.
+	if out, err := g.run(ctx, dir, "rev-list", "--count", "HEAD", "--not", "--remotes"); err != nil || out != "1" {
+		t.Fatalf("unfiltered local-only count = %q, %v; want 1 stranded commit", out, err)
+	}
+	if n, err := g.LocalOnlyCommits(ctx, dir); err != nil || n != 0 {
+		t.Fatalf("LocalOnlyCommits = %d, %v; want 0 (commit is the colleague's)", n, err)
+	}
+
+	// The filter must not blind us to real work: this user's own unpushed commit
+	// still counts, alongside the colleague's stranded one.
+	if err := os.WriteFile(filepath.Join(dir, "mine.txt"), []byte("mine\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "add", ".")
+	runGit(t, dir, "commit", "-m", "my own work")
+	if n, err := g.LocalOnlyCommits(ctx, dir); err != nil || n != 1 {
+		t.Fatalf("LocalOnlyCommits = %d, %v; want 1 (this user's commit)", n, err)
+	}
+}
+
+// TestLocalOnlyCommitsWithoutIdentity covers the fallback: with no user.email
+// configured, git cannot attribute any commit to this user, so the count must
+// stay unfiltered rather than collapse to zero — over-reporting is the safe
+// direction for a figure that gates deletion.
+func TestLocalOnlyCommitsWithoutIdentity(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	if err := g.Fetch(ctx, main, "origin"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	dir := filepath.Join(filepath.Dir(main), "wt-foo")
+	if err := g.AddWorktree(ctx, main, dir, "origin", "feature/foo"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "foo.txt"), []byte("changed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, dir, "commit", "-am", "local work")
+
+	runGit(t, main, "config", "--unset", "user.email")
+	if n, err := g.LocalOnlyCommits(ctx, dir); err != nil || n != 1 {
+		t.Fatalf("LocalOnlyCommits = %d, %v; want 1 (unfiltered fallback)", n, err)
 	}
 }
 
