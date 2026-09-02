@@ -501,13 +501,16 @@ func TestSetupStepsJSONAndFailedWrites(t *testing.T) {
 			if _, err := run(t, "", "setup-steps", "add", "true"); err != nil {
 				t.Fatal(err)
 			}
-			out, err := run(t, "", append([]string{"--format", "json"}, c.args...)...)
-			if err != nil {
+			// stdout only: `run` prompts and reports progress on stderr
+			// precisely so --format json leaves stdout parseable.
+			var out, errOut bytes.Buffer
+			if err := runCmd(t, "", &out, &errOut,
+				append([]string{"--format", "json"}, c.args...)...); err != nil {
 				t.Fatalf("%v: %v", c.args, err)
 			}
 			var decoded map[string]any
-			if err := json.Unmarshal([]byte(out), &decoded); err != nil {
-				t.Fatalf("output is not valid JSON: %v (%q)", err, out)
+			if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+				t.Fatalf("output is not valid JSON: %v (%q)", err, out.String())
 			}
 			if decoded["message"] == nil {
 				t.Errorf("decoded = %+v, want a message", decoded)

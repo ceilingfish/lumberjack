@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ceilingfish/lumberjack/internal/setup"
 )
 
 // setupRepo makes t's temp dir look like a git worktree root (a `.git` entry is
@@ -176,9 +180,14 @@ func TestCmdSetupRunInheritedSteps(t *testing.T) {
 		t.Fatalf("WriteFile .env: %v", err)
 	}
 
-	out, err := run(t, "", "setup-steps", "run")
+	// No daemon here, so the config cannot be matched against a trusted one
+	// and the commands are confirmed before they run.
+	out, err := run(t, "y\n", "setup-steps", "run")
 	if err != nil {
 		t.Fatalf("setup-steps run: %v", err)
+	}
+	if !strings.Contains(out, "have not been reviewed") {
+		t.Errorf("out = %q, want the un-reviewed run-commands shown", out)
 	}
 	if !strings.Contains(out, "Inheriting setup steps") {
 		t.Errorf("out = %q, want a note that the config was inherited", out)
@@ -206,7 +215,7 @@ func TestCmdSetupRunNoSteps(t *testing.T) {
 
 func TestCmdSetupRunFailingStepErrors(t *testing.T) {
 	setupLinkedWorktree(t, "steps:\n  - type: run-command\n    run_command:\n      command: exit 3\n")
-	_, err := run(t, "", "setup-steps", "run")
+	_, err := run(t, "y\n", "setup-steps", "run")
 	if err == nil || !strings.Contains(err.Error(), "run-command") {
 		t.Errorf("expected an error naming the failed step, got %v", err)
 	}
@@ -223,5 +232,87 @@ func TestCmdSetupListJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, `["go test ./..."]`) {
 		t.Errorf("out = %q, want a JSON array", out)
+	}
+}
+
+// trustedConfig is a config whose run-command leaves a marker, plus its
+// fingerprint as the daemon would report it for the default-branch version.
+const trustedConfig = "steps:\n  - type: run-command\n    run_command:\n      command: touch ran.txt\n"
+
+func TestCmdSetupRunTrustedConfigDoesNotPrompt(t *testing.T) {
+	_, worktree := setupLinkedWorktree(t, trustedConfig)
+	serveService(t, &stubService{setupConsentTrusted: setup.Fingerprint([]byte(trustedConfig))})
+
+	out, err := run(t, "", "setup-steps", "run")
+	if err != nil {
+		t.Fatalf("setup-steps run: %v", err)
+	}
+	if strings.Contains(out, "have not been reviewed") {
+		t.Errorf("out = %q, want no prompt for a config matching the default branch", out)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "ran.txt")); err != nil {
+		t.Errorf("expected the trusted run-command to have executed: %v", err)
+	}
+}
+
+func TestCmdSetupRunLocalEditPromptsAndCanBeDeclined(t *testing.T) {
+	_, worktree := setupLinkedWorktree(t, trustedConfig)
+	// The default branch carries a different config, so this one is a local
+	// edit: its commands are unreviewed and must be confirmed.
+	serveService(t, &stubService{setupConsentTrusted: setup.Fingerprint([]byte("steps: []\n"))})
+
+	out, err := run(t, "n\n", "setup-steps", "run")
+	if err != nil {
+		t.Fatalf("setup-steps run: %v", err)
+	}
+	if !strings.Contains(out, "touch ran.txt") || !strings.Contains(out, "have not been reviewed") {
+		t.Errorf("out = %q, want the unreviewed command shown", out)
+	}
+	if !strings.Contains(out, "Skipping run-command steps") {
+		t.Errorf("out = %q, want the skip reported", out)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "ran.txt")); !os.IsNotExist(err) {
+		t.Errorf("a declined run-command must not execute (stat err = %v)", err)
+	}
+}
+
+func TestCmdSetupRunPromptsWhenDefaultBranchHasNoConfig(t *testing.T) {
+	setupLinkedWorktree(t, trustedConfig)
+	serveService(t, &stubService{})
+
+	out, err := run(t, "n\n", "setup-steps", "run")
+	if err != nil {
+		t.Fatalf("setup-steps run: %v", err)
+	}
+	if !strings.Contains(out, "the default branch has no .lumberjack.yml") {
+		t.Errorf("out = %q, want the missing trusted config explained", out)
+	}
+}
+
+// failAfter writes to an inner buffer and then fails on the nth write, so a
+// test can reach a write that only happens after earlier ones succeeded.
+type failAfter struct {
+	n int
+}
+
+func (f *failAfter) Write(p []byte) (int, error) {
+	f.n--
+	if f.n < 0 {
+		return 0, errWrite
+	}
+	return len(p), nil
+}
+
+func TestCmdSetupRunSurfacesFailedConsentWrites(t *testing.T) {
+	// Each write of the consent prompt — the reason, each command, the skip
+	// notice — is reported rather than swallowed.
+	for _, writes := range []int{0, 1, 3} {
+		setupLinkedWorktree(t, trustedConfig)
+		serveService(t, &stubService{setupConsentTrusted: setup.Fingerprint([]byte("steps: []\n"))})
+		var out bytes.Buffer
+		err := runCmd(t, "n\n", &out, &failAfter{n: writes}, "setup-steps", "run")
+		if !errors.Is(err, errWrite) {
+			t.Errorf("after %d writes: err = %v, want the failed write", writes, err)
+		}
 	}
 }

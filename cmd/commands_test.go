@@ -48,6 +48,10 @@ type stubService struct {
 	setupConsentPending  bool
 	setupConsentCommands []string
 	setupConsentGiven    bool
+	// setupConsentTrusted is the fingerprint GetSetupConsent reports for the
+	// trusted default-branch config, which `setup-steps run` matches a local
+	// config against.
+	setupConsentTrusted string
 	// tidyMoves is what Tidy reports; lastTidyTarget/lastTidyDryRun record the
 	// request it received, so tests can assert on scoping and --dry-run.
 	tidyMoves        []*lumberjackv1.TidyMove
@@ -97,8 +101,9 @@ func (s *stubService) InitRepository(_ context.Context, req *lumberjackv1.InitRe
 // setupConsentPending, in which case it also returns setupConsentCommands.
 func (s *stubService) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
 	return &lumberjackv1.GetSetupConsentResponse{
-		Pending:     s.setupConsentPending,
-		RunCommands: s.setupConsentCommands,
+		Pending:            s.setupConsentPending,
+		RunCommands:        s.setupConsentCommands,
+		TrustedFingerprint: s.setupConsentTrusted,
 	}, nil
 }
 
@@ -515,7 +520,7 @@ func TestCmdWorktreeAddWarnsOnSetupFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("worktree add: %v", err)
 	}
-	if !strings.Contains(out, "setup failed") || !strings.Contains(out, "copy-file") {
+	if !strings.Contains(out, "⚠ setup:") || !strings.Contains(out, "copy-file") {
 		t.Errorf("out = %q", out)
 	}
 }

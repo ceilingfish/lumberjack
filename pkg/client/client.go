@@ -136,15 +136,31 @@ func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, c
 	return resp.GetLogins(), resp.GetCurrent(), nil
 }
 
-// GetSetupConsent reports whether the repository resolved by ref has
-// `.lumberjack.yml` run-command setup steps pending the local user's consent,
-// plus the command strings for a consent prompt.
-func (c *Client) GetSetupConsent(ctx context.Context, ref string) (pending bool, commands []string, err error) {
+// SetupConsent is a repository's setup-consent status: whether its trusted
+// run-command steps are pending the local user's consent, the commands to
+// prompt with, and the fingerprint of the trusted config itself.
+type SetupConsent struct {
+	Pending bool
+	// Commands are the trusted config's run-commands, for a consent prompt.
+	Commands []string
+	// TrustedFingerprint fingerprints the trusted default-branch
+	// `.lumberjack.yml`, empty when the default branch has none. It is set
+	// whether or not consent is pending.
+	TrustedFingerprint string
+}
+
+// GetSetupConsent reports the setup-consent status of the repository resolved
+// by ref.
+func (c *Client) GetSetupConsent(ctx context.Context, ref string) (SetupConsent, error) {
 	resp, err := c.svc.GetSetupConsent(ctx, &lumberjackv1.GetSetupConsentRequest{Repository: ref})
 	if err != nil {
-		return false, nil, mapError(err)
+		return SetupConsent{}, mapError(err)
 	}
-	return resp.GetPending(), resp.GetRunCommands(), nil
+	return SetupConsent{
+		Pending:            resp.GetPending(),
+		Commands:           resp.GetRunCommands(),
+		TrustedFingerprint: resp.GetTrustedFingerprint(),
+	}, nil
 }
 
 // SetSetupConsent records the local user's consent to run the current

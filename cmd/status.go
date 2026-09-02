@@ -52,11 +52,11 @@ func newStatusCmd() *cobra.Command {
 // a no-op when nothing is pending, so callers can invoke it unconditionally
 // after `init` or whenever a repository's detail is shown.
 func promptSetupConsent(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref string) error {
-	pending, commands, err := cl.GetSetupConsent(ctx, ref)
+	consent, err := cl.GetSetupConsent(ctx, ref)
 	if err != nil {
 		return err
 	}
-	if !pending {
+	if !consent.Pending {
 		return nil
 	}
 
@@ -64,7 +64,7 @@ func promptSetupConsent(ctx context.Context, cmd *cobra.Command, cl *client.Clie
 	if _, err := fmt.Fprintln(out, "This repository's .lumberjack.yml runs the following command(s) on every new worktree:"); err != nil {
 		return err
 	}
-	for _, c := range commands {
+	for _, c := range consent.Commands {
 		if _, err := fmt.Fprintf(out, "  %s\n", c); err != nil {
 			return err
 		}

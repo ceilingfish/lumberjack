@@ -42,7 +42,7 @@ func TestRemoveCommand(t *testing.T) {
 }
 
 func TestLoadIfPresentMissingFile(t *testing.T) {
-	cfg, found, err := loadIfPresent(configPath(t.TempDir()))
+	cfg, _, found, err := loadIfPresent(configPath(t.TempDir()))
 	if err != nil {
 		t.Fatalf("loadIfPresent: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestLoadIfPresentEmptyFile(t *testing.T) {
 	if err := os.WriteFile(configPath(dir), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, found, err := loadIfPresent(configPath(dir))
+	cfg, _, found, err := loadIfPresent(configPath(dir))
 	if err != nil {
 		t.Fatalf("loadIfPresent: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestLoadIfPresentMalformedFile(t *testing.T) {
 	if err := os.WriteFile(configPath(dir), []byte("steps:\n  - type: symlink\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, found, err := loadIfPresent(configPath(dir))
+	_, _, found, err := loadIfPresent(configPath(dir))
 	if err == nil {
 		t.Fatal("loadIfPresent: want an error for a malformed config, got nil")
 	}
@@ -90,7 +90,7 @@ func TestLoadIfPresentDirectoryAtConfigPath(t *testing.T) {
 	if err := os.Mkdir(configPath(dir), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := loadIfPresent(configPath(dir))
+	_, _, _, err := loadIfPresent(configPath(dir))
 	if err == nil {
 		t.Fatal("loadIfPresent: want an error when a directory sits at the config path, got nil")
 	}
@@ -123,7 +123,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	got, found, err := loadIfPresent(configPath(dir))
+	got, _, found, err := loadIfPresent(configPath(dir))
 	if err != nil {
 		t.Fatalf("loadIfPresent: %v", err)
 	}

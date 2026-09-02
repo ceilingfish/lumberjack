@@ -86,6 +86,10 @@ type Resolved struct {
 	Inherited bool
 	// Config is the effective config; empty (not nil) when there is no file.
 	Config *Config
+	// Raw is the exact bytes Config was parsed from, nil when there is no
+	// file. Fingerprint is taken over these bytes, so a config can be
+	// compared byte-for-byte against the repository's trusted one.
+	Raw []byte
 }
 
 // Resolve resolves the effective setup config for the worktree containing dir.
@@ -104,23 +108,23 @@ func Resolve(dir string) (*Resolved, error) {
 	}
 	res := &Resolved{Worktree: root, MainCheckout: main, Config: &Config{}}
 
-	cfg, found, err := loadIfPresent(configPath(root))
+	cfg, raw, found, err := loadIfPresent(configPath(root))
 	if err != nil {
 		return nil, err
 	}
 	if found {
-		res.ConfigPath, res.Config = configPath(root), cfg
+		res.ConfigPath, res.Config, res.Raw = configPath(root), cfg, raw
 		return res, nil
 	}
 	if main == root {
 		return res, nil
 	}
-	cfg, found, err = loadIfPresent(configPath(main))
+	cfg, raw, found, err = loadIfPresent(configPath(main))
 	if err != nil {
 		return nil, err
 	}
 	if found {
-		res.ConfigPath, res.Config, res.Inherited = configPath(main), cfg, true
+		res.ConfigPath, res.Config, res.Raw, res.Inherited = configPath(main), cfg, raw, true
 	}
 	return res, nil
 }

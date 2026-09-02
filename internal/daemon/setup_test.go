@@ -426,13 +426,13 @@ func TestApplySetupError(t *testing.T) {
 	msg := "copy-file failed: permission denied"
 	only := worktree.Status{}
 	applySetupError(&only, &msg)
-	if !only.NeedsReconciliation || only.Note != "setup failed: "+msg {
+	if !only.NeedsReconciliation || only.Note != "setup: "+msg {
 		t.Errorf("status = %+v, want the setup failure as the note", only)
 	}
 
 	both := worktree.Status{NeedsReconciliation: true, Note: "uncommitted changes"}
 	applySetupError(&both, &msg)
-	if both.Note != "uncommitted changes; setup failed: "+msg {
+	if both.Note != "uncommitted changes; setup: "+msg {
 		t.Errorf("note = %q, want both reasons", both.Note)
 	}
 }

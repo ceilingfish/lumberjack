@@ -120,8 +120,9 @@ func (s *Server) GetSetupConsent(ctx context.Context, req *lumberjackv1.GetSetup
 		return nil, toStatus(err)
 	}
 	return &lumberjackv1.GetSetupConsentResponse{
-		Pending:     consent.Pending,
-		RunCommands: consent.Commands,
+		Pending:            consent.Pending,
+		RunCommands:        consent.Commands,
+		TrustedFingerprint: consent.TrustedFingerprint,
 	}, nil
 }
 

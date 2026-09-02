@@ -1289,9 +1289,14 @@ type GetSetupConsentResponse struct {
 	Pending bool `protobuf:"varint,1,opt,name=pending,proto3" json:"pending,omitempty"`
 	// The run-command strings from the trusted config, for the consent prompt.
 	// Empty when pending is false.
-	RunCommands   []string `protobuf:"bytes,2,rep,name=run_commands,json=runCommands,proto3" json:"run_commands,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	RunCommands []string `protobuf:"bytes,2,rep,name=run_commands,json=runCommands,proto3" json:"run_commands,omitempty"`
+	// Content fingerprint of the trusted (default-branch) `.lumberjack.yml`,
+	// regardless of whether consent is pending. Empty when the default branch
+	// has no such file. `setup-steps run` compares the local worktree's config
+	// against it to tell a trusted config from an unreviewed local one.
+	TrustedFingerprint string `protobuf:"bytes,3,opt,name=trusted_fingerprint,json=trustedFingerprint,proto3" json:"trusted_fingerprint,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetSetupConsentResponse) Reset() {
@@ -1336,6 +1341,13 @@ func (x *GetSetupConsentResponse) GetRunCommands() []string {
 		return x.RunCommands
 	}
 	return nil
+}
+
+func (x *GetSetupConsentResponse) GetTrustedFingerprint() string {
+	if x != nil {
+		return x.TrustedFingerprint
+	}
+	return ""
 }
 
 type SetSetupConsentRequest struct {
@@ -2604,10 +2616,11 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\x16GetSetupConsentRequest\x12\x1e\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tR\n" +
-	"repository\"V\n" +
+	"repository\"\x87\x01\n" +
 	"\x17GetSetupConsentResponse\x12\x18\n" +
 	"\apending\x18\x01 \x01(\bR\apending\x12!\n" +
-	"\frun_commands\x18\x02 \x03(\tR\vrunCommands\"8\n" +
+	"\frun_commands\x18\x02 \x03(\tR\vrunCommands\x12/\n" +
+	"\x13trusted_fingerprint\x18\x03 \x01(\tR\x12trustedFingerprint\"8\n" +
 	"\x16SetSetupConsentRequest\x12\x1e\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tR\n" +

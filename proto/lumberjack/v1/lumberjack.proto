@@ -281,6 +281,11 @@ message GetSetupConsentResponse {
   // The run-command strings from the trusted config, for the consent prompt.
   // Empty when pending is false.
   repeated string run_commands = 2;
+  // Content fingerprint of the trusted (default-branch) `.lumberjack.yml`,
+  // regardless of whether consent is pending. Empty when the default branch
+  // has no such file. `setup-steps run` compares the local worktree's config
+  // against it to tell a trusted config from an unreviewed local one.
+  string trusted_fingerprint = 3;
 }
 
 message SetSetupConsentRequest {

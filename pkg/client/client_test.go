@@ -370,12 +370,12 @@ func TestClientSetLoginAndListLogins(t *testing.T) {
 
 func TestClientSetupConsent(t *testing.T) {
 	c := startStub(t)
-	pending, commands, err := c.GetSetupConsent(context.Background(), "a")
+	consent, err := c.GetSetupConsent(context.Background(), "a")
 	if err != nil {
 		t.Fatalf("GetSetupConsent: %v", err)
 	}
-	if !pending || len(commands) != 1 || commands[0] != "make deps" {
-		t.Errorf("GetSetupConsent = %v, %v", pending, commands)
+	if !consent.Pending || len(consent.Commands) != 1 || consent.Commands[0] != "make deps" {
+		t.Errorf("GetSetupConsent = %+v", consent)
 	}
 	repo, err := c.SetSetupConsent(context.Background(), "a")
 	if err != nil || repo.GetDirPrefix() != "a" {
@@ -514,7 +514,7 @@ func TestEveryMethodMapsServerErrors(t *testing.T) {
 			return err
 		},
 		"GetSetupConsent": func(c *Client) error {
-			_, _, err := c.GetSetupConsent(context.Background(), "a")
+			_, err := c.GetSetupConsent(context.Background(), "a")
 			return err
 		},
 		"SetSetupConsent": func(c *Client) error {
