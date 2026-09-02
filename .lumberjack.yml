@@ -1,0 +1,4 @@
+steps:
+  - type: run-command
+    run_command:
+      command: mise install --yes
