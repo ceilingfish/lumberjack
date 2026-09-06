@@ -78,10 +78,6 @@ func (stubServer) ListLogins(context.Context, *lumberjackv1.ListLoginsRequest) (
 	return &lumberjackv1.ListLoginsResponse{Logins: []string{"alice", "bob"}, Current: "bob"}, nil
 }
 
-func (stubServer) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) { //nolint:staticcheck
-	return &lumberjackv1.GetSetupConsentResponse{Pending: true, RunCommands: []string{"make deps"}}, nil //nolint:staticcheck
-}
-
 func (stubServer) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
 	return &lumberjackv1.SetSetupConsentResponse{
 		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()},
@@ -382,10 +378,6 @@ func TestClientSetLoginAndListLogins(t *testing.T) {
 
 func TestClientSetupConsent(t *testing.T) {
 	c := startStub(t)
-	pending, commands, err := c.GetSetupConsent(context.Background(), "a") //nolint:staticcheck
-	if err != nil || !pending || len(commands) != 1 || commands[0] != "make deps" {
-		t.Errorf("GetSetupConsent = %v, %v, %v", pending, commands, err)
-	}
 	repo, accepted, err := c.SetSetupConsent(context.Background(), "a", "current")
 	if err != nil || !accepted || repo.GetDirPrefix() != "a" {
 		t.Errorf("SetSetupConsent = %+v, %v, %v", repo, accepted, err)
@@ -535,10 +527,6 @@ func TestEveryMethodMapsServerErrors(t *testing.T) {
 		},
 		"ListLogins": func(c *Client) error {
 			_, _, err := c.ListLogins(context.Background(), "a")
-			return err
-		},
-		"GetSetupConsent": func(c *Client) error {
-			_, _, err := c.GetSetupConsent(context.Background(), "a") //nolint:staticcheck
 			return err
 		},
 		"TrustSetupSteps": func(c *Client) error {
