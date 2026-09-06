@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/github"
+	"github.com/ceilingfish/lumberjack/internal/setup"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/grpc"
@@ -140,36 +142,108 @@ func TestServerListAndGetRepository(t *testing.T) {
 	}
 }
 
-func TestServerGetSetupConsent(t *testing.T) {
-	h := newHarness(t)
-	srv := newServer(h)
-	h.repo(t)
-	h.git.configFiles = map[string][]byte{
-		"origin/main:.lumberjack.yml": []byte(`
+const setupConfigYAML = `
 steps:
   - type: run-command
     run_command:
       command: echo hi
-`),
-	}
+`
 
-	resp, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"})
+func TestServerGetRepositorySetupSteps(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{"origin/main:.lumberjack.yml": []byte(setupConfigYAML)}
+
+	resp, err := srv.GetRepository(context.Background(), &lumberjackv1.GetRepositoryRequest{Repository: "n"})
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	steps := resp.GetRepository().GetSetupSteps()
+	if !steps.GetIsDefined() {
+		t.Error("expected is_defined=true")
+	}
+	if steps.GetIsTrusted() {
+		t.Error("expected is_trusted=false before consent")
+	}
+	if len(steps.GetTrustedChecksums()) != 0 {
+		t.Errorf("TrustedChecksums = %v, want empty before consent", steps.GetTrustedChecksums())
+	}
+	if want := setup.Fingerprint([]byte(setupConfigYAML)); steps.GetCurrentChecksum() != want {
+		t.Errorf("CurrentChecksum = %q, want %q", steps.GetCurrentChecksum(), want)
+	}
+	if len(steps.GetSteps()) != 1 || steps.GetSteps()[0] != "echo hi" {
+		t.Errorf("Steps = %v", steps.GetSteps())
+	}
+}
+
+func TestServerGetRepositorySetupStepsUndefined(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	resp, err := srv.GetRepository(context.Background(), &lumberjackv1.GetRepositoryRequest{Repository: "n"})
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	steps := resp.GetRepository().GetSetupSteps()
+	if steps.GetIsDefined() || steps.GetCurrentChecksum() != "" {
+		t.Errorf("steps = %+v, want undefined for a repo with no config", steps)
+	}
+	if !steps.GetIsTrusted() {
+		t.Error("nothing to run must count as trusted")
+	}
+}
+
+func TestServerGetSetupConsentIsDerivedFromSetupSteps(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{"origin/main:.lumberjack.yml": []byte(setupConfigYAML)}
+
+	resp, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"}) //nolint:staticcheck
 	if err != nil {
 		t.Fatalf("GetSetupConsent: %v", err)
 	}
 	if !resp.GetPending() {
-		t.Error("expected pending=true")
+		t.Error("expected pending=true while the checksums differ")
 	}
 	if len(resp.GetRunCommands()) != 1 || resp.GetRunCommands()[0] != "echo hi" {
 		t.Errorf("RunCommands = %v", resp.GetRunCommands())
 	}
+
+	if _, err := srv.SetSetupConsent(context.Background(), &lumberjackv1.SetSetupConsentRequest{
+		Repository: "n", Checksum: setup.Fingerprint([]byte(setupConfigYAML)),
+	}); err != nil {
+		t.Fatalf("SetSetupConsent: %v", err)
+	}
+	resp, err = srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"}) //nolint:staticcheck
+	if err != nil {
+		t.Fatalf("GetSetupConsent: %v", err)
+	}
+	if resp.GetPending() {
+		t.Error("expected pending=false once the checksums match")
+	}
 }
 
-func TestServerGetSetupConsentEmptyRepository(t *testing.T) {
-	srv := newServer(newHarness(t))
-	_, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{})
+func TestServerGetSetupConsentFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{}) //nolint:staticcheck
 	if status.Code(err) != codes.InvalidArgument {
-		t.Errorf("expected InvalidArgument, got %v", err)
+		t.Errorf("empty repository: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "nope"}) //nolint:staticcheck
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
+	}
+
+	h.git.showFileErr = errors.New("fatal: not a valid object name")
+	_, err = srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"}) //nolint:staticcheck
+	if status.Code(err) != codes.Internal {
+		t.Errorf("unreadable config: expected Internal, got %v", err)
 	}
 }
 
@@ -177,24 +251,98 @@ func TestServerSetSetupConsent(t *testing.T) {
 	h := newHarness(t)
 	srv := newServer(h)
 	h.repo(t)
-	h.git.configFiles = map[string][]byte{
-		"origin/main:.lumberjack.yml": []byte(`
-steps:
-  - type: run-command
-    run_command:
-      command: echo hi
-`),
-	}
+	h.git.configFiles = map[string][]byte{"origin/main:.lumberjack.yml": []byte(setupConfigYAML)}
 
-	if _, err := srv.SetSetupConsent(context.Background(), &lumberjackv1.SetSetupConsentRequest{Repository: "n"}); err != nil {
+	resp, err := srv.SetSetupConsent(context.Background(), &lumberjackv1.SetSetupConsentRequest{
+		Repository: "n", Checksum: setup.Fingerprint([]byte(setupConfigYAML)),
+	})
+	if err != nil {
 		t.Fatalf("SetSetupConsent: %v", err)
 	}
-	resp, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"})
-	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+	if !resp.GetAccepted() {
+		t.Fatal("expected the matching checksum to be accepted")
 	}
-	if resp.GetPending() {
-		t.Error("expected pending=false after SetSetupConsent")
+	if !resp.GetRepository().GetSetupSteps().GetIsTrusted() {
+		t.Error("expected is_trusted=true after consent")
+	}
+}
+
+func TestServerSetSetupConsentRejectsAStaleChecksum(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{"origin/main:.lumberjack.yml": []byte(setupConfigYAML)}
+
+	resp, err := srv.SetSetupConsent(context.Background(), &lumberjackv1.SetSetupConsentRequest{
+		Repository: "n", Checksum: setup.Fingerprint([]byte("steps: []\n")),
+	})
+	if err != nil {
+		t.Fatalf("SetSetupConsent: %v", err)
+	}
+	if resp.GetAccepted() {
+		t.Fatal("a checksum that is not current must be rejected")
+	}
+	if resp.GetRepository().GetSetupSteps().GetIsTrusted() {
+		t.Error("a rejected consent must not be recorded")
+	}
+}
+
+func TestServerTrustSetupSteps(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{"origin/main:.lumberjack.yml": []byte(setupConfigYAML)}
+	local := setup.Fingerprint([]byte("steps: []\n"))
+
+	resp, err := srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{
+		Repository: "n", Checksum: local,
+	})
+	if err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
+	}
+	steps := resp.GetRepository().GetSetupSteps()
+	if !slices.Contains(steps.GetTrustedChecksums(), local) {
+		t.Errorf("TrustedChecksums = %v, want the trusted checksum", steps.GetTrustedChecksums())
+	}
+	if steps.GetIsTrusted() {
+		t.Error("trusting another config must not make the default branch's trusted")
+	}
+
+	if _, err := srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{
+		Repository: "n", Checksum: setup.Fingerprint([]byte(setupConfigYAML)),
+	}); err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
+	}
+	got, err := srv.GetRepository(context.Background(), &lumberjackv1.GetRepositoryRequest{Repository: "n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.GetRepository().GetSetupSteps().GetIsTrusted() {
+		t.Error("expected is_trusted once the default branch's checksum is trusted too")
+	}
+	if len(got.GetRepository().GetSetupSteps().GetTrustedChecksums()) != 2 {
+		t.Error("both trusted checksums must be kept")
+	}
+}
+
+func TestServerTrustSetupStepsFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{Repository: "n"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty checksum: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{Checksum: "x"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty repository: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{
+		Repository: "nope", Checksum: "x",
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
 	}
 }
 
@@ -720,27 +868,11 @@ func TestServerListRepositoriesSurvivesUnreadableSetupConfig(t *testing.T) {
 	if len(resp.GetRepositories()) != 1 {
 		t.Fatalf("repositories = %v, want one", resp.GetRepositories())
 	}
-	if resp.GetRepositories()[0].GetSetupConsentPending() {
+	if resp.GetRepositories()[0].GetSetupSteps() != nil {
+		t.Error("setup steps must be absent when the trusted config could not be read")
+	}
+	if resp.GetRepositories()[0].GetSetupConsentPending() { //nolint:staticcheck
 		t.Error("consent must not be reported as pending when it could not be read")
-	}
-}
-
-func TestServerGetSetupConsentFailures(t *testing.T) {
-	h := newHarness(t)
-	srv := newServer(h)
-	h.repo(t)
-
-	_, err := srv.GetSetupConsent(context.Background(),
-		&lumberjackv1.GetSetupConsentRequest{Repository: "nope"})
-	if status.Code(err) != codes.NotFound {
-		t.Errorf("unknown repo: expected NotFound, got %v", err)
-	}
-
-	h.git.showFileErr = errors.New("fatal: not a valid object name")
-	_, err = srv.GetSetupConsent(context.Background(),
-		&lumberjackv1.GetSetupConsentRequest{Repository: "n"})
-	if status.Code(err) != codes.Internal {
-		t.Errorf("unreadable config: expected Internal, got %v", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ceilingfish/lumberjack/pkg/client"
+	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -34,10 +35,7 @@ func newStatusCmd() *cobra.Command {
 				if err := emitRepositoryDetail(cmd.OutOrStdout(), format, repo); err != nil {
 					return err
 				}
-				if repo.GetSetupConsentPending() {
-					return promptSetupConsent(ctx, cmd, c, ref)
-				}
-				return nil
+				return promptSetupConsent(ctx, cmd, c, ref, repo)
 			})
 		},
 	}
@@ -46,25 +44,25 @@ func newStatusCmd() *cobra.Command {
 	return c
 }
 
-// promptSetupConsent checks whether the repository resolved by ref has
-// `.lumberjack.yml` run-command setup steps pending the local user's consent
-// and, if so, shows the commands and asks for it (trust-on-first-use). It is
-// a no-op when nothing is pending, so callers can invoke it unconditionally
-// after `init` or whenever a repository's detail is shown.
-func promptSetupConsent(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref string) error {
-	pending, commands, err := cl.GetSetupConsent(ctx, ref)
-	if err != nil {
-		return err
-	}
-	if !pending {
+func setupConsentPending(repo *lumberjackv1.Repository) bool {
+	steps := repo.GetSetupSteps()
+	return len(steps.GetSteps()) > 0 && !steps.GetIsTrusted()
+}
+
+func promptSetupConsent(
+	ctx context.Context, cmd *cobra.Command, cl *client.Client,
+	ref string, repo *lumberjackv1.Repository,
+) error {
+	if !setupConsentPending(repo) {
 		return nil
 	}
+	steps := repo.GetSetupSteps()
 
 	out := cmd.OutOrStdout()
 	if _, err := fmt.Fprintln(out, "This repository's .lumberjack.yml runs the following command(s) on every new worktree:"); err != nil {
 		return err
 	}
-	for _, c := range commands {
+	for _, c := range steps.GetSteps() {
 		if _, err := fmt.Fprintf(out, "  %s\n", c); err != nil {
 			return err
 		}
@@ -73,7 +71,12 @@ func promptSetupConsent(ctx context.Context, cmd *cobra.Command, cl *client.Clie
 		_, err := fmt.Fprintln(out, "Not consented — the daemon will skip these commands until you run `lumberjack status` for this repository and consent.")
 		return err
 	}
-	if _, err := cl.SetSetupConsent(ctx, ref); err != nil {
+	_, accepted, err := cl.SetSetupConsent(ctx, ref, steps.GetCurrentChecksum())
+	if err != nil {
+		return err
+	}
+	if !accepted {
+		_, err := fmt.Fprintln(out, ".lumberjack.yml changed while you were reading it — nothing recorded. Run `lumberjack status` again to see the new steps.")
 		return err
 	}
 	_, err = fmt.Fprintln(out, "Consent recorded.")

@@ -33,12 +33,15 @@ type Repository struct {
 	LastSyncStatus *string    `bun:"last_sync_status"`
 	LastSyncError  *string    `bun:"last_sync_error"`
 	CreatedAt      time.Time  `bun:"created_at,notnull,default:current_timestamp"`
-	// SetupConsentFingerprint is the content fingerprint (internal/setup.
-	// Fingerprint) of the `.lumberjack.yml` run-command steps the local user
-	// has consented to run for this repository. Empty means no consent yet;
-	// a mismatch against the trusted config's current fingerprint means
-	// consent is stale (the config changed since) and must be re-requested.
-	SetupConsentFingerprint string `bun:"setup_consent_fingerprint,notnull"`
+}
+
+type TrustedSetupStep struct {
+	bun.BaseModel `bun:"table:trusted_setup_steps,alias:tss"`
+
+	ID           int64     `bun:"id,pk,autoincrement"`
+	RepositoryID int64     `bun:"repository_id,notnull"`
+	Checksum     string    `bun:"checksum,notnull"`
+	TrustedAt    time.Time `bun:"trusted_at,notnull,default:current_timestamp"`
 }
 
 // PullRequest is a PR the daemon is tracking, mapped to its head branch.

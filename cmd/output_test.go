@@ -349,7 +349,6 @@ func TestCmdSetLoginJSON(t *testing.T) {
 }
 
 func TestCmdStatusSurfacesFailedConsentWrites(t *testing.T) {
-	consent := &lumberjackv1.GetSetupConsentResponse{Pending: true, RunCommands: []string{"make setup"}}
 	cases := []struct {
 		name    string
 		stdin   string
@@ -362,27 +361,15 @@ func TestCmdStatusSurfacesFailedConsentWrites(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			serveService(t, &coverStub{
-				repo:    &lumberjackv1.Repository{DirPrefix: "n", SetupConsentPending: true},
-				consent: consent,
-			})
+			serveService(t, &coverStub{repo: &lumberjackv1.Repository{
+				DirPrefix: "n", SetupSteps: pendingSetupSteps("make setup"),
+			}})
 			var errOut bytes.Buffer
 			err := runCmd(t, c.stdin, &flakyWriter{succeed: c.succeed}, &errOut, "status", "--repository", "n")
 			if !errors.Is(err, errWrite) {
 				t.Errorf("err = %v, want the failed write", err)
 			}
 		})
-	}
-}
-
-func TestCmdStatusSurfacesAFailedConsentLookup(t *testing.T) {
-	serveService(t, &coverStub{
-		repo:       &lumberjackv1.Repository{DirPrefix: "n", SetupConsentPending: true},
-		consentErr: errors.New("boom"),
-	})
-
-	if _, err := run(t, "", "status", "--repository", "n"); err == nil {
-		t.Error("expected the consent lookup failure to surface")
 	}
 }
 
@@ -501,13 +488,14 @@ func TestSetupStepsJSONAndFailedWrites(t *testing.T) {
 			if _, err := run(t, "", "setup-steps", "add", "true"); err != nil {
 				t.Fatal(err)
 			}
-			out, err := run(t, "", append([]string{"--format", "json"}, c.args...)...)
-			if err != nil {
+			var out, errOut bytes.Buffer
+			if err := runCmd(t, "", &out, &errOut,
+				append([]string{"--format", "json"}, c.args...)...); err != nil {
 				t.Fatalf("%v: %v", c.args, err)
 			}
 			var decoded map[string]any
-			if err := json.Unmarshal([]byte(out), &decoded); err != nil {
-				t.Fatalf("output is not valid JSON: %v (%q)", err, out)
+			if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+				t.Fatalf("output is not valid JSON: %v (%q)", err, out.String())
 			}
 			if decoded["message"] == nil {
 				t.Errorf("decoded = %+v, want a message", decoded)
@@ -580,15 +568,14 @@ func TestPromptSetupConsentSurfacesFailedWrites(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			serveService(t, &coverStub{consent: &lumberjackv1.GetSetupConsentResponse{
-				Pending: true, RunCommands: []string{"make setup"},
-			}})
+			serveService(t, &coverStub{})
 			cmd := &cobra.Command{}
 			cmd.SetOut(&flakyWriter{succeed: c.succeed})
 			cmd.SetErr(io.Discard)
 			cmd.SetIn(strings.NewReader("y\n"))
 
-			err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n")
+			repo := &lumberjackv1.Repository{DirPrefix: "n", SetupSteps: pendingSetupSteps("make setup")}
+			err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo)
 			if !errors.Is(err, errWrite) {
 				t.Errorf("err = %v, want the failed write", err)
 			}
@@ -597,18 +584,14 @@ func TestPromptSetupConsentSurfacesFailedWrites(t *testing.T) {
 }
 
 func TestPromptSetupConsentSurfacesAFailedRecord(t *testing.T) {
-	serveService(t, &coverStub{
-		consent: &lumberjackv1.GetSetupConsentResponse{
-			Pending: true, RunCommands: []string{"make setup"},
-		},
-		setConsentErr: errors.New("boom"),
-	})
+	serveService(t, &coverStub{setConsentErr: errors.New("boom")})
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
 	cmd.SetIn(strings.NewReader("y\n"))
 
-	if err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n"); err == nil {
+	repo := &lumberjackv1.Repository{DirPrefix: "n", SetupSteps: pendingSetupSteps("make setup")}
+	if err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo); err == nil {
 		t.Error("expected the failed consent record to surface")
 	}
 }

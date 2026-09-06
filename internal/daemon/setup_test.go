@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -102,10 +103,9 @@ steps:
 	h.git.configFiles = map[string][]byte{
 		trustedRef("origin", "main") + ":" + setup.ConfigFileName: raw,
 	}
-	if err := h.db.UpdateSetupConsent(context.Background(), repo.ID, setup.Fingerprint(raw)); err != nil {
+	if err := h.db.TrustSetupSteps(context.Background(), repo.ID, setup.Fingerprint(raw)); err != nil {
 		t.Fatal(err)
 	}
-	repo.SetupConsentFingerprint = setup.Fingerprint(raw)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
 
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
@@ -314,31 +314,33 @@ steps:
 	}
 }
 
-func TestGetSetupConsentPendingWhenNeverConsented(t *testing.T) {
+func TestGetSetupStepsUntrustedWhenNeverConsented(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
-	h.git.configFiles = map[string][]byte{
-		trustedRef("origin", "main") + ":" + setup.ConfigFileName: []byte(`
+	raw := []byte(`
 steps:
   - type: run-command
     run_command:
       command: echo hi
-`),
-	}
+`)
+	h.git.configFiles = map[string][]byte{trustedRef("origin", "main") + ":" + setup.ConfigFileName: raw}
 
-	consent, err := h.svc.GetSetupConsent(context.Background(), repo)
+	steps, err := h.svc.GetSetupSteps(context.Background(), repo)
 	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+		t.Fatalf("GetSetupSteps: %v", err)
 	}
-	if !consent.Pending {
-		t.Error("expected pending consent")
+	if !steps.IsDefined || steps.IsTrusted {
+		t.Errorf("steps = %+v, want defined and untrusted", steps)
 	}
-	if len(consent.Commands) != 1 || consent.Commands[0] != "echo hi" {
-		t.Errorf("Commands = %v", consent.Commands)
+	if steps.CurrentChecksum != setup.Fingerprint(raw) || len(steps.TrustedChecksums) != 0 {
+		t.Errorf("checksums = %v / %q", steps.TrustedChecksums, steps.CurrentChecksum)
+	}
+	if len(steps.Steps) != 1 || steps.Steps[0] != "echo hi" {
+		t.Errorf("Steps = %v", steps.Steps)
 	}
 }
 
-func TestSetSetupConsentClearsAndConfigChangeRePends(t *testing.T) {
+func TestSetSetupConsentTrustsAndConfigChangeUntrusts(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	raw := []byte(`
@@ -351,66 +353,107 @@ steps:
 		trustedRef("origin", "main") + ":" + setup.ConfigFileName: raw,
 	}
 
-	updated, err := h.svc.SetSetupConsent(context.Background(), repo)
+	accepted, err := h.svc.SetSetupConsent(context.Background(), repo, setup.Fingerprint(raw))
 	if err != nil {
 		t.Fatalf("SetSetupConsent: %v", err)
 	}
-	consent, err := h.svc.GetSetupConsent(context.Background(), updated)
-	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+	if !accepted {
+		t.Fatal("expected the current checksum to be accepted")
 	}
-	if consent.Pending {
-		t.Error("expected consent no longer pending after SetSetupConsent")
+	steps, err := h.svc.GetSetupSteps(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("GetSetupSteps: %v", err)
+	}
+	if !steps.IsTrusted {
+		t.Error("expected the steps to be trusted after consent")
 	}
 
-	// The trusted config changes: consent should become pending again.
-	h.git.configFiles[trustedRef("origin", "main")+":"+setup.ConfigFileName] = []byte(`
+	changed := []byte(`
 steps:
   - type: run-command
     run_command:
       command: echo changed
 `)
-	consent, err = h.svc.GetSetupConsent(context.Background(), updated)
+	h.git.configFiles[trustedRef("origin", "main")+":"+setup.ConfigFileName] = changed
+	steps, err = h.svc.GetSetupSteps(context.Background(), repo)
 	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+		t.Fatalf("GetSetupSteps: %v", err)
 	}
-	if !consent.Pending {
-		t.Error("expected consent to be pending again after config content changed")
+	if steps.IsTrusted {
+		t.Error("expected the steps to be untrusted again after the config changed")
+	}
+	if !slices.Contains(steps.TrustedChecksums, setup.Fingerprint(raw)) {
+		t.Error("the previously trusted checksum must stay trusted")
 	}
 }
 
-func TestGetSetupConsentNoRunCommandsNotPending(t *testing.T) {
+func TestTrustSetupStepsAcceptsAChecksumThatIsNotCurrent(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
+	local := setup.Fingerprint([]byte("steps: []\n"))
 	h.git.configFiles = map[string][]byte{
 		trustedRef("origin", "main") + ":" + setup.ConfigFileName: []byte(`
 steps:
-  - type: copy-file
-    copy_file:
-      source: a
-      destination: b
+  - type: run-command
+    run_command:
+      command: echo hi
 `),
 	}
 
-	consent, err := h.svc.GetSetupConsent(context.Background(), repo)
-	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+	if err := h.svc.TrustSetupSteps(context.Background(), repo, local); err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
 	}
-	if consent.Pending {
-		t.Error("copy-file-only config should never require consent")
+	steps, err := h.svc.GetSetupSteps(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("GetSetupSteps: %v", err)
+	}
+	if !slices.Contains(steps.TrustedChecksums, local) {
+		t.Errorf("TrustedChecksums = %v, want the worktree's own checksum", steps.TrustedChecksums)
+	}
+	if steps.IsTrusted {
+		t.Error("trusting another config must not make the default branch's trusted")
 	}
 }
 
-func TestGetSetupConsentNoConfigNotPending(t *testing.T) {
+func TestSetSetupConsentRejectsAStaleChecksum(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	raw := []byte(`
+steps:
+  - type: run-command
+    run_command:
+      command: echo hi
+`)
+	h.git.configFiles = map[string][]byte{
+		trustedRef("origin", "main") + ":" + setup.ConfigFileName: raw,
+	}
+
+	accepted, err := h.svc.SetSetupConsent(context.Background(), repo, setup.Fingerprint([]byte("steps: []\n")))
+	if err != nil {
+		t.Fatalf("SetSetupConsent: %v", err)
+	}
+	if accepted {
+		t.Fatal("a checksum that is not current must be rejected")
+	}
+	trusted, err := h.db.TrustedSetupChecksums(context.Background(), repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trusted) != 0 {
+		t.Errorf("trusted = %v, want nothing recorded", trusted)
+	}
+}
+
+func TestGetSetupStepsNoConfigIsTrusted(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 
-	consent, err := h.svc.GetSetupConsent(context.Background(), repo)
+	steps, err := h.svc.GetSetupSteps(context.Background(), repo)
 	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+		t.Fatalf("GetSetupSteps: %v", err)
 	}
-	if consent.Pending {
-		t.Error("no .lumberjack.yml should never require consent")
+	if steps.IsDefined || !steps.IsTrusted || len(steps.Steps) != 0 {
+		t.Errorf("steps = %+v, want undefined, trusted and empty", steps)
 	}
 }
 
@@ -426,13 +469,13 @@ func TestApplySetupError(t *testing.T) {
 	msg := "copy-file failed: permission denied"
 	only := worktree.Status{}
 	applySetupError(&only, &msg)
-	if !only.NeedsReconciliation || only.Note != "setup failed: "+msg {
+	if !only.NeedsReconciliation || only.Note != "setup: "+msg {
 		t.Errorf("status = %+v, want the setup failure as the note", only)
 	}
 
 	both := worktree.Status{NeedsReconciliation: true, Note: "uncommitted changes"}
 	applySetupError(&both, &msg)
-	if both.Note != "uncommitted changes; setup failed: "+msg {
+	if both.Note != "uncommitted changes; setup: "+msg {
 		t.Errorf("note = %q, want both reasons", both.Note)
 	}
 }
@@ -454,25 +497,25 @@ func TestSetupStepsReportAnUnreadableConfig(t *testing.T) {
 	}
 }
 
-func TestGetSetupConsentReportsAnUnresolvableDefaultBranch(t *testing.T) {
+func TestGetSetupStepsReportsAnUnresolvableDefaultBranch(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.git.defaultBranchErr = errors.New("fatal: no upstream configured")
 
-	_, err := h.svc.GetSetupConsent(context.Background(), repo)
+	_, err := h.svc.GetSetupSteps(context.Background(), repo)
 	if err == nil || !strings.Contains(err.Error(), "determining default branch") {
 		t.Errorf("err = %v, want the default-branch failure", err)
 	}
 }
 
-func TestGetSetupConsentReportsAnUnparsableConfig(t *testing.T) {
+func TestGetSetupStepsReportsAnUnparsableConfig(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.git.configFiles = map[string][]byte{
 		"origin/main:" + setup.ConfigFileName: []byte("steps: [: not yaml"),
 	}
 
-	if _, err := h.svc.GetSetupConsent(context.Background(), repo); err == nil {
+	if _, err := h.svc.GetSetupSteps(context.Background(), repo); err == nil {
 		t.Error("expected an error parsing a malformed config")
 	}
 }

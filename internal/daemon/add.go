@@ -19,9 +19,9 @@ type AddResult struct {
 	// BranchCreated is true when the branch did not exist on the remote or
 	// locally and was created off the default branch for this worktree.
 	BranchCreated bool
-	// SetupError is the setup step that failed, if any. The worktree is created
-	// and tracked regardless — setup failures are surfaced, not fatal (see
-	// runSetupSteps).
+	// SetupError is the setup step that failed, or the reason no steps ran, if
+	// either applies. The worktree is created and tracked regardless — setup
+	// problems are surfaced, not fatal (see runSetupSteps).
 	SetupError string
 }
 

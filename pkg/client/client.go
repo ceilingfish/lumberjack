@@ -136,22 +136,29 @@ func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, c
 	return resp.GetLogins(), resp.GetCurrent(), nil
 }
 
-// GetSetupConsent reports whether the repository resolved by ref has
-// `.lumberjack.yml` run-command setup steps pending the local user's consent,
-// plus the command strings for a consent prompt.
+// Deprecated: read Repository.GetSetupSteps() from GetRepository instead.
 func (c *Client) GetSetupConsent(ctx context.Context, ref string) (pending bool, commands []string, err error) {
-	resp, err := c.svc.GetSetupConsent(ctx, &lumberjackv1.GetSetupConsentRequest{Repository: ref})
+	resp, err := c.svc.GetSetupConsent(ctx, &lumberjackv1.GetSetupConsentRequest{Repository: ref}) //nolint:staticcheck
 	if err != nil {
 		return false, nil, mapError(err)
 	}
 	return resp.GetPending(), resp.GetRunCommands(), nil
 }
 
-// SetSetupConsent records the local user's consent to run the current
-// trusted `.lumberjack.yml` run-command steps for the repository resolved by
-// ref, returning the updated repository.
-func (c *Client) SetSetupConsent(ctx context.Context, ref string) (*lumberjackv1.Repository, error) {
-	resp, err := c.svc.SetSetupConsent(ctx, &lumberjackv1.SetSetupConsentRequest{Repository: ref})
+func (c *Client) SetSetupConsent(ctx context.Context, ref, checksum string) (*lumberjackv1.Repository, bool, error) {
+	resp, err := c.svc.SetSetupConsent(ctx, &lumberjackv1.SetSetupConsentRequest{
+		Repository: ref, Checksum: checksum,
+	})
+	if err != nil {
+		return nil, false, mapError(err)
+	}
+	return resp.GetRepository(), resp.GetAccepted(), nil
+}
+
+func (c *Client) TrustSetupSteps(ctx context.Context, ref, checksum string) (*lumberjackv1.Repository, error) {
+	resp, err := c.svc.TrustSetupSteps(ctx, &lumberjackv1.TrustSetupStepsRequest{
+		Repository: ref, Checksum: checksum,
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}

@@ -286,73 +286,133 @@ nonisolated struct Lumberjack_V1_WorktreeChange: Sendable {
 
 /// Repository is one tracked repo. Fields mirror the `repositories` table
 /// (docs/schema.md); mutable PR state is never carried here.
-nonisolated struct Lumberjack_V1_Repository: Sendable {
+nonisolated struct Lumberjack_V1_Repository: @unchecked Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var id: Int64 = 0
+  var id: Int64 {
+    get {_storage._id}
+    set {_uniqueStorage()._id = newValue}
+  }
 
-  var localPath: String = String()
+  var localPath: String {
+    get {_storage._localPath}
+    set {_uniqueStorage()._localPath = newValue}
+  }
 
-  var worktreeParentDir: String = String()
+  var worktreeParentDir: String {
+    get {_storage._worktreeParentDir}
+    set {_uniqueStorage()._worktreeParentDir = newValue}
+  }
 
-  var dirPrefix: String = String()
+  var dirPrefix: String {
+    get {_storage._dirPrefix}
+    set {_uniqueStorage()._dirPrefix = newValue}
+  }
 
-  var githubOwner: String = String()
+  var githubOwner: String {
+    get {_storage._githubOwner}
+    set {_uniqueStorage()._githubOwner = newValue}
+  }
 
-  var githubName: String = String()
+  var githubName: String {
+    get {_storage._githubName}
+    set {_uniqueStorage()._githubName = newValue}
+  }
 
-  var defaultRemote: String = String()
+  var defaultRemote: String {
+    get {_storage._defaultRemote}
+    set {_uniqueStorage()._defaultRemote = newValue}
+  }
 
-  var host: String = String()
+  var host: String {
+    get {_storage._host}
+    set {_uniqueStorage()._host = newValue}
+  }
 
   var lastSyncedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
-    get {_lastSyncedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
-    set {_lastSyncedAt = newValue}
+    get {_storage._lastSyncedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._lastSyncedAt = newValue}
   }
   /// Returns true if `lastSyncedAt` has been explicitly set.
-  var hasLastSyncedAt: Bool {self._lastSyncedAt != nil}
+  var hasLastSyncedAt: Bool {_storage._lastSyncedAt != nil}
   /// Clears the value of `lastSyncedAt`. Subsequent reads from it will return its default value.
-  mutating func clearLastSyncedAt() {self._lastSyncedAt = nil}
+  mutating func clearLastSyncedAt() {_uniqueStorage()._lastSyncedAt = nil}
 
-  var lastSyncStatus: Lumberjack_V1_SyncStatus = .unspecified
+  var lastSyncStatus: Lumberjack_V1_SyncStatus {
+    get {_storage._lastSyncStatus}
+    set {_uniqueStorage()._lastSyncStatus = newValue}
+  }
 
   var lastSyncError: String {
-    get {_lastSyncError ?? String()}
-    set {_lastSyncError = newValue}
+    get {_storage._lastSyncError ?? String()}
+    set {_uniqueStorage()._lastSyncError = newValue}
   }
   /// Returns true if `lastSyncError` has been explicitly set.
-  var hasLastSyncError: Bool {self._lastSyncError != nil}
+  var hasLastSyncError: Bool {_storage._lastSyncError != nil}
   /// Clears the value of `lastSyncError`. Subsequent reads from it will return its default value.
-  mutating func clearLastSyncError() {self._lastSyncError = nil}
+  mutating func clearLastSyncError() {_uniqueStorage()._lastSyncError = nil}
 
   var createdAt: SwiftProtobuf.Google_Protobuf_Timestamp {
-    get {_createdAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
-    set {_createdAt = newValue}
+    get {_storage._createdAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_uniqueStorage()._createdAt = newValue}
   }
   /// Returns true if `createdAt` has been explicitly set.
-  var hasCreatedAt: Bool {self._createdAt != nil}
+  var hasCreatedAt: Bool {_storage._createdAt != nil}
   /// Clears the value of `createdAt`. Subsequent reads from it will return its default value.
-  mutating func clearCreatedAt() {self._createdAt = nil}
+  mutating func clearCreatedAt() {_uniqueStorage()._createdAt = nil}
 
   /// The gh account this repo was registered under; the daemon switches to it
   /// before operating on the repo. Empty for repos tracked before login capture.
-  var login: String = String()
+  var login: String {
+    get {_storage._login}
+    set {_uniqueStorage()._login = newValue}
+  }
 
-  /// True when the repository's trusted `.lumberjack.yml` declares run-command
-  /// setup steps that the local user has not consented to (or has not
-  /// consented to since the config last changed). The daemon skips
-  /// run-commands while this is true; the CLI surfaces it as a prompt.
-  var setupConsentPending: Bool = false
+  /// Deprecated: use setup_steps.is_trusted. True whenever
+  /// setup_steps.current_checksum is not one of setup_steps.trusted_checksums.
+  ///
+  /// NOTE: This field was marked as deprecated in the .proto file.
+  var setupConsentPending: Bool {
+    get {_storage._setupConsentPending}
+    set {_uniqueStorage()._setupConsentPending = newValue}
+  }
+
+  var setupSteps: Lumberjack_V1_SetupSteps {
+    get {_storage._setupSteps ?? Lumberjack_V1_SetupSteps()}
+    set {_uniqueStorage()._setupSteps = newValue}
+  }
+  /// Returns true if `setupSteps` has been explicitly set.
+  var hasSetupSteps: Bool {_storage._setupSteps != nil}
+  /// Clears the value of `setupSteps`. Subsequent reads from it will return its default value.
+  mutating func clearSetupSteps() {_uniqueStorage()._setupSteps = nil}
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
-  fileprivate var _lastSyncedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
-  fileprivate var _lastSyncError: String? = nil
-  fileprivate var _createdAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+nonisolated struct Lumberjack_V1_SetupSteps: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var isDefined: Bool = false
+
+  var trustedChecksums: [String] = []
+
+  var currentChecksum: String = String()
+
+  var isTrusted: Bool = false
+
+  var steps: [String] = []
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
 }
 
 /// Worktree is the live view of a local worktree: the stored branch <-> directory
@@ -470,44 +530,38 @@ nonisolated struct Lumberjack_V1_InitRepositoryRequest: Sendable {
   init() {}
 }
 
-nonisolated struct Lumberjack_V1_InitRepositoryResponse: @unchecked Sendable {
+nonisolated struct Lumberjack_V1_InitRepositoryResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
   var repository: Lumberjack_V1_Repository {
-    get {_storage._repository ?? Lumberjack_V1_Repository()}
-    set {_uniqueStorage()._repository = newValue}
+    get {_repository ?? Lumberjack_V1_Repository()}
+    set {_repository = newValue}
   }
   /// Returns true if `repository` has been explicitly set.
-  var hasRepository: Bool {_storage._repository != nil}
+  var hasRepository: Bool {self._repository != nil}
   /// Clears the value of `repository`. Subsequent reads from it will return its default value.
-  mutating func clearRepository() {_uniqueStorage()._repository = nil}
+  mutating func clearRepository() {self._repository = nil}
 
   /// Deprecated: superseded by `adopted` (field 3), which carries the full
   /// per-branch change so init can render the same branch/PR/action table as
   /// sync. No longer populated by the daemon.
   ///
   /// NOTE: This field was marked as deprecated in the .proto file.
-  var adoptedBranches: [String] {
-    get {_storage._adoptedBranches}
-    set {_uniqueStorage()._adoptedBranches = newValue}
-  }
+  var adoptedBranches: [String] = []
 
   /// The worktrees adopted into tracking during init — directories git had
   /// already checked out for this repo but Lumberjack did not yet track (each
   /// with action ADOPTED and no PR number yet). Empty for a fresh checkout with
   /// no sibling worktrees.
-  var adopted: [Lumberjack_V1_WorktreeChange] {
-    get {_storage._adopted}
-    set {_uniqueStorage()._adopted = newValue}
-  }
+  var adopted: [Lumberjack_V1_WorktreeChange] = []
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
-  fileprivate var _storage = _StorageClass.defaultInstance
+  fileprivate var _repository: Lumberjack_V1_Repository? = nil
 }
 
 nonisolated struct Lumberjack_V1_ListRepositoriesRequest: Sendable {
@@ -636,6 +690,9 @@ nonisolated struct Lumberjack_V1_ListLoginsResponse: Sendable {
   init() {}
 }
 
+/// Deprecated: read Repository.setup_steps instead.
+///
+/// NOTE: This message was marked as deprecated in the .proto file.
 nonisolated struct Lumberjack_V1_GetSetupConsentRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -650,6 +707,9 @@ nonisolated struct Lumberjack_V1_GetSetupConsentRequest: Sendable {
   init() {}
 }
 
+/// Deprecated: read Repository.setup_steps instead.
+///
+/// NOTE: This message was marked as deprecated in the .proto file.
 nonisolated struct Lumberjack_V1_GetSetupConsentResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -677,12 +737,53 @@ nonisolated struct Lumberjack_V1_SetSetupConsentRequest: Sendable {
   /// resolves either form.
   var repository: String = String()
 
+  var checksum: String = String()
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 }
 
 nonisolated struct Lumberjack_V1_SetSetupConsentResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var repository: Lumberjack_V1_Repository {
+    get {_repository ?? Lumberjack_V1_Repository()}
+    set {_repository = newValue}
+  }
+  /// Returns true if `repository` has been explicitly set.
+  var hasRepository: Bool {self._repository != nil}
+  /// Clears the value of `repository`. Subsequent reads from it will return its default value.
+  mutating func clearRepository() {self._repository = nil}
+
+  var accepted: Bool = false
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+
+  fileprivate var _repository: Lumberjack_V1_Repository? = nil
+}
+
+nonisolated struct Lumberjack_V1_TrustSetupStepsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// A repository name (dir prefix / GitHub name) or its local path; the daemon
+  /// resolves either form.
+  var repository: String = String()
+
+  var checksum: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+nonisolated struct Lumberjack_V1_TrustSetupStepsResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1047,56 +1148,52 @@ nonisolated struct Lumberjack_V1_WatchRequest: Sendable {
 
 /// WatchResponse is one item in a Watch stream. Every event carries the affected
 /// repository; which other field is populated depends on type.
-nonisolated struct Lumberjack_V1_WatchResponse: @unchecked Sendable {
+nonisolated struct Lumberjack_V1_WatchResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  var type: Lumberjack_V1_WatchResponseType {
-    get {_storage._type}
-    set {_uniqueStorage()._type = newValue}
-  }
+  var type: Lumberjack_V1_WatchResponseType = .unspecified
 
   var repository: Lumberjack_V1_Repository {
-    get {_storage._repository ?? Lumberjack_V1_Repository()}
-    set {_uniqueStorage()._repository = newValue}
+    get {_repository ?? Lumberjack_V1_Repository()}
+    set {_repository = newValue}
   }
   /// Returns true if `repository` has been explicitly set.
-  var hasRepository: Bool {_storage._repository != nil}
+  var hasRepository: Bool {self._repository != nil}
   /// Clears the value of `repository`. Subsequent reads from it will return its default value.
-  mutating func clearRepository() {_uniqueStorage()._repository = nil}
+  mutating func clearRepository() {self._repository = nil}
 
   /// Populated for SNAPSHOT: the repository's current worktrees.
-  var worktrees: [Lumberjack_V1_Worktree] {
-    get {_storage._worktrees}
-    set {_uniqueStorage()._worktrees = newValue}
-  }
+  var worktrees: [Lumberjack_V1_Worktree] = []
 
   /// Populated for WORKTREE_CHANGED.
   var change: Lumberjack_V1_WorktreeChange {
-    get {_storage._change ?? Lumberjack_V1_WorktreeChange()}
-    set {_uniqueStorage()._change = newValue}
+    get {_change ?? Lumberjack_V1_WorktreeChange()}
+    set {_change = newValue}
   }
   /// Returns true if `change` has been explicitly set.
-  var hasChange: Bool {_storage._change != nil}
+  var hasChange: Bool {self._change != nil}
   /// Clears the value of `change`. Subsequent reads from it will return its default value.
-  mutating func clearChange() {_uniqueStorage()._change = nil}
+  mutating func clearChange() {self._change = nil}
 
   /// Populated for SYNC_FINISHED.
   var summary: Lumberjack_V1_SyncSummary {
-    get {_storage._summary ?? Lumberjack_V1_SyncSummary()}
-    set {_uniqueStorage()._summary = newValue}
+    get {_summary ?? Lumberjack_V1_SyncSummary()}
+    set {_summary = newValue}
   }
   /// Returns true if `summary` has been explicitly set.
-  var hasSummary: Bool {_storage._summary != nil}
+  var hasSummary: Bool {self._summary != nil}
   /// Clears the value of `summary`. Subsequent reads from it will return its default value.
-  mutating func clearSummary() {_uniqueStorage()._summary = nil}
+  mutating func clearSummary() {self._summary = nil}
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
-  fileprivate var _storage = _StorageClass.defaultInstance
+  fileprivate var _repository: Lumberjack_V1_Repository? = nil
+  fileprivate var _change: Lumberjack_V1_WorktreeChange? = nil
+  fileprivate var _summary: Lumberjack_V1_SyncSummary? = nil
 }
 
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
@@ -1180,7 +1277,175 @@ nonisolated extension Lumberjack_V1_WorktreeChange: SwiftProtobuf.Message, Swift
 
 nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".Repository"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}local_path\0\u{3}worktree_parent_dir\0\u{3}dir_prefix\0\u{3}github_owner\0\u{3}github_name\0\u{3}default_remote\0\u{1}host\0\u{3}last_synced_at\0\u{3}last_sync_status\0\u{3}last_sync_error\0\u{3}created_at\0\u{1}login\0\u{3}setup_consent_pending\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}local_path\0\u{3}worktree_parent_dir\0\u{3}dir_prefix\0\u{3}github_owner\0\u{3}github_name\0\u{3}default_remote\0\u{1}host\0\u{3}last_synced_at\0\u{3}last_sync_status\0\u{3}last_sync_error\0\u{3}created_at\0\u{1}login\0\u{3}setup_consent_pending\0\u{3}setup_steps\0")
+
+  fileprivate class _StorageClass {
+    var _id: Int64 = 0
+    var _localPath: String = String()
+    var _worktreeParentDir: String = String()
+    var _dirPrefix: String = String()
+    var _githubOwner: String = String()
+    var _githubName: String = String()
+    var _defaultRemote: String = String()
+    var _host: String = String()
+    var _lastSyncedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _lastSyncStatus: Lumberjack_V1_SyncStatus = .unspecified
+    var _lastSyncError: String? = nil
+    var _createdAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+    var _login: String = String()
+    var _setupConsentPending: Bool = false
+    var _setupSteps: Lumberjack_V1_SetupSteps? = nil
+
+      // This property is used as the initial default value for new instances of the type.
+      // The type itself is protecting the reference to its storage via CoW semantics.
+      // This will force a copy to be made of this reference when the first mutation occurs;
+      // hence, it is safe to mark this as `nonisolated(unsafe)`.
+      static nonisolated(unsafe) let defaultInstance = _StorageClass()
+
+    private init() {}
+
+    init(copying source: _StorageClass) {
+      _id = source._id
+      _localPath = source._localPath
+      _worktreeParentDir = source._worktreeParentDir
+      _dirPrefix = source._dirPrefix
+      _githubOwner = source._githubOwner
+      _githubName = source._githubName
+      _defaultRemote = source._defaultRemote
+      _host = source._host
+      _lastSyncedAt = source._lastSyncedAt
+      _lastSyncStatus = source._lastSyncStatus
+      _lastSyncError = source._lastSyncError
+      _createdAt = source._createdAt
+      _login = source._login
+      _setupConsentPending = source._setupConsentPending
+      _setupSteps = source._setupSteps
+    }
+  }
+
+  fileprivate mutating func _uniqueStorage() -> _StorageClass {
+    if !isKnownUniquelyReferenced(&_storage) {
+      _storage = _StorageClass(copying: _storage)
+    }
+    return _storage
+  }
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    _ = _uniqueStorage()
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      while let fieldNumber = try decoder.nextFieldNumber() {
+        // The use of inline closures is to circumvent an issue where the compiler
+        // allocates stack space for every case branch when no optimizations are
+        // enabled. https://github.com/apple/swift-protobuf/issues/1034
+        switch fieldNumber {
+        case 1: try { try decoder.decodeSingularInt64Field(value: &_storage._id) }()
+        case 2: try { try decoder.decodeSingularStringField(value: &_storage._localPath) }()
+        case 3: try { try decoder.decodeSingularStringField(value: &_storage._worktreeParentDir) }()
+        case 4: try { try decoder.decodeSingularStringField(value: &_storage._dirPrefix) }()
+        case 5: try { try decoder.decodeSingularStringField(value: &_storage._githubOwner) }()
+        case 6: try { try decoder.decodeSingularStringField(value: &_storage._githubName) }()
+        case 7: try { try decoder.decodeSingularStringField(value: &_storage._defaultRemote) }()
+        case 8: try { try decoder.decodeSingularStringField(value: &_storage._host) }()
+        case 9: try { try decoder.decodeSingularMessageField(value: &_storage._lastSyncedAt) }()
+        case 10: try { try decoder.decodeSingularEnumField(value: &_storage._lastSyncStatus) }()
+        case 11: try { try decoder.decodeSingularStringField(value: &_storage._lastSyncError) }()
+        case 12: try { try decoder.decodeSingularMessageField(value: &_storage._createdAt) }()
+        case 13: try { try decoder.decodeSingularStringField(value: &_storage._login) }()
+        case 14: try { try decoder.decodeSingularBoolField(value: &_storage._setupConsentPending) }()
+        case 15: try { try decoder.decodeSingularMessageField(value: &_storage._setupSteps) }()
+        default: break
+        }
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every if/case branch local when no optimizations
+      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+      // https://github.com/apple/swift-protobuf/issues/1182
+      if _storage._id != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._id, fieldNumber: 1)
+      }
+      if !_storage._localPath.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._localPath, fieldNumber: 2)
+      }
+      if !_storage._worktreeParentDir.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._worktreeParentDir, fieldNumber: 3)
+      }
+      if !_storage._dirPrefix.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._dirPrefix, fieldNumber: 4)
+      }
+      if !_storage._githubOwner.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._githubOwner, fieldNumber: 5)
+      }
+      if !_storage._githubName.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._githubName, fieldNumber: 6)
+      }
+      if !_storage._defaultRemote.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._defaultRemote, fieldNumber: 7)
+      }
+      if !_storage._host.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._host, fieldNumber: 8)
+      }
+      try { if let v = _storage._lastSyncedAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+      } }()
+      if _storage._lastSyncStatus != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._lastSyncStatus, fieldNumber: 10)
+      }
+      try { if let v = _storage._lastSyncError {
+        try visitor.visitSingularStringField(value: v, fieldNumber: 11)
+      } }()
+      try { if let v = _storage._createdAt {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
+      } }()
+      if !_storage._login.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._login, fieldNumber: 13)
+      }
+      if _storage._setupConsentPending != false {
+        try visitor.visitSingularBoolField(value: _storage._setupConsentPending, fieldNumber: 14)
+      }
+      try { if let v = _storage._setupSteps {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
+      } }()
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_Repository, rhs: Lumberjack_V1_Repository) -> Bool {
+    if lhs._storage !== rhs._storage {
+      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
+        let _storage = _args.0
+        let rhs_storage = _args.1
+        if _storage._id != rhs_storage._id {return false}
+        if _storage._localPath != rhs_storage._localPath {return false}
+        if _storage._worktreeParentDir != rhs_storage._worktreeParentDir {return false}
+        if _storage._dirPrefix != rhs_storage._dirPrefix {return false}
+        if _storage._githubOwner != rhs_storage._githubOwner {return false}
+        if _storage._githubName != rhs_storage._githubName {return false}
+        if _storage._defaultRemote != rhs_storage._defaultRemote {return false}
+        if _storage._host != rhs_storage._host {return false}
+        if _storage._lastSyncedAt != rhs_storage._lastSyncedAt {return false}
+        if _storage._lastSyncStatus != rhs_storage._lastSyncStatus {return false}
+        if _storage._lastSyncError != rhs_storage._lastSyncError {return false}
+        if _storage._createdAt != rhs_storage._createdAt {return false}
+        if _storage._login != rhs_storage._login {return false}
+        if _storage._setupConsentPending != rhs_storage._setupConsentPending {return false}
+        if _storage._setupSteps != rhs_storage._setupSteps {return false}
+        return true
+      }
+      if !storagesAreEqual {return false}
+    }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_SetupSteps: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".SetupSteps"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}is_defined\0\u{3}trusted_checksums\0\u{3}current_checksum\0\u{3}is_trusted\0\u{1}steps\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1188,90 +1453,41 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt64Field(value: &self.id) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.localPath) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.worktreeParentDir) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self.dirPrefix) }()
-      case 5: try { try decoder.decodeSingularStringField(value: &self.githubOwner) }()
-      case 6: try { try decoder.decodeSingularStringField(value: &self.githubName) }()
-      case 7: try { try decoder.decodeSingularStringField(value: &self.defaultRemote) }()
-      case 8: try { try decoder.decodeSingularStringField(value: &self.host) }()
-      case 9: try { try decoder.decodeSingularMessageField(value: &self._lastSyncedAt) }()
-      case 10: try { try decoder.decodeSingularEnumField(value: &self.lastSyncStatus) }()
-      case 11: try { try decoder.decodeSingularStringField(value: &self._lastSyncError) }()
-      case 12: try { try decoder.decodeSingularMessageField(value: &self._createdAt) }()
-      case 13: try { try decoder.decodeSingularStringField(value: &self.login) }()
-      case 14: try { try decoder.decodeSingularBoolField(value: &self.setupConsentPending) }()
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.isDefined) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.trustedChecksums) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.currentChecksum) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.isTrusted) }()
+      case 5: try { try decoder.decodeRepeatedStringField(value: &self.steps) }()
       default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    // The use of inline closures is to circumvent an issue where the compiler
-    // allocates stack space for every if/case branch local when no optimizations
-    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-    // https://github.com/apple/swift-protobuf/issues/1182
-    if self.id != 0 {
-      try visitor.visitSingularInt64Field(value: self.id, fieldNumber: 1)
+    if self.isDefined != false {
+      try visitor.visitSingularBoolField(value: self.isDefined, fieldNumber: 1)
     }
-    if !self.localPath.isEmpty {
-      try visitor.visitSingularStringField(value: self.localPath, fieldNumber: 2)
+    if !self.trustedChecksums.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.trustedChecksums, fieldNumber: 2)
     }
-    if !self.worktreeParentDir.isEmpty {
-      try visitor.visitSingularStringField(value: self.worktreeParentDir, fieldNumber: 3)
+    if !self.currentChecksum.isEmpty {
+      try visitor.visitSingularStringField(value: self.currentChecksum, fieldNumber: 3)
     }
-    if !self.dirPrefix.isEmpty {
-      try visitor.visitSingularStringField(value: self.dirPrefix, fieldNumber: 4)
+    if self.isTrusted != false {
+      try visitor.visitSingularBoolField(value: self.isTrusted, fieldNumber: 4)
     }
-    if !self.githubOwner.isEmpty {
-      try visitor.visitSingularStringField(value: self.githubOwner, fieldNumber: 5)
-    }
-    if !self.githubName.isEmpty {
-      try visitor.visitSingularStringField(value: self.githubName, fieldNumber: 6)
-    }
-    if !self.defaultRemote.isEmpty {
-      try visitor.visitSingularStringField(value: self.defaultRemote, fieldNumber: 7)
-    }
-    if !self.host.isEmpty {
-      try visitor.visitSingularStringField(value: self.host, fieldNumber: 8)
-    }
-    try { if let v = self._lastSyncedAt {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
-    } }()
-    if self.lastSyncStatus != .unspecified {
-      try visitor.visitSingularEnumField(value: self.lastSyncStatus, fieldNumber: 10)
-    }
-    try { if let v = self._lastSyncError {
-      try visitor.visitSingularStringField(value: v, fieldNumber: 11)
-    } }()
-    try { if let v = self._createdAt {
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 12)
-    } }()
-    if !self.login.isEmpty {
-      try visitor.visitSingularStringField(value: self.login, fieldNumber: 13)
-    }
-    if self.setupConsentPending != false {
-      try visitor.visitSingularBoolField(value: self.setupConsentPending, fieldNumber: 14)
+    if !self.steps.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.steps, fieldNumber: 5)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Lumberjack_V1_Repository, rhs: Lumberjack_V1_Repository) -> Bool {
-    if lhs.id != rhs.id {return false}
-    if lhs.localPath != rhs.localPath {return false}
-    if lhs.worktreeParentDir != rhs.worktreeParentDir {return false}
-    if lhs.dirPrefix != rhs.dirPrefix {return false}
-    if lhs.githubOwner != rhs.githubOwner {return false}
-    if lhs.githubName != rhs.githubName {return false}
-    if lhs.defaultRemote != rhs.defaultRemote {return false}
-    if lhs.host != rhs.host {return false}
-    if lhs._lastSyncedAt != rhs._lastSyncedAt {return false}
-    if lhs.lastSyncStatus != rhs.lastSyncStatus {return false}
-    if lhs._lastSyncError != rhs._lastSyncError {return false}
-    if lhs._createdAt != rhs._createdAt {return false}
-    if lhs.login != rhs.login {return false}
-    if lhs.setupConsentPending != rhs.setupConsentPending {return false}
+  static func ==(lhs: Lumberjack_V1_SetupSteps, rhs: Lumberjack_V1_SetupSteps) -> Bool {
+    if lhs.isDefined != rhs.isDefined {return false}
+    if lhs.trustedChecksums != rhs.trustedChecksums {return false}
+    if lhs.currentChecksum != rhs.currentChecksum {return false}
+    if lhs.isTrusted != rhs.isTrusted {return false}
+    if lhs.steps != rhs.steps {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1453,81 +1669,41 @@ nonisolated extension Lumberjack_V1_InitRepositoryResponse: SwiftProtobuf.Messag
   static let protoMessageName: String = _protobuf_package + ".InitRepositoryResponse"
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{3}adopted_branches\0\u{1}adopted\0")
 
-  fileprivate class _StorageClass {
-    var _repository: Lumberjack_V1_Repository? = nil
-    var _adoptedBranches: [String] = []
-    var _adopted: [Lumberjack_V1_WorktreeChange] = []
-
-      // This property is used as the initial default value for new instances of the type.
-      // The type itself is protecting the reference to its storage via CoW semantics.
-      // This will force a copy to be made of this reference when the first mutation occurs;
-      // hence, it is safe to mark this as `nonisolated(unsafe)`.
-      static nonisolated(unsafe) let defaultInstance = _StorageClass()
-
-    private init() {}
-
-    init(copying source: _StorageClass) {
-      _repository = source._repository
-      _adoptedBranches = source._adoptedBranches
-      _adopted = source._adopted
-    }
-  }
-
-  fileprivate mutating func _uniqueStorage() -> _StorageClass {
-    if !isKnownUniquelyReferenced(&_storage) {
-      _storage = _StorageClass(copying: _storage)
-    }
-    return _storage
-  }
-
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    _ = _uniqueStorage()
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      while let fieldNumber = try decoder.nextFieldNumber() {
-        // The use of inline closures is to circumvent an issue where the compiler
-        // allocates stack space for every case branch when no optimizations are
-        // enabled. https://github.com/apple/swift-protobuf/issues/1034
-        switch fieldNumber {
-        case 1: try { try decoder.decodeSingularMessageField(value: &_storage._repository) }()
-        case 2: try { try decoder.decodeRepeatedStringField(value: &_storage._adoptedBranches) }()
-        case 3: try { try decoder.decodeRepeatedMessageField(value: &_storage._adopted) }()
-        default: break
-        }
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._repository) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.adoptedBranches) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.adopted) }()
+      default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every if/case branch local when no optimizations
-      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-      // https://github.com/apple/swift-protobuf/issues/1182
-      try { if let v = _storage._repository {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
-      } }()
-      if !_storage._adoptedBranches.isEmpty {
-        try visitor.visitRepeatedStringField(value: _storage._adoptedBranches, fieldNumber: 2)
-      }
-      if !_storage._adopted.isEmpty {
-        try visitor.visitRepeatedMessageField(value: _storage._adopted, fieldNumber: 3)
-      }
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._repository {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if !self.adoptedBranches.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.adoptedBranches, fieldNumber: 2)
+    }
+    if !self.adopted.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.adopted, fieldNumber: 3)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   static func ==(lhs: Lumberjack_V1_InitRepositoryResponse, rhs: Lumberjack_V1_InitRepositoryResponse) -> Bool {
-    if lhs._storage !== rhs._storage {
-      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
-        let _storage = _args.0
-        let rhs_storage = _args.1
-        if _storage._repository != rhs_storage._repository {return false}
-        if _storage._adoptedBranches != rhs_storage._adoptedBranches {return false}
-        if _storage._adopted != rhs_storage._adopted {return false}
-        return true
-      }
-      if !storagesAreEqual {return false}
-    }
+    if lhs._repository != rhs._repository {return false}
+    if lhs.adoptedBranches != rhs.adoptedBranches {return false}
+    if lhs.adopted != rhs.adopted {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1847,7 +2023,7 @@ nonisolated extension Lumberjack_V1_GetSetupConsentResponse: SwiftProtobuf.Messa
 
 nonisolated extension Lumberjack_V1_SetSetupConsentRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".SetSetupConsentRequest"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}checksum\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1856,6 +2032,7 @@ nonisolated extension Lumberjack_V1_SetSetupConsentRequest: SwiftProtobuf.Messag
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.checksum) }()
       default: break
       }
     }
@@ -1865,11 +2042,15 @@ nonisolated extension Lumberjack_V1_SetSetupConsentRequest: SwiftProtobuf.Messag
     if !self.repository.isEmpty {
       try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
     }
+    if !self.checksum.isEmpty {
+      try visitor.visitSingularStringField(value: self.checksum, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   static func ==(lhs: Lumberjack_V1_SetSetupConsentRequest, rhs: Lumberjack_V1_SetSetupConsentRequest) -> Bool {
     if lhs.repository != rhs.repository {return false}
+    if lhs.checksum != rhs.checksum {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1877,6 +2058,80 @@ nonisolated extension Lumberjack_V1_SetSetupConsentRequest: SwiftProtobuf.Messag
 
 nonisolated extension Lumberjack_V1_SetSetupConsentResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".SetSetupConsentResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}accepted\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._repository) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.accepted) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._repository {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.accepted != false {
+      try visitor.visitSingularBoolField(value: self.accepted, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_SetSetupConsentResponse, rhs: Lumberjack_V1_SetSetupConsentResponse) -> Bool {
+    if lhs._repository != rhs._repository {return false}
+    if lhs.accepted != rhs.accepted {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_TrustSetupStepsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".TrustSetupStepsRequest"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}checksum\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.checksum) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.repository.isEmpty {
+      try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
+    }
+    if !self.checksum.isEmpty {
+      try visitor.visitSingularStringField(value: self.checksum, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_TrustSetupStepsRequest, rhs: Lumberjack_V1_TrustSetupStepsRequest) -> Bool {
+    if lhs.repository != rhs.repository {return false}
+    if lhs.checksum != rhs.checksum {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_TrustSetupStepsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".TrustSetupStepsResponse"
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
@@ -1902,7 +2157,7 @@ nonisolated extension Lumberjack_V1_SetSetupConsentResponse: SwiftProtobuf.Messa
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  static func ==(lhs: Lumberjack_V1_SetSetupConsentResponse, rhs: Lumberjack_V1_SetSetupConsentResponse) -> Bool {
+  static func ==(lhs: Lumberjack_V1_TrustSetupStepsResponse, rhs: Lumberjack_V1_TrustSetupStepsResponse) -> Bool {
     if lhs._repository != rhs._repository {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -2535,95 +2790,51 @@ nonisolated extension Lumberjack_V1_WatchResponse: SwiftProtobuf.Message, SwiftP
   static let protoMessageName: String = _protobuf_package + ".WatchResponse"
   static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}repository\0\u{1}worktrees\0\u{1}change\0\u{1}summary\0")
 
-  fileprivate class _StorageClass {
-    var _type: Lumberjack_V1_WatchResponseType = .unspecified
-    var _repository: Lumberjack_V1_Repository? = nil
-    var _worktrees: [Lumberjack_V1_Worktree] = []
-    var _change: Lumberjack_V1_WorktreeChange? = nil
-    var _summary: Lumberjack_V1_SyncSummary? = nil
-
-      // This property is used as the initial default value for new instances of the type.
-      // The type itself is protecting the reference to its storage via CoW semantics.
-      // This will force a copy to be made of this reference when the first mutation occurs;
-      // hence, it is safe to mark this as `nonisolated(unsafe)`.
-      static nonisolated(unsafe) let defaultInstance = _StorageClass()
-
-    private init() {}
-
-    init(copying source: _StorageClass) {
-      _type = source._type
-      _repository = source._repository
-      _worktrees = source._worktrees
-      _change = source._change
-      _summary = source._summary
-    }
-  }
-
-  fileprivate mutating func _uniqueStorage() -> _StorageClass {
-    if !isKnownUniquelyReferenced(&_storage) {
-      _storage = _StorageClass(copying: _storage)
-    }
-    return _storage
-  }
-
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    _ = _uniqueStorage()
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      while let fieldNumber = try decoder.nextFieldNumber() {
-        // The use of inline closures is to circumvent an issue where the compiler
-        // allocates stack space for every case branch when no optimizations are
-        // enabled. https://github.com/apple/swift-protobuf/issues/1034
-        switch fieldNumber {
-        case 1: try { try decoder.decodeSingularEnumField(value: &_storage._type) }()
-        case 2: try { try decoder.decodeSingularMessageField(value: &_storage._repository) }()
-        case 3: try { try decoder.decodeRepeatedMessageField(value: &_storage._worktrees) }()
-        case 4: try { try decoder.decodeSingularMessageField(value: &_storage._change) }()
-        case 5: try { try decoder.decodeSingularMessageField(value: &_storage._summary) }()
-        default: break
-        }
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.type) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._repository) }()
+      case 3: try { try decoder.decodeRepeatedMessageField(value: &self.worktrees) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._change) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._summary) }()
+      default: break
       }
     }
   }
 
   func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    try withExtendedLifetime(_storage) { (_storage: _StorageClass) in
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every if/case branch local when no optimizations
-      // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
-      // https://github.com/apple/swift-protobuf/issues/1182
-      if _storage._type != .unspecified {
-        try visitor.visitSingularEnumField(value: _storage._type, fieldNumber: 1)
-      }
-      try { if let v = _storage._repository {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
-      } }()
-      if !_storage._worktrees.isEmpty {
-        try visitor.visitRepeatedMessageField(value: _storage._worktrees, fieldNumber: 3)
-      }
-      try { if let v = _storage._change {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-      } }()
-      try { if let v = _storage._summary {
-        try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-      } }()
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.type != .unspecified {
+      try visitor.visitSingularEnumField(value: self.type, fieldNumber: 1)
     }
+    try { if let v = self._repository {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if !self.worktrees.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.worktrees, fieldNumber: 3)
+    }
+    try { if let v = self._change {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._summary {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   static func ==(lhs: Lumberjack_V1_WatchResponse, rhs: Lumberjack_V1_WatchResponse) -> Bool {
-    if lhs._storage !== rhs._storage {
-      let storagesAreEqual: Bool = withExtendedLifetime((lhs._storage, rhs._storage)) { (_args: (_StorageClass, _StorageClass)) in
-        let _storage = _args.0
-        let rhs_storage = _args.1
-        if _storage._type != rhs_storage._type {return false}
-        if _storage._repository != rhs_storage._repository {return false}
-        if _storage._worktrees != rhs_storage._worktrees {return false}
-        if _storage._change != rhs_storage._change {return false}
-        if _storage._summary != rhs_storage._summary {return false}
-        return true
-      }
-      if !storagesAreEqual {return false}
-    }
+    if lhs.type != rhs.type {return false}
+    if lhs._repository != rhs._repository {return false}
+    if lhs.worktrees != rhs.worktrees {return false}
+    if lhs._change != rhs._change {return false}
+    if lhs._summary != rhs._summary {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

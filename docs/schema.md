@@ -30,7 +30,19 @@ One row per tracked repo. This is the identity Lumberjack syncs against.
 | `last_sync_error`     | text      | Nullable; last error message                                                                                             |
 | `etag_pulls`          | text      | ETag from the last PR-list request, for conditional (304) fetches                                                        |
 | `created_at`          | timestamp |                                                                                                                          |
-| `setup_consent_fingerprint` | text | Content fingerprint (sha256) of the trusted `.lumberjack.yml` run-command steps the local user has consented to run. Empty means not consented. A mismatch against the trusted config's current fingerprint means consent is pending (never given, or the config changed since) |
+
+### `trusted_setup_steps`
+
+The `.lumberjack.yml` versions the local user has agreed to run for a repo, one row per distinct content checksum. Trust is additive and never expires: a checksum trusted once stays trusted, so moving between branches whose setup steps differ only asks once per version. Consent is local to the machine — nothing about it is pushed or shared.
+
+| Column          | Type      | Notes                                                                    |
+| --------------- | --------- | ------------------------------------------------------------------------ |
+| `id`            | integer   | Primary key                                                              |
+| `repository_id` | integer   | FK → `repositories.id`, `ON DELETE CASCADE`                              |
+| `checksum`      | text      | Content checksum (sha256) of the `.lumberjack.yml` that was trusted      |
+| `trusted_at`    | timestamp | When it was trusted; re-trusting the same checksum keeps the original    |
+
+Unique on (`repository_id`, `checksum`). `SetupSteps.is_trusted` on the wire means the default branch's current checksum is one of these rows.
 
 ### `pull_requests`
 
