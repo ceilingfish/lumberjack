@@ -22,6 +22,7 @@ func newSetupCmd() *cobra.Command {
 	c.AddCommand(newSetupRemoveCmd())
 	c.AddCommand(newSetupListCmd())
 	c.AddCommand(newSetupRunCmd())
+	c.AddCommand(newSetupTrustCmd())
 	return c
 }
 

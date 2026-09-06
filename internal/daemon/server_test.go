@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -165,8 +166,8 @@ func TestServerGetRepositorySetupSteps(t *testing.T) {
 	if steps.GetIsTrusted() {
 		t.Error("expected is_trusted=false before consent")
 	}
-	if steps.GetTrustedChecksum() != "" {
-		t.Errorf("TrustedChecksum = %q, want empty before consent", steps.GetTrustedChecksum())
+	if len(steps.GetTrustedChecksums()) != 0 {
+		t.Errorf("TrustedChecksums = %v, want empty before consent", steps.GetTrustedChecksums())
 	}
 	if want := setup.Fingerprint([]byte(setupConfigYAML)); steps.GetCurrentChecksum() != want {
 		t.Errorf("CurrentChecksum = %q, want %q", steps.GetCurrentChecksum(), want)
@@ -283,6 +284,65 @@ func TestServerSetSetupConsentRejectsAStaleChecksum(t *testing.T) {
 	}
 	if resp.GetRepository().GetSetupSteps().GetIsTrusted() {
 		t.Error("a rejected consent must not be recorded")
+	}
+}
+
+func TestServerTrustSetupSteps(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{"origin/main:.lumberjack.yml": []byte(setupConfigYAML)}
+	local := setup.Fingerprint([]byte("steps: []\n"))
+
+	resp, err := srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{
+		Repository: "n", Checksum: local,
+	})
+	if err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
+	}
+	steps := resp.GetRepository().GetSetupSteps()
+	if !slices.Contains(steps.GetTrustedChecksums(), local) {
+		t.Errorf("TrustedChecksums = %v, want the trusted checksum", steps.GetTrustedChecksums())
+	}
+	if steps.GetIsTrusted() {
+		t.Error("trusting another config must not make the default branch's trusted")
+	}
+
+	if _, err := srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{
+		Repository: "n", Checksum: setup.Fingerprint([]byte(setupConfigYAML)),
+	}); err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
+	}
+	got, err := srv.GetRepository(context.Background(), &lumberjackv1.GetRepositoryRequest{Repository: "n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.GetRepository().GetSetupSteps().GetIsTrusted() {
+		t.Error("expected is_trusted once the default branch's checksum is trusted too")
+	}
+	if len(got.GetRepository().GetSetupSteps().GetTrustedChecksums()) != 2 {
+		t.Error("both trusted checksums must be kept")
+	}
+}
+
+func TestServerTrustSetupStepsFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{Repository: "n"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty checksum: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{Checksum: "x"})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty repository: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.TrustSetupSteps(context.Background(), &lumberjackv1.TrustSetupStepsRequest{
+		Repository: "nope", Checksum: "x",
+	})
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
 	}
 }
 

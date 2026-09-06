@@ -98,11 +98,11 @@ func (s *Server) decorateSetupSteps(ctx context.Context, pb *lumberjackv1.Reposi
 		return
 	}
 	pb.SetupSteps = &lumberjackv1.SetupSteps{
-		IsDefined:       steps.IsDefined,
-		TrustedChecksum: steps.TrustedChecksum,
-		CurrentChecksum: steps.CurrentChecksum,
-		IsTrusted:       steps.IsTrusted,
-		Steps:           steps.Steps,
+		IsDefined:        steps.IsDefined,
+		TrustedChecksums: steps.TrustedChecksums,
+		CurrentChecksum:  steps.CurrentChecksum,
+		IsTrusted:        steps.IsTrusted,
+		Steps:            steps.Steps,
 	}
 	pb.SetupConsentPending = !steps.IsTrusted //nolint:staticcheck
 }
@@ -127,20 +127,45 @@ func (s *Server) GetSetupConsent(ctx context.Context, req *lumberjackv1.GetSetup
 }
 
 func (s *Server) SetSetupConsent(ctx context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
-	if req.GetRepository() == "" {
-		return nil, status.Error(codes.InvalidArgument, "repository is required")
-	}
-	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	pb, accepted, err := s.trustChecksum(ctx, req.GetRepository(), func(repo *schema.Repository) (bool, error) {
+		return s.svc.SetSetupConsent(ctx, repo, req.GetChecksum())
+	})
 	if err != nil {
-		return nil, toStatus(err)
+		return nil, err
 	}
-	updated, accepted, err := s.svc.SetSetupConsent(ctx, repo, req.GetChecksum())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	pb := toProtoRepository(updated)
-	s.decorateSetupSteps(ctx, pb, updated)
 	return &lumberjackv1.SetSetupConsentResponse{Repository: pb, Accepted: accepted}, nil
+}
+
+func (s *Server) TrustSetupSteps(ctx context.Context, req *lumberjackv1.TrustSetupStepsRequest) (*lumberjackv1.TrustSetupStepsResponse, error) {
+	if req.GetChecksum() == "" {
+		return nil, status.Error(codes.InvalidArgument, "checksum is required")
+	}
+	pb, _, err := s.trustChecksum(ctx, req.GetRepository(), func(repo *schema.Repository) (bool, error) {
+		return true, s.svc.TrustSetupSteps(ctx, repo, req.GetChecksum())
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &lumberjackv1.TrustSetupStepsResponse{Repository: pb}, nil
+}
+
+func (s *Server) trustChecksum(
+	ctx context.Context, ref string, trust func(*schema.Repository) (bool, error),
+) (*lumberjackv1.Repository, bool, error) {
+	if ref == "" {
+		return nil, false, status.Error(codes.InvalidArgument, "repository is required")
+	}
+	repo, err := s.db.FindRepository(ctx, ref)
+	if err != nil {
+		return nil, false, toStatus(err)
+	}
+	accepted, err := trust(repo)
+	if err != nil {
+		return nil, false, toStatus(err)
+	}
+	pb := toProtoRepository(repo)
+	s.decorateSetupSteps(ctx, pb, repo)
+	return pb, accepted, nil
 }
 
 // SetLogin sets the gh account a repository operates under.

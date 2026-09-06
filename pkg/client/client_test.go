@@ -89,6 +89,17 @@ func (stubServer) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSetupC
 	}, nil
 }
 
+func (stubServer) TrustSetupSteps(_ context.Context, req *lumberjackv1.TrustSetupStepsRequest) (*lumberjackv1.TrustSetupStepsResponse, error) {
+	return &lumberjackv1.TrustSetupStepsResponse{
+		Repository: &lumberjackv1.Repository{
+			DirPrefix: req.GetRepository(),
+			SetupSteps: &lumberjackv1.SetupSteps{
+				TrustedChecksums: []string{req.GetChecksum()},
+			},
+		},
+	}, nil
+}
+
 func (stubServer) AddWorktree(_ context.Context, req *lumberjackv1.AddWorktreeRequest) (*lumberjackv1.AddWorktreeResponse, error) {
 	return &lumberjackv1.AddWorktreeResponse{
 		Branch:        req.GetBranch(),
@@ -384,6 +395,18 @@ func TestClientSetupConsent(t *testing.T) {
 	}
 }
 
+func TestClientTrustSetupSteps(t *testing.T) {
+	c := startStub(t)
+	repo, err := c.TrustSetupSteps(context.Background(), "a", "sha256:abc")
+	if err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
+	}
+	got := repo.GetSetupSteps().GetTrustedChecksums()
+	if len(got) != 1 || got[0] != "sha256:abc" {
+		t.Errorf("TrustedChecksums = %v", got)
+	}
+}
+
 func TestClientAddWorktree(t *testing.T) {
 	c := startStub(t)
 	resp, err := c.AddWorktree(context.Background(), "a", "feature/x")
@@ -516,6 +539,10 @@ func TestEveryMethodMapsServerErrors(t *testing.T) {
 		},
 		"GetSetupConsent": func(c *Client) error {
 			_, _, err := c.GetSetupConsent(context.Background(), "a") //nolint:staticcheck
+			return err
+		},
+		"TrustSetupSteps": func(c *Client) error {
+			_, err := c.TrustSetupSteps(context.Background(), "a", "sum")
 			return err
 		},
 		"SetSetupConsent": func(c *Client) error {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -102,10 +103,9 @@ steps:
 	h.git.configFiles = map[string][]byte{
 		trustedRef("origin", "main") + ":" + setup.ConfigFileName: raw,
 	}
-	if err := h.db.UpdateTrustedChecksum(context.Background(), repo.ID, setup.Fingerprint(raw)); err != nil {
+	if err := h.db.TrustSetupSteps(context.Background(), repo.ID, setup.Fingerprint(raw)); err != nil {
 		t.Fatal(err)
 	}
-	repo.TrustedChecksum = setup.Fingerprint(raw)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
 
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
@@ -332,8 +332,8 @@ steps:
 	if !steps.IsDefined || steps.IsTrusted {
 		t.Errorf("steps = %+v, want defined and untrusted", steps)
 	}
-	if steps.CurrentChecksum != setup.Fingerprint(raw) || steps.TrustedChecksum != "" {
-		t.Errorf("checksums = %q / %q", steps.TrustedChecksum, steps.CurrentChecksum)
+	if steps.CurrentChecksum != setup.Fingerprint(raw) || len(steps.TrustedChecksums) != 0 {
+		t.Errorf("checksums = %v / %q", steps.TrustedChecksums, steps.CurrentChecksum)
 	}
 	if len(steps.Steps) != 1 || steps.Steps[0] != "echo hi" {
 		t.Errorf("Steps = %v", steps.Steps)
@@ -353,14 +353,14 @@ steps:
 		trustedRef("origin", "main") + ":" + setup.ConfigFileName: raw,
 	}
 
-	updated, accepted, err := h.svc.SetSetupConsent(context.Background(), repo, setup.Fingerprint(raw))
+	accepted, err := h.svc.SetSetupConsent(context.Background(), repo, setup.Fingerprint(raw))
 	if err != nil {
 		t.Fatalf("SetSetupConsent: %v", err)
 	}
 	if !accepted {
 		t.Fatal("expected the current checksum to be accepted")
 	}
-	steps, err := h.svc.GetSetupSteps(context.Background(), updated)
+	steps, err := h.svc.GetSetupSteps(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("GetSetupSteps: %v", err)
 	}
@@ -368,18 +368,50 @@ steps:
 		t.Error("expected the steps to be trusted after consent")
 	}
 
-	h.git.configFiles[trustedRef("origin", "main")+":"+setup.ConfigFileName] = []byte(`
+	changed := []byte(`
 steps:
   - type: run-command
     run_command:
       command: echo changed
 `)
-	steps, err = h.svc.GetSetupSteps(context.Background(), updated)
+	h.git.configFiles[trustedRef("origin", "main")+":"+setup.ConfigFileName] = changed
+	steps, err = h.svc.GetSetupSteps(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("GetSetupSteps: %v", err)
 	}
 	if steps.IsTrusted {
 		t.Error("expected the steps to be untrusted again after the config changed")
+	}
+	if !slices.Contains(steps.TrustedChecksums, setup.Fingerprint(raw)) {
+		t.Error("the previously trusted checksum must stay trusted")
+	}
+}
+
+func TestTrustSetupStepsAcceptsAChecksumThatIsNotCurrent(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	local := setup.Fingerprint([]byte("steps: []\n"))
+	h.git.configFiles = map[string][]byte{
+		trustedRef("origin", "main") + ":" + setup.ConfigFileName: []byte(`
+steps:
+  - type: run-command
+    run_command:
+      command: echo hi
+`),
+	}
+
+	if err := h.svc.TrustSetupSteps(context.Background(), repo, local); err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
+	}
+	steps, err := h.svc.GetSetupSteps(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("GetSetupSteps: %v", err)
+	}
+	if !slices.Contains(steps.TrustedChecksums, local) {
+		t.Errorf("TrustedChecksums = %v, want the worktree's own checksum", steps.TrustedChecksums)
+	}
+	if steps.IsTrusted {
+		t.Error("trusting another config must not make the default branch's trusted")
 	}
 }
 
@@ -396,15 +428,19 @@ steps:
 		trustedRef("origin", "main") + ":" + setup.ConfigFileName: raw,
 	}
 
-	updated, accepted, err := h.svc.SetSetupConsent(context.Background(), repo, setup.Fingerprint([]byte("steps: []\n")))
+	accepted, err := h.svc.SetSetupConsent(context.Background(), repo, setup.Fingerprint([]byte("steps: []\n")))
 	if err != nil {
 		t.Fatalf("SetSetupConsent: %v", err)
 	}
 	if accepted {
 		t.Fatal("a checksum that is not current must be rejected")
 	}
-	if updated.TrustedChecksum != "" {
-		t.Errorf("TrustedChecksum = %q, want nothing recorded", updated.TrustedChecksum)
+	trusted, err := h.db.TrustedSetupChecksums(context.Background(), repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trusted) != 0 {
+		t.Errorf("trusted = %v, want nothing recorded", trusted)
 	}
 }
 

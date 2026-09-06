@@ -155,6 +155,16 @@ func (c *Client) SetSetupConsent(ctx context.Context, ref, checksum string) (*lu
 	return resp.GetRepository(), resp.GetAccepted(), nil
 }
 
+func (c *Client) TrustSetupSteps(ctx context.Context, ref, checksum string) (*lumberjackv1.Repository, error) {
+	resp, err := c.svc.TrustSetupSteps(ctx, &lumberjackv1.TrustSetupStepsRequest{
+		Repository: ref, Checksum: checksum,
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetRepository(), nil
+}
+
 // ListWorktrees returns a repository's worktrees with live reconciliation.
 func (c *Client) ListWorktrees(ctx context.Context, ref string) ([]*lumberjackv1.Worktree, error) {
 	resp, err := c.svc.ListWorktrees(ctx, &lumberjackv1.ListWorktreesRequest{Repository: ref})

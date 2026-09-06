@@ -96,6 +96,11 @@ internal protocol Lumberjack_V1_LumberjackServiceClientProtocol: GRPCClient {
     _ request: Lumberjack_V1_SetSetupConsentRequest,
     callOptions: CallOptions?
   ) -> UnaryCall<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse>
+
+  func trustSetupSteps(
+    _ request: Lumberjack_V1_TrustSetupStepsRequest,
+    callOptions: CallOptions?
+  ) -> UnaryCall<Lumberjack_V1_TrustSetupStepsRequest, Lumberjack_V1_TrustSetupStepsResponse>
 }
 
 extension Lumberjack_V1_LumberjackServiceClientProtocol {
@@ -413,6 +418,24 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
       interceptors: self.interceptors?.makeSetSetupConsentInterceptors() ?? []
     )
   }
+
+  /// Unary call to TrustSetupSteps
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to TrustSetupSteps.
+  ///   - callOptions: Call options.
+  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
+  internal func trustSetupSteps(
+    _ request: Lumberjack_V1_TrustSetupStepsRequest,
+    callOptions: CallOptions? = nil
+  ) -> UnaryCall<Lumberjack_V1_TrustSetupStepsRequest, Lumberjack_V1_TrustSetupStepsResponse> {
+    return self.makeUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.trustSetupSteps.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeTrustSetupStepsInterceptors() ?? []
+    )
+  }
 }
 
 @available(*, deprecated)
@@ -554,6 +577,11 @@ internal protocol Lumberjack_V1_LumberjackServiceAsyncClientProtocol: GRPCClient
     _ request: Lumberjack_V1_SetSetupConsentRequest,
     callOptions: CallOptions?
   ) -> GRPCAsyncUnaryCall<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse>
+
+  func makeTrustSetupStepsCall(
+    _ request: Lumberjack_V1_TrustSetupStepsRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_TrustSetupStepsRequest, Lumberjack_V1_TrustSetupStepsResponse>
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -745,6 +773,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       interceptors: self.interceptors?.makeSetSetupConsentInterceptors() ?? []
     )
   }
+
+  internal func makeTrustSetupStepsCall(
+    _ request: Lumberjack_V1_TrustSetupStepsRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_TrustSetupStepsRequest, Lumberjack_V1_TrustSetupStepsResponse> {
+    return self.makeAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.trustSetupSteps.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeTrustSetupStepsInterceptors() ?? []
+    )
+  }
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -928,6 +968,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       interceptors: self.interceptors?.makeSetSetupConsentInterceptors() ?? []
     )
   }
+
+  internal func trustSetupSteps(
+    _ request: Lumberjack_V1_TrustSetupStepsRequest,
+    callOptions: CallOptions? = nil
+  ) async throws -> Lumberjack_V1_TrustSetupStepsResponse {
+    return try await self.performAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.trustSetupSteps.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeTrustSetupStepsInterceptors() ?? []
+    )
+  }
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -993,6 +1045,9 @@ internal protocol Lumberjack_V1_LumberjackServiceClientInterceptorFactoryProtoco
 
   /// - Returns: Interceptors to use when invoking 'setSetupConsent'.
   func makeSetSetupConsentInterceptors() -> [ClientInterceptor<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse>]
+
+  /// - Returns: Interceptors to use when invoking 'trustSetupSteps'.
+  func makeTrustSetupStepsInterceptors() -> [ClientInterceptor<Lumberjack_V1_TrustSetupStepsRequest, Lumberjack_V1_TrustSetupStepsResponse>]
 }
 
 internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
@@ -1015,6 +1070,7 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.watch,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.trustSetupSteps,
     ]
   )
 
@@ -1106,6 +1162,12 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
     internal static let setSetupConsent = GRPCMethodDescriptor(
       name: "SetSetupConsent",
       path: "/lumberjack.v1.LumberjackService/SetSetupConsent",
+      type: GRPCCallType.unary
+    )
+
+    internal static let trustSetupSteps = GRPCMethodDescriptor(
+      name: "TrustSetupSteps",
+      path: "/lumberjack.v1.LumberjackService/TrustSetupSteps",
       type: GRPCCallType.unary
     )
   }

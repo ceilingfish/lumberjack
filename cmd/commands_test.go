@@ -39,12 +39,13 @@ type stubService struct {
 	// logins is what ListLogins reports; loginErr, if set, is returned by
 	// SetLogin (e.g. an unauthenticated account). lastSetLogin records the login
 	// SetLogin received.
-	logins            []string
-	loginCurrent      string
-	loginErr          error
-	lastSetLogin      string
-	setupSteps        *lumberjackv1.SetupSteps
-	setupConsentGiven bool
+	logins              []string
+	loginCurrent        string
+	loginErr            error
+	lastSetLogin        string
+	setupSteps          *lumberjackv1.SetupSteps
+	setupConsentGiven   bool
+	lastTrustedChecksum string
 	// tidyMoves is what Tidy reports; lastTidyTarget/lastTidyDryRun record the
 	// request it received, so tests can assert on scoping and --dry-run.
 	tidyMoves        []*lumberjackv1.TidyMove
@@ -98,14 +99,21 @@ func (s *stubService) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSe
 	if accepted && steps != nil {
 		steps = &lumberjackv1.SetupSteps{
 			IsDefined: true, IsTrusted: true,
-			TrustedChecksum: steps.GetCurrentChecksum(),
-			CurrentChecksum: steps.GetCurrentChecksum(),
-			Steps:           steps.GetSteps(),
+			TrustedChecksums: []string{steps.GetCurrentChecksum()},
+			CurrentChecksum:  steps.GetCurrentChecksum(),
+			Steps:            steps.GetSteps(),
 		}
 	}
 	return &lumberjackv1.SetSetupConsentResponse{
 		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository(), SetupSteps: steps},
 		Accepted:   accepted,
+	}, nil
+}
+
+func (s *stubService) TrustSetupSteps(_ context.Context, req *lumberjackv1.TrustSetupStepsRequest) (*lumberjackv1.TrustSetupStepsResponse, error) {
+	s.lastTrustedChecksum = req.GetChecksum()
+	return &lumberjackv1.TrustSetupStepsResponse{
+		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository(), SetupSteps: s.setupSteps},
 	}, nil
 }
 

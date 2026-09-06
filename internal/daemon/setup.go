@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/setup"
@@ -39,8 +40,16 @@ func (s *Service) runSetupSteps(
 		return ""
 	}
 
-	consented := cfg.HasRunCommands() && repo.TrustedChecksum != "" &&
-		repo.TrustedChecksum == setup.Fingerprint(raw)
+	consented := false
+	if cfg.HasRunCommands() {
+		trusted, err := s.db.TrustedSetupChecksums(ctx, repo.ID)
+		if err != nil {
+			msg := fmt.Sprintf("reading trusted %s checksums: %v", setup.ConfigFileName, err)
+			s.recordSetupError(ctx, worktreeID, &msg)
+			return msg
+		}
+		consented = slices.Contains(trusted, setup.Fingerprint(raw))
+	}
 
 	failedStep, runErr := setup.Run(ctx, cfg, setup.Options{
 		MainCheckout:     repo.LocalPath,
@@ -135,11 +144,11 @@ func (s *Service) trustedRef(ctx context.Context, repo *schema.Repository) (stri
 }
 
 type SetupSteps struct {
-	IsDefined       bool
-	TrustedChecksum string
-	CurrentChecksum string
-	IsTrusted       bool
-	Steps           []string
+	IsDefined        bool
+	TrustedChecksums []string
+	CurrentChecksum  string
+	IsTrusted        bool
+	Steps            []string
 }
 
 func (s *Service) GetSetupSteps(ctx context.Context, repo *schema.Repository) (SetupSteps, error) {
@@ -147,34 +156,42 @@ func (s *Service) GetSetupSteps(ctx context.Context, repo *schema.Repository) (S
 	if err != nil {
 		return SetupSteps{}, err
 	}
-	steps := SetupSteps{TrustedChecksum: repo.TrustedChecksum}
-	if cfg != nil {
-		steps.IsDefined = true
-		steps.CurrentChecksum = setup.Fingerprint(raw)
-		steps.Steps = cfg.RunCommands()
+	trusted, err := s.db.TrustedSetupChecksums(ctx, repo.ID)
+	if err != nil {
+		return SetupSteps{}, err
 	}
-	steps.IsTrusted = steps.TrustedChecksum == steps.CurrentChecksum
+	steps := SetupSteps{TrustedChecksums: trusted}
+	if cfg == nil {
+		steps.IsTrusted = true
+		return steps, nil
+	}
+	steps.IsDefined = true
+	steps.CurrentChecksum = setup.Fingerprint(raw)
+	steps.Steps = cfg.RunCommands()
+	steps.IsTrusted = slices.Contains(trusted, steps.CurrentChecksum)
 	return steps, nil
+}
+
+func (s *Service) TrustSetupSteps(ctx context.Context, repo *schema.Repository, checksum string) error {
+	return s.db.TrustSetupSteps(ctx, repo.ID, checksum)
 }
 
 func (s *Service) SetSetupConsent(
 	ctx context.Context, repo *schema.Repository, checksum string,
-) (*schema.Repository, bool, error) {
+) (bool, error) {
 	_, raw, err := s.loadTrustedSetupConfig(ctx, repo)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	current := ""
 	if raw != nil {
 		current = setup.Fingerprint(raw)
 	}
-	if checksum != current {
-		return repo, false, nil
+	if checksum != current || current == "" {
+		return false, nil
 	}
-	if err := s.db.UpdateTrustedChecksum(ctx, repo.ID, current); err != nil {
-		return nil, false, err
+	if err := s.db.TrustSetupSteps(ctx, repo.ID, current); err != nil {
+		return false, err
 	}
-	updated := *repo
-	updated.TrustedChecksum = current
-	return &updated, true, nil
+	return true, nil
 }

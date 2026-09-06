@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -303,7 +304,7 @@ func TestTouchWorktreesSyncedAt(t *testing.T) {
 	}
 }
 
-func TestUpdateTrustedChecksum(t *testing.T) {
+func TestTrustSetupSteps(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
@@ -311,25 +312,47 @@ func TestUpdateTrustedChecksum(t *testing.T) {
 		t.Fatalf("CreateRepository: %v", err)
 	}
 
-	got, _ := c.repositoryByID(ctx, repo.ID)
-	if got.TrustedChecksum != "" {
-		t.Fatalf("expected no consent before it is granted, got %q", got.TrustedChecksum)
+	got, err := c.TrustedSetupChecksums(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("TrustedSetupChecksums: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected nothing trusted yet, got %v", got)
 	}
 
-	if err := c.UpdateTrustedChecksum(ctx, repo.ID, "sha256:abc"); err != nil {
-		t.Fatalf("UpdateTrustedChecksum: %v", err)
+	for _, sum := range []string{"sha256:abc", "sha256:def", "sha256:abc"} {
+		if err := c.TrustSetupSteps(ctx, repo.ID, sum); err != nil {
+			t.Fatalf("TrustSetupSteps(%s): %v", sum, err)
+		}
 	}
-	got, _ = c.repositoryByID(ctx, repo.ID)
-	if got.TrustedChecksum != "sha256:abc" {
-		t.Errorf("TrustedChecksum = %q, want sha256:abc", got.TrustedChecksum)
+	got, err = c.TrustedSetupChecksums(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("TrustedSetupChecksums: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("checksums = %v, want two (trusting twice must not duplicate)", got)
+	}
+	if !slices.Contains(got, "sha256:abc") || !slices.Contains(got, "sha256:def") {
+		t.Errorf("checksums = %v, want both trusted values", got)
+	}
+}
+
+func TestTrustedSetupChecksumsAreScopedToARepository(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo, other := newRepo("/a", "a", "A"), newRepo("/b", "b", "B")
+	_ = c.CreateRepository(ctx, repo)
+	_ = c.CreateRepository(ctx, other)
+	if err := c.TrustSetupSteps(ctx, repo.ID, "sha256:abc"); err != nil {
+		t.Fatalf("TrustSetupSteps: %v", err)
 	}
 
-	if err := c.UpdateTrustedChecksum(ctx, repo.ID, ""); err != nil {
-		t.Fatalf("UpdateTrustedChecksum(clear): %v", err)
+	got, err := c.TrustedSetupChecksums(ctx, other.ID)
+	if err != nil {
+		t.Fatalf("TrustedSetupChecksums: %v", err)
 	}
-	got, _ = c.repositoryByID(ctx, repo.ID)
-	if got.TrustedChecksum != "" {
-		t.Errorf("an empty checksum should clear consent, got %q", got.TrustedChecksum)
+	if len(got) != 0 {
+		t.Errorf("other repo's checksums = %v, want none", got)
 	}
 }
 

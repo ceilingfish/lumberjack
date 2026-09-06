@@ -371,7 +371,7 @@ nonisolated struct Lumberjack_V1_Repository: @unchecked Sendable {
   }
 
   /// Deprecated: use setup_steps.is_trusted. True whenever
-  /// setup_steps.trusted_checksum differs from setup_steps.current_checksum.
+  /// setup_steps.current_checksum is not one of setup_steps.trusted_checksums.
   ///
   /// NOTE: This field was marked as deprecated in the .proto file.
   var setupConsentPending: Bool {
@@ -402,7 +402,7 @@ nonisolated struct Lumberjack_V1_SetupSteps: Sendable {
 
   var isDefined: Bool = false
 
-  var trustedChecksum: String = String()
+  var trustedChecksums: [String] = []
 
   var currentChecksum: String = String()
 
@@ -759,6 +759,43 @@ nonisolated struct Lumberjack_V1_SetSetupConsentResponse: Sendable {
   mutating func clearRepository() {self._repository = nil}
 
   var accepted: Bool = false
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+
+  fileprivate var _repository: Lumberjack_V1_Repository? = nil
+}
+
+nonisolated struct Lumberjack_V1_TrustSetupStepsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// A repository name (dir prefix / GitHub name) or its local path; the daemon
+  /// resolves either form.
+  var repository: String = String()
+
+  var checksum: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+nonisolated struct Lumberjack_V1_TrustSetupStepsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var repository: Lumberjack_V1_Repository {
+    get {_repository ?? Lumberjack_V1_Repository()}
+    set {_repository = newValue}
+  }
+  /// Returns true if `repository` has been explicitly set.
+  var hasRepository: Bool {self._repository != nil}
+  /// Clears the value of `repository`. Subsequent reads from it will return its default value.
+  mutating func clearRepository() {self._repository = nil}
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1408,7 +1445,7 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
 
 nonisolated extension Lumberjack_V1_SetupSteps: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".SetupSteps"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}is_defined\0\u{3}trusted_checksum\0\u{3}current_checksum\0\u{3}is_trusted\0\u{1}steps\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}is_defined\0\u{3}trusted_checksums\0\u{3}current_checksum\0\u{3}is_trusted\0\u{1}steps\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1417,7 +1454,7 @@ nonisolated extension Lumberjack_V1_SetupSteps: SwiftProtobuf.Message, SwiftProt
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self.isDefined) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.trustedChecksum) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.trustedChecksums) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.currentChecksum) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self.isTrusted) }()
       case 5: try { try decoder.decodeRepeatedStringField(value: &self.steps) }()
@@ -1430,8 +1467,8 @@ nonisolated extension Lumberjack_V1_SetupSteps: SwiftProtobuf.Message, SwiftProt
     if self.isDefined != false {
       try visitor.visitSingularBoolField(value: self.isDefined, fieldNumber: 1)
     }
-    if !self.trustedChecksum.isEmpty {
-      try visitor.visitSingularStringField(value: self.trustedChecksum, fieldNumber: 2)
+    if !self.trustedChecksums.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.trustedChecksums, fieldNumber: 2)
     }
     if !self.currentChecksum.isEmpty {
       try visitor.visitSingularStringField(value: self.currentChecksum, fieldNumber: 3)
@@ -1447,7 +1484,7 @@ nonisolated extension Lumberjack_V1_SetupSteps: SwiftProtobuf.Message, SwiftProt
 
   static func ==(lhs: Lumberjack_V1_SetupSteps, rhs: Lumberjack_V1_SetupSteps) -> Bool {
     if lhs.isDefined != rhs.isDefined {return false}
-    if lhs.trustedChecksum != rhs.trustedChecksum {return false}
+    if lhs.trustedChecksums != rhs.trustedChecksums {return false}
     if lhs.currentChecksum != rhs.currentChecksum {return false}
     if lhs.isTrusted != rhs.isTrusted {return false}
     if lhs.steps != rhs.steps {return false}
@@ -2053,6 +2090,75 @@ nonisolated extension Lumberjack_V1_SetSetupConsentResponse: SwiftProtobuf.Messa
   static func ==(lhs: Lumberjack_V1_SetSetupConsentResponse, rhs: Lumberjack_V1_SetSetupConsentResponse) -> Bool {
     if lhs._repository != rhs._repository {return false}
     if lhs.accepted != rhs.accepted {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_TrustSetupStepsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".TrustSetupStepsRequest"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{1}checksum\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.checksum) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.repository.isEmpty {
+      try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
+    }
+    if !self.checksum.isEmpty {
+      try visitor.visitSingularStringField(value: self.checksum, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_TrustSetupStepsRequest, rhs: Lumberjack_V1_TrustSetupStepsRequest) -> Bool {
+    if lhs.repository != rhs.repository {return false}
+    if lhs.checksum != rhs.checksum {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_TrustSetupStepsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".TrustSetupStepsResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._repository) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._repository {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_TrustSetupStepsResponse, rhs: Lumberjack_V1_TrustSetupStepsResponse) -> Bool {
+    if lhs._repository != rhs._repository {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

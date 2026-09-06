@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/setup"
@@ -22,9 +23,9 @@ func newSetupRunCmd() *cobra.Command {
 			setup.ConfigFileName + " of its own inherits the main checkout's, so " +
 			"a freshly created worktree can be set up without one. Run-commands " +
 			"run without prompting when the config matches the repository's " +
-			"trusted default-branch " + setup.ConfigFileName + "; when it differs " +
-			"— an unreviewed local edit — the commands are shown and confirmed " +
-			"first.",
+			"default-branch " + setup.ConfigFileName + " or a checksum already " +
+			"trusted with `setup-steps trust`; otherwise the commands are shown " +
+			"and confirmed first.",
 		Args: cobra.NoArgs,
 		RunE: runSetupRun,
 	}
@@ -76,13 +77,13 @@ func consentToRunCommands(cmd *cobra.Command, out io.Writer, res *setup.Resolved
 	if !res.Config.HasRunCommands() {
 		return false, nil
 	}
-	trusted, reason := trustedSetupChecksum(cmd)
-	if reason == "" && trusted != "" && trusted == setup.Fingerprint(res.Raw) {
-		return true, nil
-	}
-
+	checksum := setup.Fingerprint(res.Raw)
+	steps, reason := repositorySetupSteps(cmd)
 	if reason == "" {
-		reason = res.ConfigPath + " differs from the version on the default branch"
+		if checksum == steps.GetCurrentChecksum() || slices.Contains(steps.GetTrustedChecksums(), checksum) {
+			return true, nil
+		}
+		reason = res.ConfigPath + " is neither the default branch's version nor a trusted one"
 	}
 	if _, err := fmt.Fprintf(out, "%s, so its command(s) have not been reviewed:\n", reason); err != nil {
 		return false, err
@@ -93,18 +94,20 @@ func consentToRunCommands(cmd *cobra.Command, out io.Writer, res *setup.Resolved
 		}
 	}
 	if confirmOn(cmd, out, "Run these commands here now?") {
+		if _, err := fmt.Fprintln(out, "Running them this once — `lumberjack setup-steps trust` remembers them."); err != nil {
+			return false, err
+		}
 		return true, nil
 	}
 	_, err := fmt.Fprintln(out, "Skipping run-command steps; other steps still run.")
 	return false, err
 }
 
-func trustedSetupChecksum(cmd *cobra.Command) (checksum, reason string) {
+func repositorySetupSteps(cmd *cobra.Command) (steps *lumberjackv1.SetupSteps, reason string) {
 	ref, err := cwdAbs()
 	if err != nil {
-		return "", "the current directory could not be resolved"
+		return nil, "the current directory could not be resolved"
 	}
-	var steps *lumberjackv1.SetupSteps
 	err = withClient(cmd, func(ctx context.Context, cl *client.Client) error {
 		repo, err := cl.GetRepository(ctx, ref)
 		if err != nil {
@@ -114,12 +117,9 @@ func trustedSetupChecksum(cmd *cobra.Command) (checksum, reason string) {
 		return nil
 	})
 	if err != nil {
-		return "", "this repository's trusted " + setup.ConfigFileName + " could not be read (" + err.Error() + ")"
+		return nil, "this repository's trusted " + setup.ConfigFileName + " could not be read (" + err.Error() + ")"
 	}
-	if !steps.GetIsDefined() {
-		return "", "the default branch has no " + setup.ConfigFileName
-	}
-	return steps.GetCurrentChecksum(), ""
+	return steps, ""
 }
 
 // writeSetupMessage prints a one-line outcome in the requested format, shared
