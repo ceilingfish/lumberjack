@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/ceilingfish/lumberjack/compare/v0.3.0...v0.4.0) (2026-09-06)
+
+
+### Features
+
+* offer to wire shell completion into the invoking shell on install ([#94](https://github.com/ceilingfish/lumberjack/issues/94)) ([a7e683f](https://github.com/ceilingfish/lumberjack/commit/a7e683f594d27c2db07785120e8cb18003b6adbc))
+
 ## [0.3.0](https://github.com/ceilingfish/lumberjack/compare/v0.2.1...v0.3.0) (2026-07-31)
 
 
