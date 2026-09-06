@@ -20,8 +20,8 @@ const cliBinaryName = "lumberjack"
 // (registering it with the platform service manager). --cli-only / --daemon-only
 // narrow it to one half; they are mutually exclusive.
 func newInstallCmd() *cobra.Command {
-	var daemonOnly, cliOnly, force bool
-	var binDir, socketPath string
+	var daemonOnly, cliOnly, force, noAutocomplete bool
+	var binDir, socketPath, autocompleteShell string
 
 	c := &cobra.Command{
 		Use:   "install",
@@ -35,7 +35,11 @@ func newInstallCmd() *cobra.Command {
 			"(see the error for why).\n\n" +
 			"--cli-only installs just the CLI copy. --daemon-only registers just the " +
 			"daemon, against the installed CLI if present, otherwise the current " +
-			"durable binary. Pass --force to reinstall/upgrade an existing install.",
+			"durable binary. Pass --force to reinstall/upgrade an existing install.\n\n" +
+			"On a terminal, install also detects your shell and offers to add shell " +
+			"completion to its rc file. --autocomplete-shell names the shell and skips " +
+			"the prompt; --no-autocomplete skips the step. Off a terminal it is skipped " +
+			"silently, and a failure there warns rather than failing the install.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			exe, err := os.Executable()
@@ -43,12 +47,15 @@ func newInstallCmd() *cobra.Command {
 				return fmt.Errorf("resolving current executable: %w", err)
 			}
 			return runInstall(cmd.OutOrStdout(), installOptions{
-				exe:        exe,
-				binDir:     binDir,
-				daemonOnly: daemonOnly,
-				cliOnly:    cliOnly,
-				force:      force,
-				socketPath: socketPath,
+				exe:               exe,
+				binDir:            binDir,
+				daemonOnly:        daemonOnly,
+				cliOnly:           cliOnly,
+				force:             force,
+				socketPath:        socketPath,
+				autocompleteShell: autocompleteShell,
+				noAutocomplete:    noAutocomplete,
+				errOut:            cmd.ErrOrStderr(),
 			})
 		},
 	}
@@ -59,17 +66,29 @@ func newInstallCmd() *cobra.Command {
 		"Directory to install the CLI binary into (default ~/.local/bin)")
 	c.Flags().StringVar(&socketPath, "socket", "",
 		"Unix socket path baked into the installed daemon service (default: ~/.lumberjack/daemon.sock)")
+	c.Flags().StringVar(&autocompleteShell, "autocomplete-shell", "",
+		fmt.Sprintf("Wire shell completion into this shell's rc file without prompting (one of %v)",
+			completionShellValues()))
+	c.Flags().BoolVar(&noAutocomplete, "no-autocomplete", false,
+		"Skip wiring shell completion into the shell rc file")
+	_ = c.RegisterFlagCompletionFunc("autocomplete-shell",
+		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+			return completionShellValues(), cobra.ShellCompDirectiveNoFileComp
+		})
 	return c
 }
 
 // installOptions is the parsed, validated input to runInstall.
 type installOptions struct {
-	exe        string // the currently-running executable (os.Executable())
-	binDir     string // --bin-dir override; "" means defaultBinDir()
-	daemonOnly bool
-	cliOnly    bool
-	force      bool
-	socketPath string
+	exe               string // the currently-running executable (os.Executable())
+	binDir            string // --bin-dir override; "" means defaultBinDir()
+	daemonOnly        bool
+	cliOnly           bool
+	force             bool
+	socketPath        string
+	autocompleteShell string // --autocomplete-shell; "" means detect-and-prompt
+	noAutocomplete    bool
+	errOut            io.Writer // where advisory warnings go; nil means os.Stderr
 }
 
 // runInstall is the free-function core of `install`, taking the running
@@ -79,6 +98,9 @@ type installOptions struct {
 func runInstall(out io.Writer, opts installOptions) error {
 	if opts.daemonOnly && opts.cliOnly {
 		return errors.New("--daemon-only and --cli-only are mutually exclusive")
+	}
+	if err := validateAutocompleteOptions(opts.autocompleteShell, opts.noAutocomplete); err != nil {
+		return err
 	}
 
 	binDir := opts.binDir
@@ -126,6 +148,12 @@ func runInstall(out io.Writer, opts installOptions) error {
 			return err
 		}
 	}
+
+	errOut := opts.errOut
+	if errOut == nil {
+		errOut = os.Stderr
+	}
+	installCompletion(out, errOut, opts)
 	return nil
 }
 
