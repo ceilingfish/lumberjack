@@ -628,3 +628,63 @@ func TestCompletionColorFollowsNoColor(t *testing.T) {
 		t.Error("colour should be disabled off a terminal")
 	}
 }
+
+func TestRunUninstallScansRCFilesForCompletion(t *testing.T) {
+	home := fakeHome(t)
+	fakeInteractive(t, true)
+	rc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(rc, []byte("export A=1\n"+completionLines["zsh"]+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asked := scriptConfirm(t, true)
+
+	binDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(binDir, cliBinaryName), []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if err := runUninstall(&out, uninstallOptions{binDir: binDir, cliOnly: true, errOut: &errOut}); err != nil {
+		t.Fatalf("runUninstall: %v", err)
+	}
+
+	if len(*asked) != 1 || (*asked)[0] != rc {
+		t.Fatalf("prompted for %v, want [%s]", *asked, rc)
+	}
+	body, err := os.ReadFile(rc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), completionMarker) {
+		t.Errorf(".zshrc still sources completion: %q", body)
+	}
+	if !strings.Contains(string(body), "export A=1") {
+		t.Errorf("unrelated rc lines were dropped: %q", body)
+	}
+	if !strings.Contains(out.String(), rc) {
+		t.Errorf("out = %q, want the edited rc reported", out.String())
+	}
+}
+
+func TestRunUninstallDaemonOnlyLeavesRCFilesAlone(t *testing.T) {
+	home := fakeHome(t)
+	fakeInteractive(t, true)
+	rc := filepath.Join(home, ".zshrc")
+	body := completionLines["zsh"] + "\n"
+	if err := os.WriteFile(rc, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	asked := scriptConfirm(t, true)
+	fakeServiceManager(t, &fakeLifecycle{})
+
+	var out, errOut bytes.Buffer
+	if err := runUninstall(&out, uninstallOptions{daemonOnly: true, errOut: &errOut}); err != nil {
+		t.Fatalf("runUninstall --daemon-only: %v", err)
+	}
+	if len(*asked) != 0 {
+		t.Errorf("prompted under --daemon-only: %v", *asked)
+	}
+	got, _ := os.ReadFile(rc)
+	if string(got) != body {
+		t.Errorf(".zshrc = %q, want it untouched", got)
+	}
+}
