@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
 
@@ -91,7 +90,7 @@ func runUninstall(out io.Writer, opts uninstallOptions) error {
 // error — uninstall's goal state (no registration) is already met.
 func uninstallDaemon(out io.Writer, svc lifecycle) error {
 	_ = svc.Stop()
-	if err := svc.Uninstall(); err != nil && !errors.Is(err, service.ErrNotInstalled) {
+	if err := svc.Uninstall(); err != nil && !isNotInstalled(err) {
 		return fmt.Errorf("uninstalling daemon: %w", err)
 	}
 	_, err := fmt.Fprintln(out, "lumberjack daemon uninstalled.")

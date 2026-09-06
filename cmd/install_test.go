@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,6 +87,15 @@ func TestInstallDaemonForce(t *testing.T) {
 	}
 	if !f.installed {
 		t.Error("Install was not called when nothing was previously installed")
+	}
+
+	// launchd reports a missing plist as a bare path error, not ErrNotInstalled.
+	f = &fakeLifecycle{uninstallErr: &fs.PathError{Op: "remove", Path: "lumberjack.plist", Err: fs.ErrNotExist}}
+	if err := installDaemon(&buf, f, true); err != nil {
+		t.Fatalf("force over missing plist: %v", err)
+	}
+	if !f.installed {
+		t.Error("Install was not called when the plist was already gone")
 	}
 
 	// A real Uninstall failure aborts before reinstalling.
@@ -288,6 +298,11 @@ func TestUninstallDaemon(t *testing.T) {
 	f = &fakeLifecycle{uninstallErr: service.ErrNotInstalled}
 	if err := uninstallDaemon(&buf, f); err != nil {
 		t.Fatalf("uninstallDaemon over not-installed: %v", err)
+	}
+
+	f = &fakeLifecycle{uninstallErr: &fs.PathError{Op: "remove", Path: "lumberjack.plist", Err: fs.ErrNotExist}}
+	if err := uninstallDaemon(&buf, f); err != nil {
+		t.Fatalf("uninstallDaemon over missing plist: %v", err)
 	}
 
 	// A real failure surfaces.

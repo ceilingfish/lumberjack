@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,11 +307,18 @@ func reinstallDaemon(svc lifecycle) error {
 	// Stop is best-effort: a not-running service errors here on most platforms,
 	// and Uninstall unloads it anyway. What matters is that Install succeeds.
 	_ = svc.Stop()
-	if err := svc.Uninstall(); err != nil && !errors.Is(err, service.ErrNotInstalled) {
+	if err := svc.Uninstall(); err != nil && !isNotInstalled(err) {
 		return fmt.Errorf("removing existing daemon for reinstall: %w", err)
 	}
 	if err := svc.Install(); err != nil {
 		return fmt.Errorf("installing daemon: %w", err)
 	}
 	return nil
+}
+
+// isNotInstalled reports whether err means "there was nothing to remove".
+// launchd's backend surfaces a missing plist as a raw path error rather than
+// service.ErrNotInstalled, so both spellings count.
+func isNotInstalled(err error) bool {
+	return errors.Is(err, service.ErrNotInstalled) || errors.Is(err, fs.ErrNotExist)
 }
