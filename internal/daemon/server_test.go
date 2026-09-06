@@ -194,6 +194,58 @@ func TestServerGetRepositorySetupStepsUndefined(t *testing.T) {
 	}
 }
 
+func TestServerGetSetupConsentIsDerivedFromSetupSteps(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+	h.git.configFiles = map[string][]byte{"origin/main:.lumberjack.yml": []byte(setupConfigYAML)}
+
+	resp, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"}) //nolint:staticcheck
+	if err != nil {
+		t.Fatalf("GetSetupConsent: %v", err)
+	}
+	if !resp.GetPending() {
+		t.Error("expected pending=true while the checksums differ")
+	}
+	if len(resp.GetRunCommands()) != 1 || resp.GetRunCommands()[0] != "echo hi" {
+		t.Errorf("RunCommands = %v", resp.GetRunCommands())
+	}
+
+	if _, err := srv.SetSetupConsent(context.Background(), &lumberjackv1.SetSetupConsentRequest{
+		Repository: "n", Checksum: setup.Fingerprint([]byte(setupConfigYAML)),
+	}); err != nil {
+		t.Fatalf("SetSetupConsent: %v", err)
+	}
+	resp, err = srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"}) //nolint:staticcheck
+	if err != nil {
+		t.Fatalf("GetSetupConsent: %v", err)
+	}
+	if resp.GetPending() {
+		t.Error("expected pending=false once the checksums match")
+	}
+}
+
+func TestServerGetSetupConsentFailures(t *testing.T) {
+	h := newHarness(t)
+	srv := newServer(h)
+	h.repo(t)
+
+	_, err := srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{}) //nolint:staticcheck
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("empty repository: expected InvalidArgument, got %v", err)
+	}
+	_, err = srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "nope"}) //nolint:staticcheck
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("unknown repo: expected NotFound, got %v", err)
+	}
+
+	h.git.showFileErr = errors.New("fatal: not a valid object name")
+	_, err = srv.GetSetupConsent(context.Background(), &lumberjackv1.GetSetupConsentRequest{Repository: "n"}) //nolint:staticcheck
+	if status.Code(err) != codes.Internal {
+		t.Errorf("unreadable config: expected Internal, got %v", err)
+	}
+}
+
 func TestServerSetSetupConsent(t *testing.T) {
 	h := newHarness(t)
 	srv := newServer(h)
@@ -758,6 +810,9 @@ func TestServerListRepositoriesSurvivesUnreadableSetupConfig(t *testing.T) {
 	}
 	if resp.GetRepositories()[0].GetSetupSteps() != nil {
 		t.Error("setup steps must be absent when the trusted config could not be read")
+	}
+	if resp.GetRepositories()[0].GetSetupConsentPending() { //nolint:staticcheck
+		t.Error("consent must not be reported as pending when it could not be read")
 	}
 }
 

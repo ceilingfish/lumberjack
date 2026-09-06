@@ -370,6 +370,15 @@ nonisolated struct Lumberjack_V1_Repository: @unchecked Sendable {
     set {_uniqueStorage()._login = newValue}
   }
 
+  /// Deprecated: use setup_steps.is_trusted. True whenever
+  /// setup_steps.trusted_checksum differs from setup_steps.current_checksum.
+  ///
+  /// NOTE: This field was marked as deprecated in the .proto file.
+  var setupConsentPending: Bool {
+    get {_storage._setupConsentPending}
+    set {_uniqueStorage()._setupConsentPending = newValue}
+  }
+
   var setupSteps: Lumberjack_V1_SetupSteps {
     get {_storage._setupSteps ?? Lumberjack_V1_SetupSteps()}
     set {_uniqueStorage()._setupSteps = newValue}
@@ -675,6 +684,44 @@ nonisolated struct Lumberjack_V1_ListLoginsResponse: Sendable {
   /// The login the repository currently operates under, if any — the CLI
   /// pre-selects it in the picker. Empty for repos tracked before login capture.
   var current: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+/// Deprecated: read Repository.setup_steps instead.
+///
+/// NOTE: This message was marked as deprecated in the .proto file.
+nonisolated struct Lumberjack_V1_GetSetupConsentRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// A repository name (dir prefix / GitHub name) or its local path; the daemon
+  /// resolves either form.
+  var repository: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+/// Deprecated: read Repository.setup_steps instead.
+///
+/// NOTE: This message was marked as deprecated in the .proto file.
+nonisolated struct Lumberjack_V1_GetSetupConsentResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// True when the repository's trusted `.lumberjack.yml` declares run-command
+  /// steps the local user has not (yet, or still) consented to.
+  var pending: Bool = false
+
+  /// The run-command strings from the trusted config, for the consent prompt.
+  /// Empty when pending is false.
+  var runCommands: [String] = []
 
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1193,7 +1240,7 @@ nonisolated extension Lumberjack_V1_WorktreeChange: SwiftProtobuf.Message, Swift
 
 nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".Repository"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}local_path\0\u{3}worktree_parent_dir\0\u{3}dir_prefix\0\u{3}github_owner\0\u{3}github_name\0\u{3}default_remote\0\u{1}host\0\u{3}last_synced_at\0\u{3}last_sync_status\0\u{3}last_sync_error\0\u{3}created_at\0\u{1}login\0\u{4}\u{2}setup_steps\0\u{b}setup_consent_pending\0\u{c}\u{e}\u{1}")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}local_path\0\u{3}worktree_parent_dir\0\u{3}dir_prefix\0\u{3}github_owner\0\u{3}github_name\0\u{3}default_remote\0\u{1}host\0\u{3}last_synced_at\0\u{3}last_sync_status\0\u{3}last_sync_error\0\u{3}created_at\0\u{1}login\0\u{3}setup_consent_pending\0\u{3}setup_steps\0")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0
@@ -1209,6 +1256,7 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
     var _lastSyncError: String? = nil
     var _createdAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
     var _login: String = String()
+    var _setupConsentPending: Bool = false
     var _setupSteps: Lumberjack_V1_SetupSteps? = nil
 
       // This property is used as the initial default value for new instances of the type.
@@ -1233,6 +1281,7 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
       _lastSyncError = source._lastSyncError
       _createdAt = source._createdAt
       _login = source._login
+      _setupConsentPending = source._setupConsentPending
       _setupSteps = source._setupSteps
     }
   }
@@ -1265,6 +1314,7 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
         case 11: try { try decoder.decodeSingularStringField(value: &_storage._lastSyncError) }()
         case 12: try { try decoder.decodeSingularMessageField(value: &_storage._createdAt) }()
         case 13: try { try decoder.decodeSingularStringField(value: &_storage._login) }()
+        case 14: try { try decoder.decodeSingularBoolField(value: &_storage._setupConsentPending) }()
         case 15: try { try decoder.decodeSingularMessageField(value: &_storage._setupSteps) }()
         default: break
         }
@@ -1317,6 +1367,9 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
       if !_storage._login.isEmpty {
         try visitor.visitSingularStringField(value: _storage._login, fieldNumber: 13)
       }
+      if _storage._setupConsentPending != false {
+        try visitor.visitSingularBoolField(value: _storage._setupConsentPending, fieldNumber: 14)
+      }
       try { if let v = _storage._setupSteps {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 15)
       } }()
@@ -1342,6 +1395,7 @@ nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProt
         if _storage._lastSyncError != rhs_storage._lastSyncError {return false}
         if _storage._createdAt != rhs_storage._createdAt {return false}
         if _storage._login != rhs_storage._login {return false}
+        if _storage._setupConsentPending != rhs_storage._setupConsentPending {return false}
         if _storage._setupSteps != rhs_storage._setupSteps {return false}
         return true
       }
@@ -1860,6 +1914,71 @@ nonisolated extension Lumberjack_V1_ListLoginsResponse: SwiftProtobuf.Message, S
   static func ==(lhs: Lumberjack_V1_ListLoginsResponse, rhs: Lumberjack_V1_ListLoginsResponse) -> Bool {
     if lhs.logins != rhs.logins {return false}
     if lhs.current != rhs.current {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_GetSetupConsentRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".GetSetupConsentRequest"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.repository.isEmpty {
+      try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_GetSetupConsentRequest, rhs: Lumberjack_V1_GetSetupConsentRequest) -> Bool {
+    if lhs.repository != rhs.repository {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_GetSetupConsentResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".GetSetupConsentResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}pending\0\u{3}run_commands\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.pending) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.runCommands) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.pending != false {
+      try visitor.visitSingularBoolField(value: self.pending, fieldNumber: 1)
+    }
+    if !self.runCommands.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.runCommands, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_GetSetupConsentResponse, rhs: Lumberjack_V1_GetSetupConsentResponse) -> Bool {
+    if lhs.pending != rhs.pending {return false}
+    if lhs.runCommands != rhs.runCommands {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

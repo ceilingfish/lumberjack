@@ -86,6 +86,16 @@ service LumberjackService {
   // far behind is disconnected rather than allowed to stall the daemon.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
 
+  // Deprecated: read Repository.setup_steps instead.
+  //
+  // GetSetupConsent reports whether a repository's `.lumberjack.yml`
+  // run-command setup steps are pending the local user's consent — either
+  // never consented, or consented to a config that has since changed. The CLI
+  // uses this at `init` and on later interactions to prompt for consent.
+  rpc GetSetupConsent(GetSetupConsentRequest) returns (GetSetupConsentResponse) {
+    option deprecated = true;
+  }
+
   // SetSetupConsent records the local user's consent to run a repository's
   // current trusted `.lumberjack.yml` run-command steps. Consent is bound to
   // the config's content: a later change to `.lumberjack.yml` makes it
@@ -133,9 +143,6 @@ message WorktreeChange {
 // Repository is one tracked repo. Fields mirror the `repositories` table
 // (docs/schema.md); mutable PR state is never carried here.
 message Repository {
-  reserved 14;
-  reserved "setup_consent_pending";
-
   int64 id = 1;
   string local_path = 2;
   string worktree_parent_dir = 3;
@@ -151,6 +158,9 @@ message Repository {
   // The gh account this repo was registered under; the daemon switches to it
   // before operating on the repo. Empty for repos tracked before login capture.
   string login = 13;
+  // Deprecated: use setup_steps.is_trusted. True whenever
+  // setup_steps.trusted_checksum differs from setup_steps.current_checksum.
+  bool setup_consent_pending = 14 [deprecated = true];
   SetupSteps setup_steps = 15;
 }
 
@@ -267,6 +277,27 @@ message ListLoginsResponse {
   // The login the repository currently operates under, if any — the CLI
   // pre-selects it in the picker. Empty for repos tracked before login capture.
   string current = 2;
+}
+
+// Deprecated: read Repository.setup_steps instead.
+message GetSetupConsentRequest {
+  option deprecated = true;
+
+  // A repository name (dir prefix / GitHub name) or its local path; the daemon
+  // resolves either form.
+  string repository = 1;
+}
+
+// Deprecated: read Repository.setup_steps instead.
+message GetSetupConsentResponse {
+  option deprecated = true;
+
+  // True when the repository's trusted `.lumberjack.yml` declares run-command
+  // steps the local user has not (yet, or still) consented to.
+  bool pending = 1;
+  // The run-command strings from the trusted config, for the consent prompt.
+  // Empty when pending is false.
+  repeated string run_commands = 2;
 }
 
 message SetSetupConsentRequest {
