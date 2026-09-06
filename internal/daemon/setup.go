@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/setup"
@@ -10,8 +11,8 @@ import (
 )
 
 // runSetupSteps runs repo's trusted `.lumberjack.yml` setup steps against the
-// worktree at dir, recording the failing step (if any) on the worktree row so
-// it surfaces on its reconciliation status. It never returns an error: per the
+// worktree at dir, recording the failing step — or the reason no steps ran at
+// all — on the worktree row so it surfaces on its reconciliation status. It never returns an error: per the
 // feature's fail-fast-but-keep design, a setup failure does not fail the clone
 // or the sync, it is only surfaced. The recorded failure is returned (empty on
 // success) so a caller driving one worktree — `worktree add` — can report it
@@ -31,11 +32,24 @@ func (s *Service) runSetupSteps(
 		return msg
 	}
 	if cfg == nil || len(cfg.Steps) == 0 {
+		if msg := s.untrustedSetupConfigNotice(ctx, repo); msg != "" {
+			s.recordSetupError(ctx, worktreeID, &msg)
+			return msg
+		}
+		s.recordSetupError(ctx, worktreeID, nil)
 		return ""
 	}
 
-	consented := cfg.HasRunCommands() && repo.SetupConsentFingerprint != "" &&
-		repo.SetupConsentFingerprint == setup.Fingerprint(raw)
+	consented := false
+	if cfg.HasRunCommands() {
+		trusted, err := s.db.TrustedSetupChecksums(ctx, repo.ID)
+		if err != nil {
+			msg := fmt.Sprintf("reading trusted %s checksums: %v", setup.ConfigFileName, err)
+			s.recordSetupError(ctx, worktreeID, &msg)
+			return msg
+		}
+		consented = slices.Contains(trusted, setup.Fingerprint(raw))
+	}
 
 	failedStep, runErr := setup.Run(ctx, cfg, setup.Options{
 		MainCheckout:     repo.LocalPath,
@@ -60,6 +74,26 @@ func (s *Service) recordSetupError(ctx context.Context, worktreeID int64, msg *s
 	_ = s.db.SetWorktreeSetupError(ctx, worktreeID, msg)
 }
 
+// untrustedSetupConfigNotice explains why a worktree came up unconfigured
+// when the local checkout has setup steps that the trusted default-branch tip
+// does not: the config has not been merged and pushed yet. Reading only the
+// pushed default branch is the trust boundary and stays; this makes the
+// resulting skip visible instead of looking like a success. It returns "" when
+// there is nothing to explain, including when the local config cannot be read
+// — a notice is not worth failing or misreporting a worktree over.
+func (s *Service) untrustedSetupConfigNotice(ctx context.Context, repo *schema.Repository) string {
+	local, err := setup.Resolve(repo.LocalPath)
+	if err != nil || local.Config == nil || len(local.Config.Steps) == 0 {
+		return ""
+	}
+	ref, err := s.trustedRef(ctx, repo)
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("local %s has %d step(s) that are not on %s, so no setup steps ran",
+		setup.ConfigFileName, len(local.Config.Steps), ref)
+}
+
 // applySetupError folds a persisted setup failure into a live reconciliation
 // Status, so it surfaces through the same reconciliation-note/status field
 // the CLI already renders. A setup failure always needs attention, regardless
@@ -70,10 +104,10 @@ func applySetupError(st *worktree.Status, setupErr *string) {
 	}
 	st.NeedsReconciliation = true
 	if st.Note == "" {
-		st.Note = "setup failed: " + *setupErr
+		st.Note = "setup: " + *setupErr
 		return
 	}
-	st.Note += "; setup failed: " + *setupErr
+	st.Note += "; setup: " + *setupErr
 }
 
 // loadTrustedSetupConfig reads and parses `.lumberjack.yml` from repo's
@@ -81,11 +115,10 @@ func applySetupError(st *worktree.Status, setupErr *string) {
 // cannot use it to run arbitrary code on the user's machine. It returns
 // (nil, nil, nil) when the repository has no such file there.
 func (s *Service) loadTrustedSetupConfig(ctx context.Context, repo *schema.Repository) (*setup.Config, []byte, error) {
-	branch, err := s.git.DefaultBranch(ctx, repo.LocalPath, repo.DefaultRemote)
+	ref, err := s.trustedRef(ctx, repo)
 	if err != nil {
-		return nil, nil, fmt.Errorf("determining default branch: %w", err)
+		return nil, nil, err
 	}
-	ref := repo.DefaultRemote + "/" + branch
 	data, found, err := s.git.ShowFile(ctx, repo.LocalPath, ref, setup.ConfigFileName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading %s from %s: %w", setup.ConfigFileName, ref, err)
@@ -100,47 +133,65 @@ func (s *Service) loadTrustedSetupConfig(ctx context.Context, repo *schema.Repos
 	return cfg, data, nil
 }
 
-// SetupConsent is whether a repository's trusted run-command setup steps are
-// pending the local user's consent, and the commands themselves — for the CLI
-// to prompt with.
-type SetupConsent struct {
-	Pending  bool
-	Commands []string
+// trustedRef is the remote-tracking ref `.lumberjack.yml` is trusted from:
+// repo's default remote's default-branch tip.
+func (s *Service) trustedRef(ctx context.Context, repo *schema.Repository) (string, error) {
+	branch, err := s.git.DefaultBranch(ctx, repo.LocalPath, repo.DefaultRemote)
+	if err != nil {
+		return "", fmt.Errorf("determining default branch: %w", err)
+	}
+	return repo.DefaultRemote + "/" + branch, nil
 }
 
-// GetSetupConsent reports repo's setup-consent status: pending when the
-// trusted config declares run-commands and the local user has not consented
-// to their current content (never, or the config has since changed).
-func (s *Service) GetSetupConsent(ctx context.Context, repo *schema.Repository) (SetupConsent, error) {
-	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
-	if err != nil {
-		return SetupConsent{}, err
-	}
-	if cfg == nil || !cfg.HasRunCommands() {
-		return SetupConsent{}, nil
-	}
-	if repo.SetupConsentFingerprint == setup.Fingerprint(raw) {
-		return SetupConsent{}, nil
-	}
-	return SetupConsent{Pending: true, Commands: cfg.RunCommands()}, nil
+type SetupSteps struct {
+	IsDefined        bool
+	TrustedChecksums []string
+	CurrentChecksum  string
+	IsTrusted        bool
+	Steps            []string
 }
 
-// SetSetupConsent records the local user's consent to run repo's current
-// trusted run-command steps, binding it to the config's content fingerprint.
-// Consent is local per machine (no remote or shared store).
-func (s *Service) SetSetupConsent(ctx context.Context, repo *schema.Repository) (*schema.Repository, error) {
+func (s *Service) GetSetupSteps(ctx context.Context, repo *schema.Repository) (SetupSteps, error) {
 	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
 	if err != nil {
-		return nil, err
+		return SetupSteps{}, err
 	}
-	fingerprint := ""
-	if cfg != nil {
-		fingerprint = setup.Fingerprint(raw)
+	trusted, err := s.db.TrustedSetupChecksums(ctx, repo.ID)
+	if err != nil {
+		return SetupSteps{}, err
 	}
-	if err := s.db.UpdateSetupConsent(ctx, repo.ID, fingerprint); err != nil {
-		return nil, err
+	steps := SetupSteps{TrustedChecksums: trusted}
+	if cfg == nil {
+		steps.IsTrusted = true
+		return steps, nil
 	}
-	updated := *repo
-	updated.SetupConsentFingerprint = fingerprint
-	return &updated, nil
+	steps.IsDefined = true
+	steps.CurrentChecksum = setup.Fingerprint(raw)
+	steps.Steps = cfg.RunCommands()
+	steps.IsTrusted = slices.Contains(trusted, steps.CurrentChecksum)
+	return steps, nil
+}
+
+func (s *Service) TrustSetupSteps(ctx context.Context, repo *schema.Repository, checksum string) error {
+	return s.db.TrustSetupSteps(ctx, repo.ID, checksum)
+}
+
+func (s *Service) SetSetupConsent(
+	ctx context.Context, repo *schema.Repository, checksum string,
+) (bool, error) {
+	_, raw, err := s.loadTrustedSetupConfig(ctx, repo)
+	if err != nil {
+		return false, err
+	}
+	current := ""
+	if raw != nil {
+		current = setup.Fingerprint(raw)
+	}
+	if checksum != current || current == "" {
+		return false, nil
+	}
+	if err := s.db.TrustSetupSteps(ctx, repo.ID, current); err != nil {
+		return false, err
+	}
+	return true, nil
 }

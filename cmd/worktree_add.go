@@ -47,8 +47,8 @@ func newWorktreeAddCmd() *cobra.Command {
 }
 
 // emitAddedWorktree reports where the worktree landed and, when setup steps
-// failed, warns about it — the worktree is kept either way, so this is a notice
-// rather than an error.
+// failed or were skipped, warns about it — the worktree is kept either way, so
+// this is a notice rather than an error.
 func emitAddedWorktree(cmd *cobra.Command, format present.Format, resp *lumberjackv1.AddWorktreeResponse) error {
 	out := cmd.OutOrStdout()
 	if format == present.JSON {
@@ -64,7 +64,7 @@ func emitAddedWorktree(cmd *cobra.Command, format present.Format, resp *lumberja
 		return err
 	}
 	if e := resp.GetSetupError(); e != "" {
-		_, err := fmt.Fprintf(out, "%s\n", present.StatusWarn("⚠ setup failed: "+e, color))
+		_, err := fmt.Fprintf(out, "%s\n", present.StatusWarn("⚠ setup: "+e, color))
 		return err
 	}
 	return nil

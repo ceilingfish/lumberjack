@@ -190,7 +190,8 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
 | `lumberjack set-login [LOGIN] [--repository NAME]` | Set the `gh` account for the repo in the current dir, or the named one. |
 | `lumberjack setup-steps add/remove/list COMMAND` | Manage the current worktree's `.lumberjack.yml` run-command setup steps. |
-| `lumberjack setup-steps run` | Run the current worktree's setup steps now — inherits the main checkout's `.lumberjack.yml` unless the worktree has its own. |
+| `lumberjack setup-steps run` | Run the current worktree's setup steps now — inherits the main checkout's `.lumberjack.yml` unless the worktree has its own. Run-commands matching the default branch's config run straight away; a locally edited config's commands are shown and confirmed first. |
+| `lumberjack setup-steps trust` | Record this worktree's `.lumberjack.yml` checksum as one you have agreed to run, so it stops asking. Every trusted version stays trusted. |
 | `lumberjack install [--cli-only\|--daemon-only] [--force]` | Install the CLI and/or daemon (see [Installation](#installation)). |
 | `lumberjack uninstall [--cli-only\|--daemon-only]` | Reverse `install`. |
 | `lumberjack daemon start/stop/status` | Manage the daemon's lifecycle once installed. |

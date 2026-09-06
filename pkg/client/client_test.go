@@ -78,13 +78,25 @@ func (stubServer) ListLogins(context.Context, *lumberjackv1.ListLoginsRequest) (
 	return &lumberjackv1.ListLoginsResponse{Logins: []string{"alice", "bob"}, Current: "bob"}, nil
 }
 
-func (stubServer) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
-	return &lumberjackv1.GetSetupConsentResponse{Pending: true, RunCommands: []string{"make deps"}}, nil
+func (stubServer) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) { //nolint:staticcheck
+	return &lumberjackv1.GetSetupConsentResponse{Pending: true, RunCommands: []string{"make deps"}}, nil //nolint:staticcheck
 }
 
 func (stubServer) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
 	return &lumberjackv1.SetSetupConsentResponse{
 		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()},
+		Accepted:   req.GetChecksum() == "current",
+	}, nil
+}
+
+func (stubServer) TrustSetupSteps(_ context.Context, req *lumberjackv1.TrustSetupStepsRequest) (*lumberjackv1.TrustSetupStepsResponse, error) {
+	return &lumberjackv1.TrustSetupStepsResponse{
+		Repository: &lumberjackv1.Repository{
+			DirPrefix: req.GetRepository(),
+			SetupSteps: &lumberjackv1.SetupSteps{
+				TrustedChecksums: []string{req.GetChecksum()},
+			},
+		},
 	}, nil
 }
 
@@ -370,16 +382,28 @@ func TestClientSetLoginAndListLogins(t *testing.T) {
 
 func TestClientSetupConsent(t *testing.T) {
 	c := startStub(t)
-	pending, commands, err := c.GetSetupConsent(context.Background(), "a")
+	pending, commands, err := c.GetSetupConsent(context.Background(), "a") //nolint:staticcheck
+	if err != nil || !pending || len(commands) != 1 || commands[0] != "make deps" {
+		t.Errorf("GetSetupConsent = %v, %v, %v", pending, commands, err)
+	}
+	repo, accepted, err := c.SetSetupConsent(context.Background(), "a", "current")
+	if err != nil || !accepted || repo.GetDirPrefix() != "a" {
+		t.Errorf("SetSetupConsent = %+v, %v, %v", repo, accepted, err)
+	}
+	if _, accepted, err := c.SetSetupConsent(context.Background(), "a", "stale"); err != nil || accepted {
+		t.Errorf("a stale checksum must come back rejected (accepted = %v, err = %v)", accepted, err)
+	}
+}
+
+func TestClientTrustSetupSteps(t *testing.T) {
+	c := startStub(t)
+	repo, err := c.TrustSetupSteps(context.Background(), "a", "sha256:abc")
 	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+		t.Fatalf("TrustSetupSteps: %v", err)
 	}
-	if !pending || len(commands) != 1 || commands[0] != "make deps" {
-		t.Errorf("GetSetupConsent = %v, %v", pending, commands)
-	}
-	repo, err := c.SetSetupConsent(context.Background(), "a")
-	if err != nil || repo.GetDirPrefix() != "a" {
-		t.Errorf("SetSetupConsent = %+v, %v", repo, err)
+	got := repo.GetSetupSteps().GetTrustedChecksums()
+	if len(got) != 1 || got[0] != "sha256:abc" {
+		t.Errorf("TrustedChecksums = %v", got)
 	}
 }
 
@@ -514,11 +538,15 @@ func TestEveryMethodMapsServerErrors(t *testing.T) {
 			return err
 		},
 		"GetSetupConsent": func(c *Client) error {
-			_, _, err := c.GetSetupConsent(context.Background(), "a")
+			_, _, err := c.GetSetupConsent(context.Background(), "a") //nolint:staticcheck
+			return err
+		},
+		"TrustSetupSteps": func(c *Client) error {
+			_, err := c.TrustSetupSteps(context.Background(), "a", "sum")
 			return err
 		},
 		"SetSetupConsent": func(c *Client) error {
-			_, err := c.SetSetupConsent(context.Background(), "a")
+			_, _, err := c.SetSetupConsent(context.Background(), "a", "x")
 			return err
 		},
 		"ListWorktrees": func(c *Client) error {

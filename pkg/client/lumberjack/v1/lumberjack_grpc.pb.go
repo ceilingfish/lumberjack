@@ -43,6 +43,7 @@ const (
 	LumberjackService_Watch_FullMethodName            = "/lumberjack.v1.LumberjackService/Watch"
 	LumberjackService_GetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/GetSetupConsent"
 	LumberjackService_SetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/SetSetupConsent"
+	LumberjackService_TrustSetupSteps_FullMethodName  = "/lumberjack.v1.LumberjackService/TrustSetupSteps"
 )
 
 // LumberjackServiceClient is the client API for LumberjackService service.
@@ -106,6 +107,9 @@ type LumberjackServiceClient interface {
 	// supported; each gets its own independent feed. A subscriber that falls too
 	// far behind is disconnected rather than allowed to stall the daemon.
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
+	// Deprecated: Do not use.
+	// Deprecated: read Repository.setup_steps instead.
+	//
 	// GetSetupConsent reports whether a repository's `.lumberjack.yml`
 	// run-command setup steps are pending the local user's consent — either
 	// never consented, or consented to a config that has since changed. The CLI
@@ -116,6 +120,7 @@ type LumberjackServiceClient interface {
 	// the config's content: a later change to `.lumberjack.yml` makes it
 	// pending again.
 	SetSetupConsent(ctx context.Context, in *SetSetupConsentRequest, opts ...grpc.CallOption) (*SetSetupConsentResponse, error)
+	TrustSetupSteps(ctx context.Context, in *TrustSetupStepsRequest, opts ...grpc.CallOption) (*TrustSetupStepsResponse, error)
 }
 
 type lumberjackServiceClient struct {
@@ -274,6 +279,7 @@ func (c *lumberjackServiceClient) Watch(ctx context.Context, in *WatchRequest, o
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type LumberjackService_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 
+// Deprecated: Do not use.
 func (c *lumberjackServiceClient) GetSetupConsent(ctx context.Context, in *GetSetupConsentRequest, opts ...grpc.CallOption) (*GetSetupConsentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetSetupConsentResponse)
@@ -288,6 +294,16 @@ func (c *lumberjackServiceClient) SetSetupConsent(ctx context.Context, in *SetSe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SetSetupConsentResponse)
 	err := c.cc.Invoke(ctx, LumberjackService_SetSetupConsent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lumberjackServiceClient) TrustSetupSteps(ctx context.Context, in *TrustSetupStepsRequest, opts ...grpc.CallOption) (*TrustSetupStepsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TrustSetupStepsResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_TrustSetupSteps_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -355,6 +371,9 @@ type LumberjackServiceServer interface {
 	// supported; each gets its own independent feed. A subscriber that falls too
 	// far behind is disconnected rather than allowed to stall the daemon.
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
+	// Deprecated: Do not use.
+	// Deprecated: read Repository.setup_steps instead.
+	//
 	// GetSetupConsent reports whether a repository's `.lumberjack.yml`
 	// run-command setup steps are pending the local user's consent — either
 	// never consented, or consented to a config that has since changed. The CLI
@@ -365,6 +384,7 @@ type LumberjackServiceServer interface {
 	// the config's content: a later change to `.lumberjack.yml` makes it
 	// pending again.
 	SetSetupConsent(context.Context, *SetSetupConsentRequest) (*SetSetupConsentResponse, error)
+	TrustSetupSteps(context.Context, *TrustSetupStepsRequest) (*TrustSetupStepsResponse, error)
 	mustEmbedUnimplementedLumberjackServiceServer()
 }
 
@@ -419,6 +439,9 @@ func (UnimplementedLumberjackServiceServer) GetSetupConsent(context.Context, *Ge
 }
 func (UnimplementedLumberjackServiceServer) SetSetupConsent(context.Context, *SetSetupConsentRequest) (*SetSetupConsentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetSetupConsent not implemented")
+}
+func (UnimplementedLumberjackServiceServer) TrustSetupSteps(context.Context, *TrustSetupStepsRequest) (*TrustSetupStepsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method TrustSetupSteps not implemented")
 }
 func (UnimplementedLumberjackServiceServer) mustEmbedUnimplementedLumberjackServiceServer() {}
 func (UnimplementedLumberjackServiceServer) testEmbeddedByValue()                           {}
@@ -697,6 +720,24 @@ func _LumberjackService_SetSetupConsent_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LumberjackService_TrustSetupSteps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TrustSetupStepsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).TrustSetupSteps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_TrustSetupSteps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).TrustSetupSteps(ctx, req.(*TrustSetupStepsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LumberjackService_ServiceDesc is the grpc.ServiceDesc for LumberjackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -755,6 +796,10 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetSetupConsent",
 			Handler:    _LumberjackService_SetSetupConsent_Handler,
+		},
+		{
+			MethodName: "TrustSetupSteps",
+			Handler:    _LumberjackService_TrustSetupSteps_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

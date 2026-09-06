@@ -70,9 +70,7 @@ type coverStub struct {
 	tidyMoves     []*lumberjackv1.TidyMove
 	syncEvents    []*lumberjackv1.SyncResponse
 	adopted       []*lumberjackv1.WorktreeChange
-	consent       *lumberjackv1.GetSetupConsentResponse
 	err           error
-	consentErr    error
 	setConsentErr error
 	block         time.Duration
 
@@ -172,19 +170,6 @@ func (s *coverStub) InitRepository(ctx context.Context, req *lumberjackv1.InitRe
 	}, nil
 }
 
-func (s *coverStub) GetSetupConsent(ctx context.Context, _ *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
-	if err := s.wait(ctx); err != nil {
-		return nil, err
-	}
-	if s.consentErr != nil {
-		return nil, s.consentErr
-	}
-	if s.consent == nil {
-		return &lumberjackv1.GetSetupConsentResponse{}, nil
-	}
-	return s.consent, nil
-}
-
 func (s *coverStub) SetSetupConsent(ctx context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
 	if err := s.wait(ctx); err != nil {
 		return nil, err
@@ -192,7 +177,10 @@ func (s *coverStub) SetSetupConsent(ctx context.Context, req *lumberjackv1.SetSe
 	if s.setConsentErr != nil {
 		return nil, s.setConsentErr
 	}
-	return &lumberjackv1.SetSetupConsentResponse{Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()}}, nil
+	return &lumberjackv1.SetSetupConsentResponse{
+		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()},
+		Accepted:   true,
+	}, nil
 }
 
 func (s *coverStub) Sync(_ *lumberjackv1.SyncRequest, stream grpc.ServerStreamingServer[lumberjackv1.SyncResponse]) error {
@@ -205,4 +193,8 @@ func (s *coverStub) Sync(_ *lumberjackv1.SyncRequest, stream grpc.ServerStreamin
 		}
 	}
 	return nil
+}
+
+func pendingSetupSteps(commands ...string) *lumberjackv1.SetupSteps {
+	return &lumberjackv1.SetupSteps{IsDefined: true, CurrentChecksum: "current", Steps: commands}
 }

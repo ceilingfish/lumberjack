@@ -1,10 +1,16 @@
 package cmd
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/ceilingfish/lumberjack/internal/setup"
+	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 )
 
 // setupRepo makes t's temp dir look like a git worktree root (a `.git` entry is
@@ -176,9 +182,12 @@ func TestCmdSetupRunInheritedSteps(t *testing.T) {
 		t.Fatalf("WriteFile .env: %v", err)
 	}
 
-	out, err := run(t, "", "setup-steps", "run")
+	out, err := run(t, "y\n", "setup-steps", "run")
 	if err != nil {
 		t.Fatalf("setup-steps run: %v", err)
+	}
+	if !strings.Contains(out, "have not been reviewed") {
+		t.Errorf("out = %q, want the un-reviewed run-commands shown", out)
 	}
 	if !strings.Contains(out, "Inheriting setup steps") {
 		t.Errorf("out = %q, want a note that the config was inherited", out)
@@ -206,7 +215,7 @@ func TestCmdSetupRunNoSteps(t *testing.T) {
 
 func TestCmdSetupRunFailingStepErrors(t *testing.T) {
 	setupLinkedWorktree(t, "steps:\n  - type: run-command\n    run_command:\n      command: exit 3\n")
-	_, err := run(t, "", "setup-steps", "run")
+	_, err := run(t, "y\n", "setup-steps", "run")
 	if err == nil || !strings.Contains(err.Error(), "run-command") {
 		t.Errorf("expected an error naming the failed step, got %v", err)
 	}
@@ -223,5 +232,157 @@ func TestCmdSetupListJSON(t *testing.T) {
 	}
 	if !strings.Contains(out, `["go test ./..."]`) {
 		t.Errorf("out = %q, want a JSON array", out)
+	}
+}
+
+func trustedSetupSteps(config string) *lumberjackv1.SetupSteps {
+	return &lumberjackv1.SetupSteps{IsDefined: true, CurrentChecksum: setup.Fingerprint([]byte(config))}
+}
+
+const trustedConfig = "steps:\n  - type: run-command\n    run_command:\n      command: touch ran.txt\n"
+
+func TestCmdSetupRunTrustedConfigDoesNotPrompt(t *testing.T) {
+	_, worktree := setupLinkedWorktree(t, trustedConfig)
+	serveService(t, &stubService{setupSteps: trustedSetupSteps(trustedConfig)})
+
+	out, err := run(t, "", "setup-steps", "run")
+	if err != nil {
+		t.Fatalf("setup-steps run: %v", err)
+	}
+	if strings.Contains(out, "have not been reviewed") {
+		t.Errorf("out = %q, want no prompt for a config matching the default branch", out)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "ran.txt")); err != nil {
+		t.Errorf("expected the trusted run-command to have executed: %v", err)
+	}
+}
+
+func TestCmdSetupRunLocalEditPromptsAndCanBeDeclined(t *testing.T) {
+	_, worktree := setupLinkedWorktree(t, trustedConfig)
+	serveService(t, &stubService{setupSteps: trustedSetupSteps("steps: []\n")})
+
+	out, err := run(t, "n\n", "setup-steps", "run")
+	if err != nil {
+		t.Fatalf("setup-steps run: %v", err)
+	}
+	if !strings.Contains(out, "touch ran.txt") || !strings.Contains(out, "have not been reviewed") {
+		t.Errorf("out = %q, want the unreviewed command shown", out)
+	}
+	if !strings.Contains(out, "Skipping run-command steps") {
+		t.Errorf("out = %q, want the skip reported", out)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "ran.txt")); !os.IsNotExist(err) {
+		t.Errorf("a declined run-command must not execute (stat err = %v)", err)
+	}
+}
+
+func TestCmdSetupRunPromptsWhenTheRepositoryHasNoConfig(t *testing.T) {
+	setupLinkedWorktree(t, trustedConfig)
+	serveService(t, &stubService{})
+
+	out, err := run(t, "n\n", "setup-steps", "run")
+	if err != nil {
+		t.Fatalf("setup-steps run: %v", err)
+	}
+	if !strings.Contains(out, "neither the default branch's version nor a trusted one") {
+		t.Errorf("out = %q, want the untrusted config explained", out)
+	}
+}
+
+func TestCmdSetupRunAPreviouslyTrustedConfigDoesNotPrompt(t *testing.T) {
+	_, worktree := setupLinkedWorktree(t, trustedConfig)
+	steps := trustedSetupSteps("steps: []\n")
+	steps.TrustedChecksums = []string{setup.Fingerprint([]byte(trustedConfig))}
+	serveService(t, &stubService{setupSteps: steps})
+
+	out, err := run(t, "", "setup-steps", "run")
+	if err != nil {
+		t.Fatalf("setup-steps run: %v", err)
+	}
+	if strings.Contains(out, "have not been reviewed") {
+		t.Errorf("out = %q, want no prompt for an already-trusted config", out)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "ran.txt")); err != nil {
+		t.Errorf("expected the trusted run-command to have executed: %v", err)
+	}
+}
+
+func TestCmdSetupTrustSendsTheWorktreeChecksum(t *testing.T) {
+	stub := &stubService{setupSteps: trustedSetupSteps("steps: []\n")}
+	serveService(t, stub)
+	setupLinkedWorktree(t, trustedConfig)
+
+	out, err := run(t, "", "setup-steps", "trust")
+	if err != nil {
+		t.Fatalf("setup-steps trust: %v", err)
+	}
+	if want := setup.Fingerprint([]byte(trustedConfig)); stub.lastTrustedChecksum != want {
+		t.Errorf("trusted checksum = %q, want the worktree's own %q", stub.lastTrustedChecksum, want)
+	}
+	if !strings.Contains(out, "Trusted the setup steps in") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSetupTrustNeedsAConfig(t *testing.T) {
+	serveService(t, &stubService{})
+	setupRepo(t)
+
+	if _, err := run(t, "", "setup-steps", "trust"); err == nil {
+		t.Error("expected an error when no .lumberjack.yml governs the worktree")
+	}
+}
+
+type failAfter struct {
+	n int
+}
+
+func (f *failAfter) Write(p []byte) (int, error) {
+	f.n--
+	if f.n < 0 {
+		return 0, errWrite
+	}
+	return len(p), nil
+}
+
+func TestCmdSetupRunSurfacesFailedConsentWrites(t *testing.T) {
+	for _, writes := range []int{0, 1, 3} {
+		setupLinkedWorktree(t, trustedConfig)
+		serveService(t, &stubService{setupSteps: trustedSetupSteps("steps: []\n")})
+		var out bytes.Buffer
+		err := runCmd(t, "n\n", &out, &failAfter{n: writes}, "setup-steps", "run")
+		if !errors.Is(err, errWrite) {
+			t.Errorf("after %d writes: err = %v, want the failed write", writes, err)
+		}
+	}
+}
+
+func TestCmdSetupTrustJSONAndFailures(t *testing.T) {
+	setupLinkedWorktree(t, trustedConfig)
+	serveService(t, &stubService{setupSteps: trustedSetupSteps("steps: []\n")})
+
+	var out, errOut bytes.Buffer
+	if err := runCmd(t, "", &out, &errOut, "--format", "json", "setup-steps", "trust"); err != nil {
+		t.Fatalf("setup-steps trust --format json: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(out.Bytes(), &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v (%q)", err, out.String())
+	}
+	if decoded["message"] == nil {
+		t.Errorf("decoded = %+v, want a message", decoded)
+	}
+
+	if err := runCmd(t, "", failWriter{}, &errOut, "setup-steps", "trust"); !errors.Is(err, errWrite) {
+		t.Errorf("err = %v, want the failed write", err)
+	}
+}
+
+func TestCmdSetupTrustSurfacesADaemonFailure(t *testing.T) {
+	setupLinkedWorktree(t, trustedConfig)
+	noDaemon(t)
+
+	if _, err := run(t, "", "setup-steps", "trust"); err == nil {
+		t.Error("expected the daemon failure to surface")
 	}
 }
