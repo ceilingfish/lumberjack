@@ -138,7 +138,6 @@ message Repository {
   // Field 14 was `bool setup_consent_pending`, superseded by
   // setup_steps.is_trusted.
   reserved 14;
-  reserved "setup_consent_pending";
 
   int64 id = 1;
   string local_path = 2;

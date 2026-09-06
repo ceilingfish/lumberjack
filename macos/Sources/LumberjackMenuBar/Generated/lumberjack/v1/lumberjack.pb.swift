@@ -1223,7 +1223,7 @@ nonisolated extension Lumberjack_V1_WorktreeChange: SwiftProtobuf.Message, Swift
 
 nonisolated extension Lumberjack_V1_Repository: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".Repository"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}local_path\0\u{3}worktree_parent_dir\0\u{3}dir_prefix\0\u{3}github_owner\0\u{3}github_name\0\u{3}default_remote\0\u{1}host\0\u{3}last_synced_at\0\u{3}last_sync_status\0\u{3}last_sync_error\0\u{3}created_at\0\u{1}login\0\u{4}\u{2}setup_steps\0\u{b}setup_consent_pending\0\u{c}\u{e}\u{1}")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}local_path\0\u{3}worktree_parent_dir\0\u{3}dir_prefix\0\u{3}github_owner\0\u{3}github_name\0\u{3}default_remote\0\u{1}host\0\u{3}last_synced_at\0\u{3}last_sync_status\0\u{3}last_sync_error\0\u{3}created_at\0\u{1}login\0\u{4}\u{2}setup_steps\0\u{c}\u{e}\u{1}")
 
   fileprivate class _StorageClass {
     var _id: Int64 = 0

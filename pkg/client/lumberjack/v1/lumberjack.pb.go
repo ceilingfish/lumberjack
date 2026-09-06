@@ -2589,7 +2589,7 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\x0elast_synced_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampH\x01R\flastSyncedAt\x88\x01\x01B\f\n" +
 	"\n" +
 	"_pr_numberB\x11\n" +
-	"\x0f_last_synced_at\"\x93\x05\n" +
+	"\x0f_last_synced_at\"\xfc\x04\n" +
 	"\n" +
 	"Repository\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x1d\n" +
@@ -2613,7 +2613,7 @@ const file_lumberjack_v1_lumberjack_proto_rawDesc = "" +
 	"\vsetup_steps\x18\x0f \x01(\v2\x19.lumberjack.v1.SetupStepsR\n" +
 	"setupStepsB\x11\n" +
 	"\x0f_last_synced_atB\x12\n" +
-	"\x10_last_sync_errorJ\x04\b\x0e\x10\x0fR\x15setup_consent_pending\"\xb8\x01\n" +
+	"\x10_last_sync_errorJ\x04\b\x0e\x10\x0f\"\xb8\x01\n" +
 	"\n" +
 	"SetupSteps\x12\x1d\n" +
 	"\n" +
