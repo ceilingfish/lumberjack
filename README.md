@@ -191,7 +191,7 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack set-login [LOGIN] [--repository NAME]` | Set the `gh` account for the repo in the current dir, or the named one. |
 | `lumberjack setup-steps add/remove/list COMMAND` | Manage the current worktree's `.lumberjack.yml` run-command setup steps. |
 | `lumberjack setup-steps run` | Run the current worktree's setup steps now — inherits the main checkout's `.lumberjack.yml` unless the worktree has its own. |
-| `lumberjack install [--cli-only\|--daemon-only] [--force]` | Install the CLI and/or daemon (see [Installation](#installation)). |
+| `lumberjack install [--cli-only\|--daemon-only] [--force] [--autocomplete-shell <shell>\|--no-autocomplete]` | Install the CLI and/or daemon (see [Installation](#installation)). |
 | `lumberjack uninstall [--cli-only\|--daemon-only]` | Reverse `install`. |
 | `lumberjack daemon start/stop/status` | Manage the daemon's lifecycle once installed. |
 
@@ -212,16 +212,38 @@ lumberjack set-login my-work-login   # or name one directly
 ## Shell completion
 
 Lumberjack ships completion for common shells, with live suggestions for
-repository names and `gh` logins. Add this to your shell's rc file (swap `zsh`
-for `bash`, `fish`, or `powershell`):
+repository names and `gh` logins.
+
+`lumberjack install` sets this up for you: it detects the shell you ran it from
+and offers to append one line to that shell's rc file. Say yes and open a new
+shell. Steer it with flags:
 
 ```sh
-# ~/.zshrc
+lumberjack install --autocomplete-shell fish  # name the shell, skip the prompt
+lumberjack install --no-autocomplete          # leave rc files alone
+```
+
+Off a terminal — in a script or CI — the step is skipped silently. If it fails,
+the install still succeeds and prints the line to add by hand.
+`lumberjack uninstall` offers to take the line back out.
+
+To wire it up by hand, add the line for your shell:
+
+| shell | rc file | line |
+|---|---|---|
+| zsh | `~/.zshrc` | `eval "$(lumberjack completion zsh)"` |
+| bash | `~/.bash_profile` or `~/.bashrc` | `eval "$(lumberjack completion bash)"` |
+| fish | `~/.config/fish/config.fish` | `lumberjack completion fish \| source` |
+| powershell | `$PROFILE` | `lumberjack completion powershell \| Out-String \| Invoke-Expression` |
+
+From a source checkout with no installed binary, the `shell-completion` mise
+task prints the same script via `go run`:
+
+```sh
 eval "$(mise run shell-completion zsh)"
 ```
 
-From source without mise, or for a faster shell startup, generate the script once
-instead of on every launch:
+For a faster shell startup, generate the script once instead of on every launch:
 
 ```sh
 lumberjack completion zsh > "${fpath[1]}/_lumberjack"

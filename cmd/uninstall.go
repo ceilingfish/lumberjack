@@ -31,6 +31,7 @@ func newUninstallCmd() *cobra.Command {
 				binDir:     binDir,
 				daemonOnly: daemonOnly,
 				cliOnly:    cliOnly,
+				errOut:     cmd.ErrOrStderr(),
 			})
 		},
 	}
@@ -46,6 +47,7 @@ type uninstallOptions struct {
 	binDir     string // --bin-dir override; "" means defaultBinDir()
 	daemonOnly bool
 	cliOnly    bool
+	errOut     io.Writer // where advisory warnings go; nil means os.Stderr
 }
 
 func runUninstall(out io.Writer, opts uninstallOptions) error {
@@ -76,6 +78,12 @@ func runUninstall(out io.Writer, opts uninstallOptions) error {
 			return err
 		}
 	}
+
+	errOut := opts.errOut
+	if errOut == nil {
+		errOut = os.Stderr
+	}
+	uninstallCompletion(out, errOut, opts.daemonOnly)
 	return nil
 }
 

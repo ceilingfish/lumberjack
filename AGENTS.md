@@ -37,7 +37,11 @@ The gRPC contract is the boundary between the two. Design implications:
 
 Cobra generates the completion script; `cmd/completion.go` adds dynamic suggestions (repository names and `gh` logins come from the daemon over gRPC, guarded by a short timeout so a slow or stopped daemon never stalls the shell).
 
-Install it by sourcing the script from your shell rc — the `shell-completion` mise task prints it for the shell you name:
+`lumberjack install` wires it up: `cmd/autocomplete.go` detects the invoking shell (parent process name first, `$SHELL` as a fallback), resolves that shell's rc file, and — after a prompt gated on `interactiveTerminal`, or straight away under `--autocomplete-shell` — appends one line that invokes the installed binary. Every seam it needs (`parentProcessName`, `interactiveTerminal`, `rawTerminal`, `completionConfirmer`) is a package var so tests drive it without a real shell. The step is advisory: a failure warns on stderr and leaves `install` exiting zero, mirroring the PATH warning. `uninstall` scans the candidate rc files rather than reading recorded state, so it self-corrects after hand edits.
+
+Off a terminal, or under `--daemon-only`/`--no-autocomplete`, the step is skipped silently.
+
+By hand, source the script from your shell rc — the `shell-completion` mise task prints it for the shell you name, from a source checkout:
 
 ```sh
 # ~/.zshrc  (bash/fish/powershell: swap the shell name)
