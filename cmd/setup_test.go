@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/ceilingfish/lumberjack/internal/setup"
+	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 )
 
 // setupRepo makes t's temp dir look like a git worktree root (a `.git` entry is
@@ -180,8 +181,6 @@ func TestCmdSetupRunInheritedSteps(t *testing.T) {
 		t.Fatalf("WriteFile .env: %v", err)
 	}
 
-	// No daemon here, so the config cannot be matched against a trusted one
-	// and the commands are confirmed before they run.
 	out, err := run(t, "y\n", "setup-steps", "run")
 	if err != nil {
 		t.Fatalf("setup-steps run: %v", err)
@@ -235,13 +234,15 @@ func TestCmdSetupListJSON(t *testing.T) {
 	}
 }
 
-// trustedConfig is a config whose run-command leaves a marker, plus its
-// fingerprint as the daemon would report it for the default-branch version.
+func trustedSetupSteps(config string) *lumberjackv1.SetupSteps {
+	return &lumberjackv1.SetupSteps{IsDefined: true, CurrentChecksum: setup.Fingerprint([]byte(config))}
+}
+
 const trustedConfig = "steps:\n  - type: run-command\n    run_command:\n      command: touch ran.txt\n"
 
 func TestCmdSetupRunTrustedConfigDoesNotPrompt(t *testing.T) {
 	_, worktree := setupLinkedWorktree(t, trustedConfig)
-	serveService(t, &stubService{setupConsentTrusted: setup.Fingerprint([]byte(trustedConfig))})
+	serveService(t, &stubService{setupSteps: trustedSetupSteps(trustedConfig)})
 
 	out, err := run(t, "", "setup-steps", "run")
 	if err != nil {
@@ -257,9 +258,7 @@ func TestCmdSetupRunTrustedConfigDoesNotPrompt(t *testing.T) {
 
 func TestCmdSetupRunLocalEditPromptsAndCanBeDeclined(t *testing.T) {
 	_, worktree := setupLinkedWorktree(t, trustedConfig)
-	// The default branch carries a different config, so this one is a local
-	// edit: its commands are unreviewed and must be confirmed.
-	serveService(t, &stubService{setupConsentTrusted: setup.Fingerprint([]byte("steps: []\n"))})
+	serveService(t, &stubService{setupSteps: trustedSetupSteps("steps: []\n")})
 
 	out, err := run(t, "n\n", "setup-steps", "run")
 	if err != nil {
@@ -289,8 +288,6 @@ func TestCmdSetupRunPromptsWhenDefaultBranchHasNoConfig(t *testing.T) {
 	}
 }
 
-// failAfter writes to an inner buffer and then fails on the nth write, so a
-// test can reach a write that only happens after earlier ones succeeded.
 type failAfter struct {
 	n int
 }
@@ -304,11 +301,9 @@ func (f *failAfter) Write(p []byte) (int, error) {
 }
 
 func TestCmdSetupRunSurfacesFailedConsentWrites(t *testing.T) {
-	// Each write of the consent prompt — the reason, each command, the skip
-	// notice — is reported rather than swallowed.
 	for _, writes := range []int{0, 1, 3} {
 		setupLinkedWorktree(t, trustedConfig)
-		serveService(t, &stubService{setupConsentTrusted: setup.Fingerprint([]byte("steps: []\n"))})
+		serveService(t, &stubService{setupSteps: trustedSetupSteps("steps: []\n")})
 		var out bytes.Buffer
 		err := runCmd(t, "n\n", &out, &failAfter{n: writes}, "setup-steps", "run")
 		if !errors.Is(err, errWrite) {

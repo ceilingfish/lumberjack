@@ -86,12 +86,6 @@ service LumberjackService {
   // far behind is disconnected rather than allowed to stall the daemon.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
 
-  // GetSetupConsent reports whether a repository's `.lumberjack.yml`
-  // run-command setup steps are pending the local user's consent — either
-  // never consented, or consented to a config that has since changed. The CLI
-  // uses this at `init` and on later interactions to prompt for consent.
-  rpc GetSetupConsent(GetSetupConsentRequest) returns (GetSetupConsentResponse);
-
   // SetSetupConsent records the local user's consent to run a repository's
   // current trusted `.lumberjack.yml` run-command steps. Consent is bound to
   // the config's content: a later change to `.lumberjack.yml` makes it
@@ -139,6 +133,9 @@ message WorktreeChange {
 // Repository is one tracked repo. Fields mirror the `repositories` table
 // (docs/schema.md); mutable PR state is never carried here.
 message Repository {
+  reserved 14;
+  reserved "setup_consent_pending";
+
   int64 id = 1;
   string local_path = 2;
   string worktree_parent_dir = 3;
@@ -154,11 +151,15 @@ message Repository {
   // The gh account this repo was registered under; the daemon switches to it
   // before operating on the repo. Empty for repos tracked before login capture.
   string login = 13;
-  // True when the repository's trusted `.lumberjack.yml` declares run-command
-  // setup steps that the local user has not consented to (or has not
-  // consented to since the config last changed). The daemon skips
-  // run-commands while this is true; the CLI surfaces it as a prompt.
-  bool setup_consent_pending = 14;
+  SetupSteps setup_steps = 15;
+}
+
+message SetupSteps {
+  bool is_defined = 1;
+  string trusted_checksum = 2;
+  string current_checksum = 3;
+  bool is_trusted = 4;
+  repeated string steps = 5;
 }
 
 // Worktree is the live view of a local worktree: the stored branch <-> directory
@@ -268,34 +269,16 @@ message ListLoginsResponse {
   string current = 2;
 }
 
-message GetSetupConsentRequest {
-  // A repository name (dir prefix / GitHub name) or its local path; the daemon
-  // resolves either form.
-  string repository = 1;
-}
-
-message GetSetupConsentResponse {
-  // True when the repository's trusted `.lumberjack.yml` declares run-command
-  // steps the local user has not (yet, or still) consented to.
-  bool pending = 1;
-  // The run-command strings from the trusted config, for the consent prompt.
-  // Empty when pending is false.
-  repeated string run_commands = 2;
-  // Content fingerprint of the trusted (default-branch) `.lumberjack.yml`,
-  // regardless of whether consent is pending. Empty when the default branch
-  // has no such file. `setup-steps run` compares the local worktree's config
-  // against it to tell a trusted config from an unreviewed local one.
-  string trusted_fingerprint = 3;
-}
-
 message SetSetupConsentRequest {
   // A repository name (dir prefix / GitHub name) or its local path; the daemon
   // resolves either form.
   string repository = 1;
+  string checksum = 2;
 }
 
 message SetSetupConsentResponse {
   Repository repository = 1;
+  bool accepted = 2;
 }
 
 message ListWorktreesRequest {

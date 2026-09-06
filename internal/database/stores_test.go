@@ -303,7 +303,7 @@ func TestTouchWorktreesSyncedAt(t *testing.T) {
 	}
 }
 
-func TestUpdateSetupConsent(t *testing.T) {
+func TestUpdateTrustedChecksum(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
@@ -312,24 +312,24 @@ func TestUpdateSetupConsent(t *testing.T) {
 	}
 
 	got, _ := c.repositoryByID(ctx, repo.ID)
-	if got.SetupConsentFingerprint != "" {
-		t.Fatalf("expected no consent before it is granted, got %q", got.SetupConsentFingerprint)
+	if got.TrustedChecksum != "" {
+		t.Fatalf("expected no consent before it is granted, got %q", got.TrustedChecksum)
 	}
 
-	if err := c.UpdateSetupConsent(ctx, repo.ID, "sha256:abc"); err != nil {
-		t.Fatalf("UpdateSetupConsent: %v", err)
+	if err := c.UpdateTrustedChecksum(ctx, repo.ID, "sha256:abc"); err != nil {
+		t.Fatalf("UpdateTrustedChecksum: %v", err)
 	}
 	got, _ = c.repositoryByID(ctx, repo.ID)
-	if got.SetupConsentFingerprint != "sha256:abc" {
-		t.Errorf("SetupConsentFingerprint = %q, want sha256:abc", got.SetupConsentFingerprint)
+	if got.TrustedChecksum != "sha256:abc" {
+		t.Errorf("TrustedChecksum = %q, want sha256:abc", got.TrustedChecksum)
 	}
 
-	if err := c.UpdateSetupConsent(ctx, repo.ID, ""); err != nil {
-		t.Fatalf("UpdateSetupConsent(clear): %v", err)
+	if err := c.UpdateTrustedChecksum(ctx, repo.ID, ""); err != nil {
+		t.Fatalf("UpdateTrustedChecksum(clear): %v", err)
 	}
 	got, _ = c.repositoryByID(ctx, repo.ID)
-	if got.SetupConsentFingerprint != "" {
-		t.Errorf("an empty fingerprint should clear consent, got %q", got.SetupConsentFingerprint)
+	if got.TrustedChecksum != "" {
+		t.Errorf("an empty checksum should clear consent, got %q", got.TrustedChecksum)
 	}
 }
 

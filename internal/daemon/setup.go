@@ -39,8 +39,8 @@ func (s *Service) runSetupSteps(
 		return ""
 	}
 
-	consented := cfg.HasRunCommands() && repo.SetupConsentFingerprint != "" &&
-		repo.SetupConsentFingerprint == setup.Fingerprint(raw)
+	consented := cfg.HasRunCommands() && repo.TrustedChecksum != "" &&
+		repo.TrustedChecksum == setup.Fingerprint(raw)
 
 	failedStep, runErr := setup.Run(ctx, cfg, setup.Options{
 		MainCheckout:     repo.LocalPath,
@@ -134,58 +134,47 @@ func (s *Service) trustedRef(ctx context.Context, repo *schema.Repository) (stri
 	return repo.DefaultRemote + "/" + branch, nil
 }
 
-// SetupConsent is whether a repository's trusted run-command setup steps are
-// pending the local user's consent, and the commands themselves — for the CLI
-// to prompt with.
-type SetupConsent struct {
-	Pending  bool
-	Commands []string
-	// TrustedFingerprint is the content fingerprint of the trusted
-	// default-branch `.lumberjack.yml`, set whether or not consent is
-	// pending, and empty when the default branch has no such file. The CLI
-	// compares a worktree's own config against it to tell a config that has
-	// been through review from an unreviewed local one.
-	TrustedFingerprint string
+type SetupSteps struct {
+	IsDefined       bool
+	TrustedChecksum string
+	CurrentChecksum string
+	IsTrusted       bool
+	Steps           []string
 }
 
-// GetSetupConsent reports repo's setup-consent status: pending when the
-// trusted config declares run-commands and the local user has not consented
-// to their current content (never, or the config has since changed).
-func (s *Service) GetSetupConsent(ctx context.Context, repo *schema.Repository) (SetupConsent, error) {
+func (s *Service) GetSetupSteps(ctx context.Context, repo *schema.Repository) (SetupSteps, error) {
 	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
 	if err != nil {
-		return SetupConsent{}, err
+		return SetupSteps{}, err
 	}
-	if cfg == nil {
-		return SetupConsent{}, nil
-	}
-	fingerprint := setup.Fingerprint(raw)
-	if !cfg.HasRunCommands() || repo.SetupConsentFingerprint == fingerprint {
-		return SetupConsent{TrustedFingerprint: fingerprint}, nil
-	}
-	return SetupConsent{
-		Pending:            true,
-		Commands:           cfg.RunCommands(),
-		TrustedFingerprint: fingerprint,
-	}, nil
-}
-
-// SetSetupConsent records the local user's consent to run repo's current
-// trusted run-command steps, binding it to the config's content fingerprint.
-// Consent is local per machine (no remote or shared store).
-func (s *Service) SetSetupConsent(ctx context.Context, repo *schema.Repository) (*schema.Repository, error) {
-	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	fingerprint := ""
+	steps := SetupSteps{TrustedChecksum: repo.TrustedChecksum}
 	if cfg != nil {
-		fingerprint = setup.Fingerprint(raw)
+		steps.IsDefined = true
+		steps.CurrentChecksum = setup.Fingerprint(raw)
+		steps.Steps = cfg.RunCommands()
 	}
-	if err := s.db.UpdateSetupConsent(ctx, repo.ID, fingerprint); err != nil {
-		return nil, err
+	steps.IsTrusted = steps.TrustedChecksum == steps.CurrentChecksum
+	return steps, nil
+}
+
+func (s *Service) SetSetupConsent(
+	ctx context.Context, repo *schema.Repository, checksum string,
+) (*schema.Repository, bool, error) {
+	_, raw, err := s.loadTrustedSetupConfig(ctx, repo)
+	if err != nil {
+		return nil, false, err
+	}
+	current := ""
+	if raw != nil {
+		current = setup.Fingerprint(raw)
+	}
+	if checksum != current {
+		return repo, false, nil
+	}
+	if err := s.db.UpdateTrustedChecksum(ctx, repo.ID, current); err != nil {
+		return nil, false, err
 	}
 	updated := *repo
-	updated.SetupConsentFingerprint = fingerprint
-	return &updated, nil
+	updated.TrustedChecksum = current
+	return &updated, true, nil
 }

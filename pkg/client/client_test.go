@@ -78,13 +78,10 @@ func (stubServer) ListLogins(context.Context, *lumberjackv1.ListLoginsRequest) (
 	return &lumberjackv1.ListLoginsResponse{Logins: []string{"alice", "bob"}, Current: "bob"}, nil
 }
 
-func (stubServer) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
-	return &lumberjackv1.GetSetupConsentResponse{Pending: true, RunCommands: []string{"make deps"}}, nil
-}
-
 func (stubServer) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
 	return &lumberjackv1.SetSetupConsentResponse{
 		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()},
+		Accepted:   req.GetChecksum() == "current",
 	}, nil
 }
 
@@ -370,16 +367,12 @@ func TestClientSetLoginAndListLogins(t *testing.T) {
 
 func TestClientSetupConsent(t *testing.T) {
 	c := startStub(t)
-	consent, err := c.GetSetupConsent(context.Background(), "a")
-	if err != nil {
-		t.Fatalf("GetSetupConsent: %v", err)
+	repo, accepted, err := c.SetSetupConsent(context.Background(), "a", "current")
+	if err != nil || !accepted || repo.GetDirPrefix() != "a" {
+		t.Errorf("SetSetupConsent = %+v, %v, %v", repo, accepted, err)
 	}
-	if !consent.Pending || len(consent.Commands) != 1 || consent.Commands[0] != "make deps" {
-		t.Errorf("GetSetupConsent = %+v", consent)
-	}
-	repo, err := c.SetSetupConsent(context.Background(), "a")
-	if err != nil || repo.GetDirPrefix() != "a" {
-		t.Errorf("SetSetupConsent = %+v, %v", repo, err)
+	if _, accepted, err := c.SetSetupConsent(context.Background(), "a", "stale"); err != nil || accepted {
+		t.Errorf("a stale checksum must come back rejected (accepted = %v, err = %v)", accepted, err)
 	}
 }
 
@@ -513,12 +506,8 @@ func TestEveryMethodMapsServerErrors(t *testing.T) {
 			_, _, err := c.ListLogins(context.Background(), "a")
 			return err
 		},
-		"GetSetupConsent": func(c *Client) error {
-			_, err := c.GetSetupConsent(context.Background(), "a")
-			return err
-		},
 		"SetSetupConsent": func(c *Client) error {
-			_, err := c.SetSetupConsent(context.Background(), "a")
+			_, _, err := c.SetSetupConsent(context.Background(), "a", "x")
 			return err
 		},
 		"ListWorktrees": func(c *Client) error {

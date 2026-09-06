@@ -30,7 +30,7 @@ One row per tracked repo. This is the identity Lumberjack syncs against.
 | `last_sync_error`     | text      | Nullable; last error message                                                                                             |
 | `etag_pulls`          | text      | ETag from the last PR-list request, for conditional (304) fetches                                                        |
 | `created_at`          | timestamp |                                                                                                                          |
-| `setup_consent_fingerprint` | text | Content fingerprint (sha256) of the trusted `.lumberjack.yml` run-command steps the local user has consented to run. Empty means not consented. A mismatch against the trusted config's current fingerprint means consent is pending (never given, or the config changed since) |
+| `trusted_checksum` | text | Content checksum (sha256) of the trusted `.lumberjack.yml` run-command steps the local user has consented to run. Empty means not consented. A mismatch against the trusted config's current checksum means consent is pending (never given, or the config changed since), surfaced as `SetupSteps.is_trusted` on the repository |
 
 ### `pull_requests`
 

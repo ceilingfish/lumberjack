@@ -86,10 +86,7 @@ type Resolved struct {
 	Inherited bool
 	// Config is the effective config; empty (not nil) when there is no file.
 	Config *Config
-	// Raw is the exact bytes Config was parsed from, nil when there is no
-	// file. Fingerprint is taken over these bytes, so a config can be
-	// compared byte-for-byte against the repository's trusted one.
-	Raw []byte
+	Raw    []byte
 }
 
 // Resolve resolves the effective setup config for the worktree containing dir.

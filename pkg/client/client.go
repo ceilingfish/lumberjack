@@ -136,42 +136,14 @@ func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, c
 	return resp.GetLogins(), resp.GetCurrent(), nil
 }
 
-// SetupConsent is a repository's setup-consent status: whether its trusted
-// run-command steps are pending the local user's consent, the commands to
-// prompt with, and the fingerprint of the trusted config itself.
-type SetupConsent struct {
-	Pending bool
-	// Commands are the trusted config's run-commands, for a consent prompt.
-	Commands []string
-	// TrustedFingerprint fingerprints the trusted default-branch
-	// `.lumberjack.yml`, empty when the default branch has none. It is set
-	// whether or not consent is pending.
-	TrustedFingerprint string
-}
-
-// GetSetupConsent reports the setup-consent status of the repository resolved
-// by ref.
-func (c *Client) GetSetupConsent(ctx context.Context, ref string) (SetupConsent, error) {
-	resp, err := c.svc.GetSetupConsent(ctx, &lumberjackv1.GetSetupConsentRequest{Repository: ref})
+func (c *Client) SetSetupConsent(ctx context.Context, ref, checksum string) (*lumberjackv1.Repository, bool, error) {
+	resp, err := c.svc.SetSetupConsent(ctx, &lumberjackv1.SetSetupConsentRequest{
+		Repository: ref, Checksum: checksum,
+	})
 	if err != nil {
-		return SetupConsent{}, mapError(err)
+		return nil, false, mapError(err)
 	}
-	return SetupConsent{
-		Pending:            resp.GetPending(),
-		Commands:           resp.GetRunCommands(),
-		TrustedFingerprint: resp.GetTrustedFingerprint(),
-	}, nil
-}
-
-// SetSetupConsent records the local user's consent to run the current
-// trusted `.lumberjack.yml` run-command steps for the repository resolved by
-// ref, returning the updated repository.
-func (c *Client) SetSetupConsent(ctx context.Context, ref string) (*lumberjackv1.Repository, error) {
-	resp, err := c.svc.SetSetupConsent(ctx, &lumberjackv1.SetSetupConsentRequest{Repository: ref})
-	if err != nil {
-		return nil, mapError(err)
-	}
-	return resp.GetRepository(), nil
+	return resp.GetRepository(), resp.GetAccepted(), nil
 }
 
 // ListWorktrees returns a repository's worktrees with live reconciliation.

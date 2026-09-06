@@ -39,19 +39,12 @@ type stubService struct {
 	// logins is what ListLogins reports; loginErr, if set, is returned by
 	// SetLogin (e.g. an unauthenticated account). lastSetLogin records the login
 	// SetLogin received.
-	logins       []string
-	loginCurrent string
-	loginErr     error
-	lastSetLogin string
-	// setupConsentPending/setupConsentCommands drive GetSetupConsent;
-	// setupConsentGiven records whether SetSetupConsent was called.
-	setupConsentPending  bool
-	setupConsentCommands []string
-	setupConsentGiven    bool
-	// setupConsentTrusted is the fingerprint GetSetupConsent reports for the
-	// trusted default-branch config, which `setup-steps run` matches a local
-	// config against.
-	setupConsentTrusted string
+	logins            []string
+	loginCurrent      string
+	loginErr          error
+	lastSetLogin      string
+	setupSteps        *lumberjackv1.SetupSteps
+	setupConsentGiven bool
 	// tidyMoves is what Tidy reports; lastTidyTarget/lastTidyDryRun record the
 	// request it received, so tests can assert on scoping and --dry-run.
 	tidyMoves        []*lumberjackv1.TidyMove
@@ -92,25 +85,28 @@ func (s *stubService) InitRepository(_ context.Context, req *lumberjackv1.InitRe
 		Repository: &lumberjackv1.Repository{
 			LocalPath: req.GetLocalPath(), GithubOwner: "o", GithubName: "n",
 			WorktreeParentDir: filepath.Dir(req.GetLocalPath()), DirPrefix: "n",
+			SetupSteps: s.setupSteps,
 		},
 		Adopted: s.initAdopted,
 	}, nil
 }
 
-// GetSetupConsent reports no pending consent unless a test sets
-// setupConsentPending, in which case it also returns setupConsentCommands.
-func (s *stubService) GetSetupConsent(context.Context, *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
-	return &lumberjackv1.GetSetupConsentResponse{
-		Pending:            s.setupConsentPending,
-		RunCommands:        s.setupConsentCommands,
-		TrustedFingerprint: s.setupConsentTrusted,
-	}, nil
-}
-
-// SetSetupConsent records that consent was given, for tests to assert on.
 func (s *stubService) SetSetupConsent(_ context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
 	s.setupConsentGiven = true
-	return &lumberjackv1.SetSetupConsentResponse{Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository()}}, nil
+	accepted := req.GetChecksum() == s.setupSteps.GetCurrentChecksum()
+	steps := s.setupSteps
+	if accepted && steps != nil {
+		steps = &lumberjackv1.SetupSteps{
+			IsDefined: true, IsTrusted: true,
+			TrustedChecksum: steps.GetCurrentChecksum(),
+			CurrentChecksum: steps.GetCurrentChecksum(),
+			Steps:           steps.GetSteps(),
+		}
+	}
+	return &lumberjackv1.SetSetupConsentResponse{
+		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository(), SetupSteps: steps},
+		Accepted:   accepted,
+	}, nil
 }
 
 func (s *stubService) ListRepositories(context.Context, *lumberjackv1.ListRepositoriesRequest) (*lumberjackv1.ListRepositoriesResponse, error) {
@@ -124,8 +120,8 @@ func (s *stubService) GetRepository(_ context.Context, req *lumberjackv1.GetRepo
 	}
 	return &lumberjackv1.GetRepositoryResponse{Repository: &lumberjackv1.Repository{
 		DirPrefix: req.GetRepository(), LocalPath: "/p/n", GithubOwner: "o", GithubName: "n", Host: "github.com",
-		LastSyncStatus:      lumberjackv1.SyncStatus_SYNC_STATUS_OK,
-		SetupConsentPending: s.setupConsentPending,
+		LastSyncStatus: lumberjackv1.SyncStatus_SYNC_STATUS_OK,
+		SetupSteps:     s.setupSteps,
 	}}, nil
 }
 
@@ -252,8 +248,7 @@ func TestCmdInitReportsAdoptedWorktrees(t *testing.T) {
 
 func TestCmdInitPromptsForSetupConsentAndRecordsYes(t *testing.T) {
 	stub := &stubService{
-		setupConsentPending:  true,
-		setupConsentCommands: []string{"go mod download"},
+		setupSteps: pendingSetupSteps("go mod download"),
 	}
 	serveStub(t, stub)
 
@@ -274,8 +269,7 @@ func TestCmdInitPromptsForSetupConsentAndRecordsYes(t *testing.T) {
 
 func TestCmdInitPromptsForSetupConsentAndRespectsNo(t *testing.T) {
 	stub := &stubService{
-		setupConsentPending:  true,
-		setupConsentCommands: []string{"rm -rf /"},
+		setupSteps: pendingSetupSteps("rm -rf /"),
 	}
 	serveStub(t, stub)
 
@@ -305,7 +299,7 @@ func TestCmdInitNoPromptWhenConsentNotPending(t *testing.T) {
 }
 
 func TestCmdStatusDetailSurfacesPendingConsent(t *testing.T) {
-	stub := &stubService{setupConsentPending: true, setupConsentCommands: []string{"echo hi"}}
+	stub := &stubService{setupSteps: pendingSetupSteps("echo hi")}
 	serveStub(t, stub)
 
 	out, err := run(t, "n\n", "status", "--repository", "n")

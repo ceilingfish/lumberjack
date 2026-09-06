@@ -106,8 +106,6 @@ func confirm(cmd *cobra.Command, prompt string) bool {
 	return confirmOn(cmd, cmd.OutOrStdout(), prompt)
 }
 
-// confirmOn is confirm with the question written to w, for commands whose
-// stdout carries machine-readable output and so must prompt on stderr.
 func confirmOn(cmd *cobra.Command, w io.Writer, prompt string) bool {
 	_, _ = fmt.Fprintf(w, "%s [y/N] ", prompt)
 	scanner := bufio.NewScanner(cmd.InOrStdin())

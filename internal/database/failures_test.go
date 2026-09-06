@@ -146,7 +146,7 @@ func TestRepositoryUpdateErrors(t *testing.T) {
 	}{
 		{"UpdateSyncResult", func(c *Client) error { return c.UpdateSyncResult(ctx, 1, time.Unix(0, 0), nil) }},
 		{"UpdateLogin", func(c *Client) error { return c.UpdateLogin(ctx, 1, "someone") }},
-		{"UpdateSetupConsent", func(c *Client) error { return c.UpdateSetupConsent(ctx, 1, "fingerprint") }},
+		{"UpdateTrustedChecksum", func(c *Client) error { return c.UpdateTrustedChecksum(ctx, 1, "fingerprint") }},
 	}
 	for _, u := range updates {
 		t.Run(u.name, func(t *testing.T) {

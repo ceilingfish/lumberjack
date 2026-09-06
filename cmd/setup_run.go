@@ -9,6 +9,7 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/setup"
 	"github.com/ceilingfish/lumberjack/pkg/client"
+	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -71,19 +72,11 @@ func runSetupRun(cmd *cobra.Command, _ []string) error {
 		fmt.Sprintf("Ran %d setup step(s) in %s", len(res.Config.Steps), res.Worktree))
 }
 
-// consentToRunCommands decides whether res's run-command steps may run.
-// Matching the repository's trusted default-branch config is consent enough —
-// those commands have been through review, and asking every time would train
-// the user to say yes. A config that differs from it, including one this
-// branch adds or edits, has not, so its commands are shown and confirmed. The
-// answer covers this invocation only; the daemon's own consent record
-// (`lumberjack status`) is deliberately left alone, since it may only be
-// bound to a trusted config.
 func consentToRunCommands(cmd *cobra.Command, out io.Writer, res *setup.Resolved) (bool, error) {
 	if !res.Config.HasRunCommands() {
 		return false, nil
 	}
-	trusted, reason := trustedSetupFingerprint(cmd)
+	trusted, reason := trustedSetupChecksum(cmd)
 	if reason == "" && trusted != "" && trusted == setup.Fingerprint(res.Raw) {
 		return true, nil
 	}
@@ -106,30 +99,27 @@ func consentToRunCommands(cmd *cobra.Command, out io.Writer, res *setup.Resolved
 	return false, err
 }
 
-// trustedSetupFingerprint asks the daemon for the fingerprint of the
-// repository's trusted default-branch config. It returns a reason instead of
-// an error when trust cannot be established at all — an untracked directory,
-// or no daemon to ask — so the command still works there, by prompting.
-func trustedSetupFingerprint(cmd *cobra.Command) (fingerprint, reason string) {
+func trustedSetupChecksum(cmd *cobra.Command) (checksum, reason string) {
 	ref, err := cwdAbs()
 	if err != nil {
 		return "", "the current directory could not be resolved"
 	}
+	var steps *lumberjackv1.SetupSteps
 	err = withClient(cmd, func(ctx context.Context, cl *client.Client) error {
-		consent, err := cl.GetSetupConsent(ctx, ref)
+		repo, err := cl.GetRepository(ctx, ref)
 		if err != nil {
 			return err
 		}
-		fingerprint = consent.TrustedFingerprint
+		steps = repo.GetSetupSteps()
 		return nil
 	})
 	if err != nil {
 		return "", "this repository's trusted " + setup.ConfigFileName + " could not be read (" + err.Error() + ")"
 	}
-	if fingerprint == "" {
+	if !steps.GetIsDefined() {
 		return "", "the default branch has no " + setup.ConfigFileName
 	}
-	return fingerprint, ""
+	return steps.GetCurrentChecksum(), ""
 }
 
 // writeSetupMessage prints a one-line outcome in the requested format, shared

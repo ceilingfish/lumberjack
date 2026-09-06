@@ -87,11 +87,6 @@ internal protocol Lumberjack_V1_LumberjackServiceClientProtocol: GRPCClient {
     handler: @escaping (Lumberjack_V1_WatchResponse) -> Void
   ) -> ServerStreamingCall<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse>
 
-  func getSetupConsent(
-    _ request: Lumberjack_V1_GetSetupConsentRequest,
-    callOptions: CallOptions?
-  ) -> UnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse>
-
   func setSetupConsent(
     _ request: Lumberjack_V1_SetSetupConsentRequest,
     callOptions: CallOptions?
@@ -370,27 +365,6 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
     )
   }
 
-  /// GetSetupConsent reports whether a repository's `.lumberjack.yml`
-  /// run-command setup steps are pending the local user's consent — either
-  /// never consented, or consented to a config that has since changed. The CLI
-  /// uses this at `init` and on later interactions to prompt for consent.
-  ///
-  /// - Parameters:
-  ///   - request: Request to send to GetSetupConsent.
-  ///   - callOptions: Call options.
-  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
-  internal func getSetupConsent(
-    _ request: Lumberjack_V1_GetSetupConsentRequest,
-    callOptions: CallOptions? = nil
-  ) -> UnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse> {
-    return self.makeUnaryCall(
-      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent.path,
-      request: request,
-      callOptions: callOptions ?? self.defaultCallOptions,
-      interceptors: self.interceptors?.makeGetSetupConsentInterceptors() ?? []
-    )
-  }
-
   /// SetSetupConsent records the local user's consent to run a repository's
   /// current trusted `.lumberjack.yml` run-command steps. Consent is bound to
   /// the config's content: a later change to `.lumberjack.yml` makes it
@@ -542,11 +516,6 @@ internal protocol Lumberjack_V1_LumberjackServiceAsyncClientProtocol: GRPCClient
     _ request: Lumberjack_V1_WatchRequest,
     callOptions: CallOptions?
   ) -> GRPCAsyncServerStreamingCall<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse>
-
-  func makeGetSetupConsentCall(
-    _ request: Lumberjack_V1_GetSetupConsentRequest,
-    callOptions: CallOptions?
-  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse>
 
   func makeSetSetupConsentCall(
     _ request: Lumberjack_V1_SetSetupConsentRequest,
@@ -717,18 +686,6 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       request: request,
       callOptions: callOptions ?? self.defaultCallOptions,
       interceptors: self.interceptors?.makeWatchInterceptors() ?? []
-    )
-  }
-
-  internal func makeGetSetupConsentCall(
-    _ request: Lumberjack_V1_GetSetupConsentRequest,
-    callOptions: CallOptions? = nil
-  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse> {
-    return self.makeAsyncUnaryCall(
-      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent.path,
-      request: request,
-      callOptions: callOptions ?? self.defaultCallOptions,
-      interceptors: self.interceptors?.makeGetSetupConsentInterceptors() ?? []
     )
   }
 
@@ -903,18 +860,6 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
     )
   }
 
-  internal func getSetupConsent(
-    _ request: Lumberjack_V1_GetSetupConsentRequest,
-    callOptions: CallOptions? = nil
-  ) async throws -> Lumberjack_V1_GetSetupConsentResponse {
-    return try await self.performAsyncUnaryCall(
-      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent.path,
-      request: request,
-      callOptions: callOptions ?? self.defaultCallOptions,
-      interceptors: self.interceptors?.makeGetSetupConsentInterceptors() ?? []
-    )
-  }
-
   internal func setSetupConsent(
     _ request: Lumberjack_V1_SetSetupConsentRequest,
     callOptions: CallOptions? = nil
@@ -986,9 +931,6 @@ internal protocol Lumberjack_V1_LumberjackServiceClientInterceptorFactoryProtoco
   /// - Returns: Interceptors to use when invoking 'watch'.
   func makeWatchInterceptors() -> [ClientInterceptor<Lumberjack_V1_WatchRequest, Lumberjack_V1_WatchResponse>]
 
-  /// - Returns: Interceptors to use when invoking 'getSetupConsent'.
-  func makeGetSetupConsentInterceptors() -> [ClientInterceptor<Lumberjack_V1_GetSetupConsentRequest, Lumberjack_V1_GetSetupConsentResponse>]
-
   /// - Returns: Interceptors to use when invoking 'setSetupConsent'.
   func makeSetSetupConsentInterceptors() -> [ClientInterceptor<Lumberjack_V1_SetSetupConsentRequest, Lumberjack_V1_SetSetupConsentResponse>]
 }
@@ -1011,7 +953,6 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.sync,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.tidy,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.watch,
-      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.getSetupConsent,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent,
     ]
   )
@@ -1093,12 +1034,6 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       name: "Watch",
       path: "/lumberjack.v1.LumberjackService/Watch",
       type: GRPCCallType.serverStreaming
-    )
-
-    internal static let getSetupConsent = GRPCMethodDescriptor(
-      name: "GetSetupConsent",
-      path: "/lumberjack.v1.LumberjackService/GetSetupConsent",
-      type: GRPCCallType.unary
     )
 
     internal static let setSetupConsent = GRPCMethodDescriptor(

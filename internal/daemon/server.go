@@ -60,7 +60,7 @@ func (s *Server) InitRepository(ctx context.Context, req *lumberjackv1.InitRepos
 		adoptedPB[i] = toProtoChange(c)
 	}
 	pb := toProtoRepository(repo)
-	s.decorateSetupConsent(ctx, pb, repo)
+	s.decorateSetupSteps(ctx, pb, repo)
 	return &lumberjackv1.InitRepositoryResponse{
 		Repository: pb,
 		Adopted:    adoptedPB,
@@ -76,7 +76,7 @@ func (s *Server) ListRepositories(ctx context.Context, _ *lumberjackv1.ListRepos
 	out := make([]*lumberjackv1.Repository, len(repos))
 	for i := range repos {
 		out[i] = toProtoRepository(&repos[i])
-		s.decorateSetupConsent(ctx, out[i], &repos[i])
+		s.decorateSetupSteps(ctx, out[i], &repos[i])
 	}
 	return &lumberjackv1.ListRepositoriesResponse{Repositories: out}, nil
 }
@@ -88,46 +88,24 @@ func (s *Server) GetRepository(ctx context.Context, req *lumberjackv1.GetReposit
 		return nil, toStatus(err)
 	}
 	pb := toProtoRepository(repo)
-	s.decorateSetupConsent(ctx, pb, repo)
+	s.decorateSetupSteps(ctx, pb, repo)
 	return &lumberjackv1.GetRepositoryResponse{Repository: pb}, nil
 }
 
-// decorateSetupConsent sets pb.SetupConsentPending from repo's live
-// setup-consent status. A failure reading the trusted config (e.g. the
-// daemon has never fetched this repo yet) is swallowed — it must not break
-// an otherwise-successful list/get, and the CLI's dedicated GetSetupConsent
-// call surfaces the same failure explicitly when it matters.
-func (s *Server) decorateSetupConsent(ctx context.Context, pb *lumberjackv1.Repository, repo *schema.Repository) {
-	consent, err := s.svc.GetSetupConsent(ctx, repo)
+func (s *Server) decorateSetupSteps(ctx context.Context, pb *lumberjackv1.Repository, repo *schema.Repository) {
+	steps, err := s.svc.GetSetupSteps(ctx, repo)
 	if err != nil {
 		return
 	}
-	pb.SetupConsentPending = consent.Pending
+	pb.SetupSteps = &lumberjackv1.SetupSteps{
+		IsDefined:       steps.IsDefined,
+		TrustedChecksum: steps.TrustedChecksum,
+		CurrentChecksum: steps.CurrentChecksum,
+		IsTrusted:       steps.IsTrusted,
+		Steps:           steps.Steps,
+	}
 }
 
-// GetSetupConsent reports whether a repository's trusted run-command setup
-// steps are pending the local user's consent.
-func (s *Server) GetSetupConsent(ctx context.Context, req *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
-	if req.GetRepository() == "" {
-		return nil, status.Error(codes.InvalidArgument, "repository is required")
-	}
-	repo, err := s.db.FindRepository(ctx, req.GetRepository())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	consent, err := s.svc.GetSetupConsent(ctx, repo)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &lumberjackv1.GetSetupConsentResponse{
-		Pending:            consent.Pending,
-		RunCommands:        consent.Commands,
-		TrustedFingerprint: consent.TrustedFingerprint,
-	}, nil
-}
-
-// SetSetupConsent records the local user's consent to a repository's current
-// trusted run-command setup steps.
 func (s *Server) SetSetupConsent(ctx context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {
 	if req.GetRepository() == "" {
 		return nil, status.Error(codes.InvalidArgument, "repository is required")
@@ -136,11 +114,13 @@ func (s *Server) SetSetupConsent(ctx context.Context, req *lumberjackv1.SetSetup
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	updated, err := s.svc.SetSetupConsent(ctx, repo)
+	updated, accepted, err := s.svc.SetSetupConsent(ctx, repo, req.GetChecksum())
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	return &lumberjackv1.SetSetupConsentResponse{Repository: toProtoRepository(updated)}, nil
+	pb := toProtoRepository(updated)
+	s.decorateSetupSteps(ctx, pb, updated)
+	return &lumberjackv1.SetSetupConsentResponse{Repository: pb, Accepted: accepted}, nil
 }
 
 // SetLogin sets the gh account a repository operates under.
