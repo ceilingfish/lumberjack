@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/ghauth"
 )
@@ -282,6 +283,49 @@ func (c *Client) ListOpenPRs(ctx context.Context, repo RepoInfo) ([]PR, error) {
 		prs[i] = PR{Number: r.Number, HeadBranch: r.HeadRefName}
 	}
 	return prs, nil
+}
+
+// FindPRForBranch returns the pull request whose head is branch, searching
+// every state rather than only the open snapshot. A PR that opened and merged
+// between two syncs is never seen open, so this is the only way to associate
+// its worktree after the fact. An open PR wins over a closed one; among closed
+// ones the most recently updated wins. It reports found=false when the branch
+// has never had a PR.
+func (c *Client) FindPRForBranch(ctx context.Context, repo RepoInfo, branch string) (PR, bool, error) {
+	out, err := c.run(ctx, "", "pr", "list",
+		"--repo", fmt.Sprintf("%s/%s/%s", repo.Host, repo.Owner, repo.Name),
+		"--state", "all",
+		"--head", branch,
+		"--limit", "100",
+		"--json", "number,headRefName,state,updatedAt")
+	if err != nil {
+		return PR{}, false, err
+	}
+	var raw []struct {
+		Number      int64     `json:"number"`
+		HeadRefName string    `json:"headRefName"`
+		State       string    `json:"state"`
+		UpdatedAt   time.Time `json:"updatedAt"`
+	}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return PR{}, false, fmt.Errorf("parsing gh pr list: %w", err)
+	}
+	best := -1
+	for i, r := range raw {
+		switch {
+		case best < 0:
+		case raw[best].State == "OPEN" && r.State != "OPEN":
+			continue
+		case r.State == "OPEN" && raw[best].State != "OPEN":
+		case !r.UpdatedAt.After(raw[best].UpdatedAt):
+			continue
+		}
+		best = i
+	}
+	if best < 0 {
+		return PR{}, false, nil
+	}
+	return PR{Number: raw[best].Number, HeadBranch: raw[best].HeadRefName}, true, nil
 }
 
 // PRMerged reports whether pull request number in repo was merged (as opposed

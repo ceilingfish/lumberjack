@@ -293,8 +293,14 @@ type fakeGH struct {
 	// forces the lookup to fail.
 	merged    map[int64]bool
 	mergedErr error
-	user      string
-	userErr   error
+	// branchPRs answers FindPRForBranch: the PR (in any state) whose head is
+	// that branch. branchErr forces the lookup to fail, and branchLookups
+	// records every branch it was asked about.
+	branchPRs     map[string]github.PR
+	branchErr     error
+	branchLookups []string
+	user          string
+	userErr       error
 	// active is the account gh reports as currently signed in.
 	active    string
 	activeErr error
@@ -334,6 +340,17 @@ func (f *fakeGH) PRMerged(_ context.Context, _ github.RepoInfo, number int64) (b
 		return false, f.mergedErr
 	}
 	return f.merged[number], nil
+}
+
+func (f *fakeGH) FindPRForBranch(_ context.Context, _ github.RepoInfo, branch string) (github.PR, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.branchLookups = append(f.branchLookups, branch)
+	if f.branchErr != nil {
+		return github.PR{}, false, f.branchErr
+	}
+	pr, ok := f.branchPRs[branch]
+	return pr, ok, nil
 }
 
 func (f *fakeGH) AuthenticatedUser(context.Context) (string, error) {
@@ -2256,5 +2273,179 @@ func TestConfirmMessage(t *testing.T) {
 		if got := confirmMessage(c.st); got != c.want {
 			t.Errorf("confirmMessage(%+v) = %q, want %q", c.st, got, c.want)
 		}
+	}
+}
+
+// unlinkedWorktree inits a repository over a hand-created worktree on branch,
+// which is adopted with no PR number — the state a worktree is left in when its
+// PR was never seen open.
+func (h *harness) unlinkedWorktree(t *testing.T, branch string) *schema.Repository {
+	t.Helper()
+	dir := filepath.Join(h.parent, "n")
+	existing := filepath.Join(h.parent, "n-"+filepath.Base(branch))
+	if err := mkWorktreeDir(existing); err != nil {
+		t.Fatal(err)
+	}
+	h.git.worktrees = []worktree.Ref{
+		{Dir: dir, Branch: "main"},
+		{Dir: existing, Branch: branch},
+	}
+	repo, adopted, err := h.svc.InitRepository(context.Background(), dir)
+	if err != nil || len(adopted) != 1 {
+		t.Fatalf("init: adopted=%v err=%v", adopted, err)
+	}
+	if wt := h.syncedWorktree(t, repo); wt.GithubPRNumber != nil {
+		t.Fatalf("expected an unlinked worktree, got PR %d", *wt.GithubPRNumber)
+	}
+	return repo
+}
+
+// TestSyncLinksPRMergedBetweenTicks is the regression for a PR whose whole
+// lifetime falls between two syncs: it is never in the open set, so only a
+// whole-history branch lookup can associate it — after which the ordinary
+// merged-PR path removes the worktree.
+func TestSyncLinksPRMergedBetweenTicks(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x"}}
+	h.gh.merged = map[int64]bool{7: true}
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed=%d, want 1 (linked to a merged PR)", removed)
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 0 {
+		t.Errorf("expected the worktree removed, got %d", len(got))
+	}
+}
+
+// TestSyncLinksPRMergedBetweenTicksRetainsDirty checks the link does not
+// override the safety rules: a dirty worktree is linked but kept.
+func TestSyncLinksPRMergedBetweenTicksRetainsDirty(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	wt := h.syncedWorktree(t, repo)
+	h.git.dirty[wt.DirectoryPath] = true
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x"}}
+	h.gh.merged = map[int64]bool{7: true}
+
+	var changes []WorktreeChange
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo,
+		func(c WorktreeChange) { changes = append(changes, c) })
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 0 {
+		t.Errorf("removed=%d, want 0 (dirty)", removed)
+	}
+	if !hasAction(changes, "feature/x", ActionRetained) {
+		t.Errorf("expected a retained change, got %v", changes)
+	}
+	got := h.syncedWorktree(t, repo)
+	if got.GithubPRNumber == nil || *got.GithubPRNumber != 7 {
+		t.Errorf("expected the row linked to PR 7, got %v", got.GithubPRNumber)
+	}
+}
+
+// TestSyncLeavesBranchWithNoPRAndCachesTheLookup checks a branch that has never
+// had a PR keeps its current treatment — tracked, not managed — and does not
+// cost a fresh lookup on every tick.
+func TestSyncLeavesBranchWithNoPRAndCachesTheLookup(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+
+	for range 3 {
+		if _, removed, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil || removed != 0 {
+			t.Fatalf("sync: removed=%d err=%v", removed, err)
+		}
+	}
+	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 1 {
+		t.Errorf("expected the worktree kept, got %d", len(got))
+	}
+	if len(h.gh.branchLookups) != 1 {
+		t.Errorf("branch lookups = %v, want one (the negative answer is cached)", h.gh.branchLookups)
+	}
+}
+
+// TestSyncSkipsPRLookupForLinkedWorktree checks the lookup is confined to rows
+// that carry no PR number.
+func TestSyncSkipsPRLookupForLinkedWorktree(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}}
+	h.seedSync(t, repo)
+	h.gh.prs = nil
+	h.gh.merged = map[int64]bool{1: true}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(h.gh.branchLookups) != 0 {
+		t.Errorf("branch lookups = %v, want none", h.gh.branchLookups)
+	}
+}
+
+// TestSyncPRLookupFailureLeavesWorktreeAlone checks a failed lookup is reported
+// as a sync error rather than read as "no PR".
+func TestSyncPRLookupFailureLeavesWorktreeAlone(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	h.gh.branchErr = errors.New("gh exploded")
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil {
+		t.Fatal("expected the lookup failure surfaced as a sync error")
+	}
+	if removed != 0 {
+		t.Errorf("removed=%d, want 0", removed)
+	}
+	if got := h.syncedWorktree(t, repo); got.GithubPRNumber != nil {
+		t.Errorf("expected the row untouched, got PR %d", *got.GithubPRNumber)
+	}
+}
+
+// TestDeleteLinksPRMergedBetweenTicks checks an explicit delete of such a
+// worktree recognises the merged PR instead of warning about commits that are
+// safely on the base branch.
+func TestDeleteLinksPRMergedBetweenTicks(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	wt := h.syncedWorktree(t, repo)
+	h.git.localOnly[wt.DirectoryPath] = 4
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x"}}
+	h.gh.merged = map[int64]bool{7: true}
+
+	res, err := h.svc.DeleteWorktree(context.Background(), repo, "feature/x", false)
+	if err != nil {
+		t.Fatalf("DeleteWorktree: %v", err)
+	}
+	if !res.Deleted || res.RequiresConfirmation || res.CommitsAtRisk != 0 {
+		t.Errorf("merged worktree should delete cleanly: %+v", res)
+	}
+}
+
+// TestSyncRetriesPRLookupAfterCacheExpiry checks the cached "no PR" answer is
+// not permanent: a branch that gains a PR later is still linked.
+func TestSyncRetriesPRLookupAfterCacheExpiry(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	now := time.Now().Add(noPRLookupTTL + time.Minute)
+	h.svc.now = func() time.Time { return now }
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x"}}
+	h.gh.merged = map[int64]bool{7: true}
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed=%d, want 1 (the expired cache entry is re-checked)", removed)
 	}
 }

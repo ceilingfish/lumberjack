@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -410,6 +411,50 @@ func TestListOpenPRs(t *testing.T) {
 func TestListOpenPRsBadJSON(t *testing.T) {
 	c := fakeClient(func(...string) (string, error) { return "{", nil })
 	if _, err := c.ListOpenPRs(context.Background(), RepoInfo{}); err == nil {
+		t.Error("expected JSON parse error")
+	}
+}
+
+func TestFindPRForBranch(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `[{"number":7,"headRefName":"feature/x","state":"CLOSED","updatedAt":"2026-01-01T00:00:00Z"},
+			{"number":9,"headRefName":"feature/x","state":"MERGED","updatedAt":"2026-02-01T00:00:00Z"}]`, nil
+	})
+	pr, found, err := c.FindPRForBranch(context.Background(), RepoInfo{Owner: "o", Name: "n", Host: "github.com"}, "feature/x")
+	if err != nil || !found {
+		t.Fatalf("FindPRForBranch: found=%v err=%v", found, err)
+	}
+	if pr.Number != 9 {
+		t.Errorf("pr = %+v, want the most recently updated", pr)
+	}
+	if !slices.Contains(gotArgs, "all") || !slices.Contains(gotArgs, "feature/x") {
+		t.Errorf("expected --state all --head feature/x in args %v", gotArgs)
+	}
+}
+
+func TestFindPRForBranchPrefersOpen(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `[{"number":9,"headRefName":"b","state":"MERGED","updatedAt":"2026-02-01T00:00:00Z"},
+			{"number":3,"headRefName":"b","state":"OPEN","updatedAt":"2026-01-01T00:00:00Z"}]`, nil
+	})
+	pr, found, err := c.FindPRForBranch(context.Background(), RepoInfo{}, "b")
+	if err != nil || !found || pr.Number != 3 {
+		t.Errorf("pr = %+v found=%v err=%v, want the open PR", pr, found, err)
+	}
+}
+
+func TestFindPRForBranchNone(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "[]", nil })
+	if _, found, err := c.FindPRForBranch(context.Background(), RepoInfo{}, "b"); found || err != nil {
+		t.Errorf("found=%v err=%v, want no PR", found, err)
+	}
+}
+
+func TestFindPRForBranchBadJSON(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "{", nil })
+	if _, _, err := c.FindPRForBranch(context.Background(), RepoInfo{}, "b"); err == nil {
 		t.Error("expected JSON parse error")
 	}
 }
