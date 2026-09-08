@@ -74,6 +74,10 @@ type GHOps interface {
 	// treat a merged worktree's branch commits as safely on the base branch
 	// rather than as un-pushed work at risk.
 	PRMerged(ctx context.Context, repo github.RepoInfo, number int64) (bool, error)
+	// FindPRForBranch resolves a branch to its pull request across every state,
+	// so a worktree whose PR opened and merged between two syncs — and so was
+	// never in the open set — can still be linked to it after the fact.
+	FindPRForBranch(ctx context.Context, repo github.RepoInfo, branch string) (github.PR, bool, error)
 	// CheckRepoAccess verifies gh's active account can reach a repository, so
 	// set-login can reject a login that authenticates but cannot operate the repo.
 	CheckRepoAccess(ctx context.Context, repo github.RepoInfo) error
@@ -90,6 +94,12 @@ type Service struct {
 
 	global    sync.RWMutex
 	repoLocks sync.Map
+
+	// noPRBranches remembers branches a whole-history PR lookup found nothing
+	// for, keyed by repository and branch, so a repo full of hand-made
+	// worktrees does not pay for a fresh lookup on every tick. Entries expire
+	// after noPRLookupTTL, since a branch can gain a PR later.
+	noPRBranches sync.Map
 
 	// events fans out worktree/sync changes to Watch subscribers. Publishing
 	// is a side effect of a mutation that already happened under mu — it never
@@ -241,7 +251,7 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 		views = make([]WorktreeView, 0, len(stored))
 		for i := range stored {
 			wt := stored[i]
-			prState, perr := s.prState(ctx, repo, wt, openByNum)
+			prState, perr := s.prState(ctx, repo, &wt, openByNum)
 			if perr != nil {
 				return fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, perr)
 			}
@@ -667,7 +677,7 @@ func (s *Service) removeClosed(
 		if s.prStillOpen(wt, openByNum) {
 			continue // PR still open — keep the worktree
 		}
-		state, serr := s.prState(ctx, repo, wt, openByNum)
+		state, serr := s.prState(ctx, repo, &wt, openByNum)
 		if serr != nil {
 			*errs = append(*errs, fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, serr))
 			continue
@@ -677,6 +687,9 @@ func (s *Service) removeClosed(
 				removed++
 			}
 			continue
+		}
+		if state == worktree.PROpen {
+			continue // the lookup above linked it to a PR that is still open
 		}
 		if s.removeOne(ctx, repo, wt, state, progress, errs) {
 			removed++
@@ -761,10 +774,16 @@ func (s *Service) prStillOpen(wt schema.Worktree, openByNum map[int64]github.PR)
 // commits are on the base branch but on no remote-tracking ref — from being
 // reported as holding local-only commits at risk.
 func (s *Service) prState(
-	ctx context.Context, repo *schema.Repository, wt schema.Worktree, openByNum map[int64]github.PR,
+	ctx context.Context, repo *schema.Repository, wt *schema.Worktree, openByNum map[int64]github.PR,
 ) (worktree.PRState, error) {
 	if wt.GithubPRNumber == nil {
-		return worktree.PRNone, nil
+		linked, err := s.linkHistoricalPR(ctx, repo, wt)
+		if err != nil {
+			return worktree.PRNone, err
+		}
+		if !linked {
+			return worktree.PRNone, nil
+		}
 	}
 	if _, ok := openByNum[*wt.GithubPRNumber]; ok {
 		return worktree.PROpen, nil
@@ -838,4 +857,48 @@ func (s *Service) removeOne(
 		Action: ActionDeleted, Detail: detail,
 	})
 	return true
+}
+
+// noPRLookupTTL is how long a "this branch has no PR at all" answer is trusted
+// before FindPRForBranch is asked again. A branch that gains a PR is normally
+// linked by the open-PR path within one sync; the lookup only exists for PRs
+// whose whole lifetime missed the open snapshot, so re-asking daily is enough.
+const noPRLookupTTL = 24 * time.Hour
+
+// linkHistoricalPR associates a tracked worktree that carries no PR number with
+// a pull request on its branch, searching every PR state rather than the open
+// snapshot alone. It is how a worktree whose PR opened and merged between two
+// sync ticks — and so was never seen open — becomes managed again, letting the
+// ordinary merged-PR removal path decide its fate.
+//
+// It mutates wt in place and reports whether a PR was found. A branch with no
+// PR in any state is remembered for noPRLookupTTL so long-lived hand-made
+// worktrees do not cost a lookup every tick. A lookup failure is returned as an
+// error and leaves the row untouched — it must never be read as "no PR".
+func (s *Service) linkHistoricalPR(ctx context.Context, repo *schema.Repository, wt *schema.Worktree) (bool, error) {
+	if wt.BranchName == "" {
+		return false, nil
+	}
+	key := fmt.Sprintf("%d\x00%s", repo.ID, wt.BranchName)
+	if at, ok := s.noPRBranches.Load(key); ok {
+		if s.now().Sub(at.(time.Time)) < noPRLookupTTL {
+			return false, nil
+		}
+		s.noPRBranches.Delete(key)
+	}
+	pr, found, err := s.gh.FindPRForBranch(ctx, repoInfo(repo), wt.BranchName)
+	if err != nil {
+		return false, fmt.Errorf("looking up PR for branch %s: %w", wt.BranchName, err)
+	}
+	if !found {
+		s.noPRBranches.Store(key, s.now())
+		return false, nil
+	}
+	num := pr.Number
+	if err := s.db.SetWorktreePR(ctx, wt.ID, &num, pr.HeadBranch); err != nil {
+		return false, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err)
+	}
+	wt.GithubPRNumber = &num
+	wt.BranchName = pr.HeadBranch
+	return true, nil
 }

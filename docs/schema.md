@@ -101,6 +101,8 @@ Optional but recommended — audit log for `lumberjack status` detail and daemon
 
 The daemon manages every tracked worktree uniformly, regardless of whether it created the worktree or adopted one already on disk. Adoption is not limited to branches an open PR claims: each sync also adopts any worktree git has checked out that Lumberjack is not yet tracking, recording it with a null `github_pr_number` so it becomes visible to `lumberjack worktrees` without becoming a cleanup candidate. Should a PR later open on such a branch, the next sync links it to the existing row rather than recreating the worktree.
 
+A PR can also open and merge entirely between two hourly syncs, so it is never seen in the open snapshot at all. Each sync therefore resolves any worktree still carrying a null `github_pr_number` against `gh pr list --state all --head <branch>`, preferring an open PR and otherwise the most recently updated one, and records what it finds — after which the ordinary merged-PR removal path applies, with all its safety rules intact. A branch with no PR in any state stays tracked-not-managed, and that negative answer is cached for a day so a repository full of hand-made worktrees costs no lookups per tick.
+
 A worktree whose PR has merged or closed is removed only when it is provably safe to do so — a clean tree with no local-only commits; anything dirty or holding un-pushed work is retained (see "Derived live, not stored").
 
 ## Derived live, not stored
