@@ -54,6 +54,44 @@ in scripts. `doctor` does **not** need the daemon running.
 
 ## Installation
 
+### With Homebrew (recommended)
+
+```sh
+brew tap ceilingfish/lumberjack https://github.com/ceilingfish/lumberjack
+brew install ceilingfish/lumberjack/lumberjack
+```
+
+The tap lives in this repo, under [`HomebrewFormula/`](HomebrewFormula/) — hence
+the repository URL on the `tap` line; without it Homebrew would look for a
+separate `homebrew-lumberjack` repo.
+
+The formula **builds from source** (it pulls in Homebrew's `go` as a build-only
+dependency, and `gh` as a runtime one). That is deliberate: a binary you compile
+locally never carries the `com.apple.quarantine` attribute, so Gatekeeper has
+nothing to block — no *"cannot be opened because the developer cannot be
+verified"*, no `xattr -d` dance, no `spctl` override. It costs about half a
+minute of build time on first install.
+
+Homebrew installs the CLI only. Register the daemon — a per-user LaunchAgent, no
+`sudo` — yourself:
+
+```sh
+lumberjack install --daemon-only
+lumberjack daemon start
+```
+
+The daemon is registered against the binary path it sees at that moment, and
+Homebrew moves that path on every version bump, so re-register after upgrading:
+
+```sh
+brew upgrade lumberjack
+lumberjack install --daemon-only --force
+```
+
+Shell completion is installed by the formula into Homebrew's completions
+directory, so `lumberjack install`'s own completion-wiring step is unnecessary
+here.
+
 ### With Go
 
 ```sh

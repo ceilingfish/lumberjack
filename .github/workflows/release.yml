@@ -84,6 +84,42 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # Point the in-repo Homebrew tap (HomebrewFormula/lumberjack.rb) at the tag
+  # just released. The formula builds from source, so all that changes is the
+  # source-tarball url and its sha256 — committed straight to main, which is
+  # what `brew tap ceilingfish/lumberjack <repo url>` tracks.
+  bump-homebrew-formula:
+    needs: [release-please, release-cli]
+    if: ${{ needs.release-please.outputs.cli_release_created == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.cli_tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Rewrite the formula's url and sha256
+        run: |
+          set -euo pipefail
+          url="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          sha=$(curl -fsSL "$url" | sha256sum | cut -d' ' -f1)
+          sed -i \
+            -e "s|^  url .*|  url \"$url\"|" \
+            -e "s|^  sha256 .*|  sha256 \"$sha\"|" \
+            HomebrewFormula/lumberjack.rb
+          grep -E '^  (url|sha256) ' HomebrewFormula/lumberjack.rb
+      - name: Commit the bump
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "formula already points at $TAG"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: point Homebrew formula at ${TAG}"
+          git push origin main
+
   # Merging the app's Release PR tagged this push `macos/vX.Y.Z` — build and
   # publish its .dmg for it.
   release-macos:
