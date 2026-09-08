@@ -58,7 +58,7 @@ func runUninstall(out io.Writer, opts uninstallOptions) error {
 	}
 
 	if !opts.cliOnly {
-		svc, err := daemon.NewLifecycle("", "", version)
+		svc, err := daemon.NewLifecycle("", "", cli.Version)
 		if err != nil {
 			return err
 		}

@@ -139,7 +139,7 @@ func runInstall(out io.Writer, opts installOptions) error {
 			}
 			daemonExe = resolved
 		}
-		svc, err := daemon.NewLifecycle(opts.socketPath, daemonExe, version)
+		svc, err := daemon.NewLifecycle(opts.socketPath, daemonExe, cli.Version)
 		if err != nil {
 			return err
 		}

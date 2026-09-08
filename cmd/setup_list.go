@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/spf13/cobra"
 )
@@ -19,11 +21,11 @@ func newSetupListCmd() *cobra.Command {
 }
 
 func runSetupList(cmd *cobra.Command, _ []string) error {
-	format, err := outputFormat(cmd)
+	format, err := cli.OutputFormat(cmd)
 	if err != nil {
 		return err
 	}
-	_, cfg, err := loadWorktreeConfig()
+	_, cfg, err := cli.LoadWorktreeConfig()
 	if err != nil {
 		return err
 	}

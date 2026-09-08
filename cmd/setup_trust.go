@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/setup"
 	"github.com/ceilingfish/lumberjack/pkg/client"
@@ -19,14 +21,14 @@ func newSetupTrustCmd() *cobra.Command {
 			"this worktree as one you have agreed to run, so `setup-steps run` " +
 			"and the daemon run its commands without asking again. Every " +
 			"checksum trusted this way stays trusted, so switching between " +
-			"branches with different setup steps only asks once per version.",
+			"branches with different setup steps only asks once per cli.Version.",
 		Args: cobra.NoArgs,
 		RunE: runSetupTrust,
 	}
 }
 
 func runSetupTrust(cmd *cobra.Command, _ []string) error {
-	format, err := outputFormat(cmd)
+	format, err := cli.OutputFormat(cmd)
 	if err != nil {
 		return err
 	}
@@ -41,11 +43,11 @@ func runSetupTrust(cmd *cobra.Command, _ []string) error {
 	if res.ConfigPath == "" {
 		return fmt.Errorf("no %s governs %s", setup.ConfigFileName, res.Worktree)
 	}
-	ref, err := cwdAbs()
+	ref, err := cli.CwdAbs()
 	if err != nil {
 		return err
 	}
-	return withClient(cmd, func(ctx context.Context, cl *client.Client) error {
+	return cli.WithClient(cmd, func(ctx context.Context, cl *client.Client) error {
 		if _, err := cl.TrustSetupSteps(ctx, ref, setup.Fingerprint(res.Raw)); err != nil {
 			return err
 		}

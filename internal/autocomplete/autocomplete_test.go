@@ -605,3 +605,127 @@ func TestCompletionColorFollowsNoColor(t *testing.T) {
 		t.Error("colour should be disabled off a terminal")
 	}
 }
+
+func TestLineIsTheRCLineForTheShell(t *testing.T) {
+	if got := Line("zsh"); got != lines["zsh"] {
+		t.Errorf("Line(zsh) = %q, want %q", got, lines["zsh"])
+	}
+	if got := Line("tcsh"); got != "" {
+		t.Errorf("Line(tcsh) = %q, want empty for an unsupported shell", got)
+	}
+}
+
+func TestRCPathForPowershell(t *testing.T) {
+	home := fakeHome(t)
+	got, err := rcPath("powershell", "linux", home, func(string) bool { return false })
+	if err != nil {
+		t.Fatalf("rcPath: %v", err)
+	}
+	if got != powershellProfilePath("linux", home) {
+		t.Errorf("rcPath = %q, want the powershell profile", got)
+	}
+}
+
+// A directory where the rc file should be makes every write fail; the install
+// warns and prints the manual instruction rather than failing.
+func TestInstallWriteFailureWarnsAndInstructs(t *testing.T) {
+	home := fakeHome(t)
+	fakeInteractive(t, true)
+	if err := os.Mkdir(filepath.Join(home, ".zshrc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	Install(&out, &errOut, Options{Shell: "zsh"})
+	if !strings.Contains(errOut.String(), "by hand") {
+		t.Errorf("errOut = %q, want the manual instruction", errOut.String())
+	}
+}
+
+func TestAppendLineToAnUnwritablePath(t *testing.T) {
+	dir := t.TempDir()
+	rc := filepath.Join(dir, "rc")
+	if err := os.Mkdir(rc, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendLine(rc, "line"); err == nil {
+		t.Error("expected appending to a directory to fail")
+	}
+}
+
+func TestUninstallEditFailureWarns(t *testing.T) {
+	home := fakeHome(t)
+	fakeInteractive(t, true)
+	rc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(rc, []byte(lines["zsh"]+"\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(home, 0o500); err != nil {
+		t.Skipf("cannot drop directory permissions here: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(home, 0o755) })
+	scriptConfirm(t, true)
+
+	var out, errOut bytes.Buffer
+	Uninstall(&out, &errOut)
+	if !strings.Contains(errOut.String(), "editing") {
+		t.Errorf("errOut = %q, want the edit failure warned", errOut.String())
+	}
+}
+
+func TestConfirmAppendIgnoresAnEmptyRead(t *testing.T) {
+	prev := cli.RawTerminal
+	cli.RawTerminal = func() (io.Reader, func(), error) {
+		return &keyReader{keys: []string{"", "y"}}, func() {}, nil
+	}
+	t.Cleanup(func() { cli.RawTerminal = prev })
+
+	got, err := confirmAppend(io.Discard, "/home/u/.zshrc", "line")
+	if err != nil {
+		t.Fatalf("confirmAppend: %v", err)
+	}
+	if !got {
+		t.Error("confirmAppend = false, want the empty read skipped and the y taken")
+	}
+}
+
+// On Windows there is no `ps` to ask, so the parent process is unknown and the
+// shell is detected from $SHELL instead.
+func TestParentProcessNameOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only meaningful on Windows")
+	}
+	if got := parentProcessName(); got != "" {
+		t.Errorf("parentProcessName = %q, want empty on Windows", got)
+	}
+}
+
+// Install is also reachable with a shell Validate would have rejected; the
+// unsupported shell warns rather than panicking.
+func TestInstallWithAnUnsupportedShellWarns(t *testing.T) {
+	fakeHome(t)
+	fakeInteractive(t, true)
+	var out, errOut bytes.Buffer
+	Install(&out, &errOut, Options{Shell: "tcsh"})
+	if !strings.Contains(errOut.String(), "unsupported shell") {
+		t.Errorf("errOut = %q, want the unsupported shell warned", errOut.String())
+	}
+}
+
+// An rc file that exists but cannot be written surfaces as a warning plus the
+// manual instruction, leaving the install itself successful.
+func TestInstallAppendFailureWarnsAndInstructs(t *testing.T) {
+	home := fakeHome(t)
+	fakeInteractive(t, true)
+	rc := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(rc, []byte("export A=1\n"), 0o400); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(rc, 0o400); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	Install(&out, &errOut, Options{Shell: "zsh"})
+	if !strings.Contains(errOut.String(), "writing") || !strings.Contains(errOut.String(), "by hand") {
+		t.Errorf("errOut = %q, want the write failure warned and the manual instruction", errOut.String())
+	}
+}

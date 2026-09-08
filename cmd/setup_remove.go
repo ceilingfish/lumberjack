@@ -3,6 +3,8 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/setup"
 	"github.com/spf13/cobra"
@@ -22,7 +24,7 @@ func newSetupRemoveCmd() *cobra.Command {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
-			_, cfg, err := loadWorktreeConfig()
+			_, cfg, err := cli.LoadWorktreeConfig()
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
@@ -33,12 +35,12 @@ func newSetupRemoveCmd() *cobra.Command {
 }
 
 func runSetupRemove(cmd *cobra.Command, args []string) error {
-	format, err := outputFormat(cmd)
+	format, err := cli.OutputFormat(cmd)
 	if err != nil {
 		return err
 	}
 	command := args[0]
-	root, cfg, err := loadWorktreeConfig()
+	root, cfg, err := cli.LoadWorktreeConfig()
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"fmt"
@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
-	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -38,9 +37,9 @@ func (t *tabW) flush() error {
 	return t.w.Flush()
 }
 
-// emitRepositories renders repos per format: a bare JSON array, or the
+// EmitRepositories renders repos per format: a bare JSON array, or the
 // existing table (colourised when color is true).
-func emitRepositories(w io.Writer, format present.Format, repos []*lumberjackv1.Repository) error {
+func EmitRepositories(w io.Writer, format present.Format, repos []*lumberjackv1.Repository) error {
 	if format == present.JSON {
 		return present.WriteJSONList(w, repos)
 	}
@@ -63,8 +62,8 @@ func renderRepositories(w io.Writer, repos []*lumberjackv1.Repository, color boo
 	return t.flush()
 }
 
-// emitRepositoryDetail renders one repository's detail per format.
-func emitRepositoryDetail(w io.Writer, format present.Format, r *lumberjackv1.Repository) error {
+// EmitRepositoryDetail renders one repository's detail per format.
+func EmitRepositoryDetail(w io.Writer, format present.Format, r *lumberjackv1.Repository) error {
 	if format == present.JSON {
 		return present.WriteJSONObject(w, r)
 	}
@@ -86,14 +85,14 @@ func renderRepositoryDetail(w io.Writer, r *lumberjackv1.Repository, color bool)
 	if r.GetLastSyncError() != "" {
 		t.row("Last error:\t%s\n", present.StatusErr(r.GetLastSyncError(), color))
 	}
-	if cli.SetupConsentPending(r) {
+	if SetupConsentPending(r) {
 		t.row("Setup steps:\t⚠ run-command consent pending\n")
 	}
 	return t.flush()
 }
 
-// emitWorktrees renders a repository's worktrees per format.
-func emitWorktrees(w io.Writer, format present.Format, wts []*lumberjackv1.Worktree) error {
+// EmitWorktrees renders a repository's worktrees per format.
+func EmitWorktrees(w io.Writer, format present.Format, wts []*lumberjackv1.Worktree) error {
 	if format == present.JSON {
 		return present.WriteJSONList(w, wts)
 	}
@@ -120,8 +119,8 @@ func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree, color bool) erro
 	return t.flush()
 }
 
-// emitTidyMoves renders tidy's moves per format: a bare JSON array, or a table.
-func emitTidyMoves(w io.Writer, format present.Format, moves []*lumberjackv1.TidyMove, dryRun bool) error {
+// EmitTidyMoves renders tidy's moves per format: a bare JSON array, or a table.
+func EmitTidyMoves(w io.Writer, format present.Format, moves []*lumberjackv1.TidyMove, dryRun bool) error {
 	if format == present.JSON {
 		return present.WriteJSONList(w, moves)
 	}
@@ -164,9 +163,9 @@ func tidyResult(m *lumberjackv1.TidyMove, dryRun, color bool) string {
 	}
 }
 
-// renderWorktreeChanges prints a branch/PR/action table of the per-branch
+// RenderWorktreeChanges prints a branch/PR/action table of the per-branch
 // changes a sync or init made. It writes nothing when there are no changes.
-func renderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange, color bool) error {
+func RenderWorktreeChanges(w io.Writer, changes []*lumberjackv1.WorktreeChange, color bool) error {
 	if len(changes) == 0 {
 		return nil
 	}

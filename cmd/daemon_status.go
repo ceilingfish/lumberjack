@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/daemon"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
@@ -18,11 +20,11 @@ func newDaemonStatusCmd() *cobra.Command {
 		Short: "Report whether the daemon is installed and running",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			format, err := outputFormat(cmd)
+			format, err := cli.OutputFormat(cmd)
 			if err != nil {
 				return err
 			}
-			svc, err := daemon.NewLifecycle("", "", version)
+			svc, err := daemon.NewLifecycle("", "", cli.Version)
 			if err != nil {
 				return err
 			}

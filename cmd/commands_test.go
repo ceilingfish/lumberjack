@@ -621,13 +621,13 @@ func TestCmdSetLoginPicker(t *testing.T) {
 	serveStub(t, stub)
 
 	// Substitute the interactive picker with a deterministic choice.
-	prev := loginPicker
+	prev := cli.LoginPicker
 	var offered []string
-	loginPicker = func(_ *cobra.Command, logins []string, _ string) (string, error) {
+	cli.LoginPicker = func(_ *cobra.Command, logins []string, _ string) (string, error) {
 		offered = logins
 		return "work", nil
 	}
-	t.Cleanup(func() { loginPicker = prev })
+	t.Cleanup(func() { cli.LoginPicker = prev })
 
 	out, err := run(t, "", "set-login", "--repository", "n")
 	if err != nil {
@@ -793,13 +793,13 @@ func lockedMove() *lumberjackv1.TidyMove {
 func answerLockPrompt(t *testing.T, strategy lumberjackv1.LockStrategy) *[]string {
 	t.Helper()
 	var asked []string
-	prevInteractive, prevPrompter := cli.InteractiveTerminal, lockPrompter
+	prevInteractive, prevPrompter := cli.InteractiveTerminal, cli.LockPrompter
 	cli.InteractiveTerminal = func() bool { return true }
-	lockPrompter = func(_ *cobra.Command, path, _ string) (lumberjackv1.LockStrategy, error) {
+	cli.LockPrompter = func(_ *cobra.Command, path, _ string) (lumberjackv1.LockStrategy, error) {
 		asked = append(asked, path)
 		return strategy, nil
 	}
-	t.Cleanup(func() { cli.InteractiveTerminal, lockPrompter = prevInteractive, prevPrompter })
+	t.Cleanup(func() { cli.InteractiveTerminal, cli.LockPrompter = prevInteractive, prevPrompter })
 	return &asked
 }
 

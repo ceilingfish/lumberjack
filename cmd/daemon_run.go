@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/daemon"
 	"github.com/spf13/cobra"
 )
@@ -17,7 +18,7 @@ func newDaemonRunCmd() *cobra.Command {
 		Short: "Run the daemon in the foreground",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			svc, err := daemon.NewPlatformService(socketPath, "", version)
+			svc, err := daemon.NewPlatformService(socketPath, "", cli.Version)
 			if err != nil {
 				return err
 			}

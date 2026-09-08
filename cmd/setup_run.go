@@ -33,7 +33,7 @@ func newSetupRunCmd() *cobra.Command {
 }
 
 func runSetupRun(cmd *cobra.Command, _ []string) error {
-	format, err := outputFormat(cmd)
+	format, err := cli.OutputFormat(cmd)
 	if err != nil {
 		return err
 	}
@@ -84,7 +84,7 @@ func consentToRunCommands(cmd *cobra.Command, out io.Writer, res *setup.Resolved
 		if checksum == steps.GetCurrentChecksum() || slices.Contains(steps.GetTrustedChecksums(), checksum) {
 			return true, nil
 		}
-		reason = res.ConfigPath + " is neither the default branch's version nor a trusted one"
+		reason = res.ConfigPath + " is neither the default branch's cli.Version nor a trusted one"
 	}
 	if _, err := fmt.Fprintf(out, "%s, so its command(s) have not been reviewed:\n", reason); err != nil {
 		return false, err
@@ -105,11 +105,11 @@ func consentToRunCommands(cmd *cobra.Command, out io.Writer, res *setup.Resolved
 }
 
 func repositorySetupSteps(cmd *cobra.Command) (steps *lumberjackv1.SetupSteps, reason string) {
-	ref, err := cwdAbs()
+	ref, err := cli.CwdAbs()
 	if err != nil {
 		return nil, "the current directory could not be resolved"
 	}
-	err = withClient(cmd, func(ctx context.Context, cl *client.Client) error {
+	err = cli.WithClient(cmd, func(ctx context.Context, cl *client.Client) error {
 		repo, err := cl.GetRepository(ctx, ref)
 		if err != nil {
 			return err

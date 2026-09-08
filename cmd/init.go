@@ -45,11 +45,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolving path %q: %w", path, err)
 	}
-	format, err := outputFormat(cmd)
+	format, err := cli.OutputFormat(cmd)
 	if err != nil {
 		return err
 	}
-	return withClient(cmd, func(ctx context.Context, c *client.Client) error {
+	return cli.WithClient(cmd, func(ctx context.Context, c *client.Client) error {
 		repo, adopted, err := c.InitRepository(ctx, abs)
 		if err != nil {
 			return err
@@ -69,7 +69,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		// A branch/PR/action table of the worktrees adopted during registration.
-		if err := renderWorktreeChanges(out, adopted, format == present.Color); err != nil {
+		if err := cli.RenderWorktreeChanges(out, adopted, format == present.Color); err != nil {
 			return err
 		}
 		return cli.PromptSetupConsent(ctx, cmd, c, repo.GetDirPrefix(), repo)

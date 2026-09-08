@@ -45,19 +45,19 @@ func newTidyCmd() *cobra.Command {
 			"Use --dry-run to see what would move without moving anything.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ref, err := resolveRepositoryRef(repository)
+			ref, err := cli.ResolveRepositoryRef(repository)
 			if err != nil {
 				return err
 			}
-			format, err := outputFormat(cmd)
+			format, err := cli.OutputFormat(cmd)
 			if err != nil {
 				return err
 			}
-			strategy, err := parseLockStrategy(lockStrategy)
+			strategy, err := cli.ParseLockStrategy(lockStrategy)
 			if err != nil {
 				return err
 			}
-			return withClient(cmd, func(ctx context.Context, cl *client.Client) error {
+			return cli.WithClient(cmd, func(ctx context.Context, cl *client.Client) error {
 				opts := client.TidyOptions{
 					Repository: ref, Worktree: worktree, DryRun: dryRun,
 					LockStrategy: strategy,
@@ -81,7 +81,7 @@ func newTidyCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return emitTidyMoves(cmd.OutOrStdout(), format, moves, dryRun)
+				return cli.EmitTidyMoves(cmd.OutOrStdout(), format, moves, dryRun)
 			})
 		},
 	}
@@ -91,12 +91,12 @@ func newTidyCmd() *cobra.Command {
 	c.Flags().BoolVar(&dryRun, "dry-run", false,
 		"report what would move without moving anything")
 	c.Flags().StringVar(&lockStrategy, "lock-strategy", "",
-		fmt.Sprintf("what to do with a locked worktree: %v (default: ask)", lockStrategyValues()))
+		fmt.Sprintf("what to do with a locked worktree: %v (default: ask)", cli.LockStrategyValues()))
 	_ = c.RegisterFlagCompletionFunc("lock-strategy",
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-			return lockStrategyValues(), cobra.ShellCompDirectiveNoFileComp
+			return cli.LockStrategyValues(), cobra.ShellCompDirectiveNoFileComp
 		})
-	addRepositoryFlag(c, &repository)
+	cli.AddRepositoryFlag(c, &repository)
 	return c
 }
 
@@ -125,7 +125,7 @@ func resolveLockedWorktrees(
 		if !m.GetLocked() || m.GetError() != "" {
 			continue
 		}
-		strategy, err := lockPrompter(cmd, m.GetFrom(), m.GetLockReason())
+		strategy, err := cli.LockPrompter(cmd, m.GetFrom(), m.GetLockReason())
 		if err != nil {
 			return nil, err
 		}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
 )
@@ -22,40 +24,40 @@ func TestCompleteRepositoryNames(t *testing.T) {
 		{DirPrefix: "alpha"}, {DirPrefix: "beta"},
 	}})
 
-	got := completeRepositoryNames(completionCmd(context.Background()))
+	got := cli.CompleteRepositoryNames(completionCmd(context.Background()))
 	if len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
-		t.Errorf("completeRepositoryNames = %v, want the tracked repository names", got)
+		t.Errorf("cli.CompleteRepositoryNames = %v, want the tracked repository names", got)
 	}
 }
 
 func TestCompleteLogins(t *testing.T) {
 	serveService(t, &coverStub{logins: []string{"personal", "work"}})
 
-	got := completeLogins(completionCmd(context.Background()), "n")
+	got := cli.CompleteLogins(completionCmd(context.Background()), "n")
 	if len(got) != 2 || got[0] != "personal" {
-		t.Errorf("completeLogins = %v, want the daemon's login list", got)
+		t.Errorf("cli.CompleteLogins = %v, want the daemon's login list", got)
 	}
 }
 
 func TestCompletionRPCFailureYieldsNoSuggestions(t *testing.T) {
 	serveService(t, &coverStub{err: errors.New("boom")})
 
-	if got := completeRepositoryNames(completionCmd(context.Background())); got != nil {
-		t.Errorf("completeRepositoryNames = %v, want no suggestions", got)
+	if got := cli.CompleteRepositoryNames(completionCmd(context.Background())); got != nil {
+		t.Errorf("cli.CompleteRepositoryNames = %v, want no suggestions", got)
 	}
-	if got := completeLogins(completionCmd(context.Background()), "n"); got != nil {
-		t.Errorf("completeLogins = %v, want no suggestions", got)
+	if got := cli.CompleteLogins(completionCmd(context.Background()), "n"); got != nil {
+		t.Errorf("cli.CompleteLogins = %v, want no suggestions", got)
 	}
 }
 
 func TestCompletionDialFailureYieldsNoSuggestions(t *testing.T) {
 	noDaemon(t)
 
-	if got := completeRepositoryNames(completionCmd(context.Background())); got != nil {
-		t.Errorf("completeRepositoryNames = %v, want no suggestions", got)
+	if got := cli.CompleteRepositoryNames(completionCmd(context.Background())); got != nil {
+		t.Errorf("cli.CompleteRepositoryNames = %v, want no suggestions", got)
 	}
-	if got := completeLogins(completionCmd(context.Background()), "n"); got != nil {
-		t.Errorf("completeLogins = %v, want no suggestions", got)
+	if got := cli.CompleteLogins(completionCmd(context.Background()), "n"); got != nil {
+		t.Errorf("cli.CompleteLogins = %v, want no suggestions", got)
 	}
 }
 
@@ -68,11 +70,11 @@ func TestCompletionDeadlineYieldsNoSuggestions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	if got := completeRepositoryNames(completionCmd(ctx)); got != nil {
-		t.Errorf("completeRepositoryNames = %v, want no suggestions past the deadline", got)
+	if got := cli.CompleteRepositoryNames(completionCmd(ctx)); got != nil {
+		t.Errorf("cli.CompleteRepositoryNames = %v, want no suggestions past the deadline", got)
 	}
-	if got := completeLogins(completionCmd(ctx), "n"); got != nil {
-		t.Errorf("completeLogins = %v, want no suggestions past the deadline", got)
+	if got := cli.CompleteLogins(completionCmd(ctx), "n"); got != nil {
+		t.Errorf("cli.CompleteLogins = %v, want no suggestions past the deadline", got)
 	}
 }
 

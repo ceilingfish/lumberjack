@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/daemon"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
@@ -18,11 +20,11 @@ func newDaemonStopCmd() *cobra.Command {
 		Short: "Stop the daemon if it is running",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			format, err := outputFormat(cmd)
+			format, err := cli.OutputFormat(cmd)
 			if err != nil {
 				return err
 			}
-			svc, err := daemon.NewLifecycle("", "", version)
+			svc, err := daemon.NewLifecycle("", "", cli.Version)
 			if err != nil {
 				return err
 			}

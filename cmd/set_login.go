@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
@@ -35,18 +37,18 @@ func newSetLoginCmd() *cobra.Command {
 			if len(args) != 0 {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
-			ref, err := resolveRepositoryRef(repository)
+			ref, err := cli.ResolveRepositoryRef(repository)
 			if err != nil {
 				return nil, cobra.ShellCompDirectiveNoFileComp
 			}
-			return completeLogins(cmd, ref), cobra.ShellCompDirectiveNoFileComp
+			return cli.CompleteLogins(cmd, ref), cobra.ShellCompDirectiveNoFileComp
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ref, err := resolveRepositoryRef(repository)
+			ref, err := cli.ResolveRepositoryRef(repository)
 			if err != nil {
 				return err
 			}
-			format, err := outputFormat(cmd)
+			format, err := cli.OutputFormat(cmd)
 			if err != nil {
 				return err
 			}
@@ -54,19 +56,19 @@ func newSetLoginCmd() *cobra.Command {
 			if len(args) == 1 {
 				login = args[0]
 			}
-			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
+			return cli.WithClient(cmd, func(ctx context.Context, c *client.Client) error {
 				return setLogin(ctx, cmd, c, ref, login, format)
 			})
 		},
 	}
 
-	addRepositoryFlag(c, &repository)
+	cli.AddRepositoryFlag(c, &repository)
 	return c
 }
 
 // setLogin sets the gh login for the repository resolved by ref and reports the
 // result. ref is either the current working directory (no --repository) or the
-// value of --repository, per resolveRepositoryRef.
+// value of --repository, per cli.ResolveRepositoryRef.
 //
 // An empty login means the user did not name one: the daemon reports the
 // accounts gh is authenticated as for the repo's host and the user picks one
@@ -81,7 +83,7 @@ func setLogin(ctx context.Context, cmd *cobra.Command, cl *client.Client, ref, l
 		if len(logins) == 0 {
 			return errors.New("gh has no authenticated accounts for this repository's host; run `gh auth login` first")
 		}
-		login, err = loginPicker(cmd, logins, current)
+		login, err = cli.LoginPicker(cmd, logins, current)
 		if err != nil {
 			return err
 		}

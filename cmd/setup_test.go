@@ -284,7 +284,7 @@ func TestCmdSetupRunPromptsWhenTheRepositoryHasNoConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup-steps run: %v", err)
 	}
-	if !strings.Contains(out, "neither the default branch's version nor a trusted one") {
+	if !strings.Contains(out, "neither the default branch's cli.Version nor a trusted one") {
 		t.Errorf("out = %q, want the untrusted config explained", out)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/grpc"
 )
@@ -197,4 +199,11 @@ func (s *coverStub) Sync(_ *lumberjackv1.SyncRequest, stream grpc.ServerStreamin
 
 func pendingSetupSteps(commands ...string) *lumberjackv1.SetupSteps {
 	return &lumberjackv1.SetupSteps{IsDefined: true, CurrentChecksum: "current", Steps: commands}
+}
+
+func onATerminal(t *testing.T) {
+	t.Helper()
+	prev := cli.InteractiveTerminal
+	cli.InteractiveTerminal = func() bool { return true }
+	t.Cleanup(func() { cli.InteractiveTerminal = prev })
 }

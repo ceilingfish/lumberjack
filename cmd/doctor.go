@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/doctor"
 	"github.com/spf13/cobra"
 )
@@ -10,12 +11,12 @@ func newDoctorCmd() *cobra.Command {
 		Use:   "doctor",
 		Short: "Check that required host prerequisites (git, gh) are available",
 		Long: "Verifies that git and the GitHub CLI (gh) can be found and that gh " +
-			"is authenticated, reporting each tool's location and version. Exits " +
+			"is authenticated, reporting each tool's location and cli.Version. Exits " +
 			"non-zero if any check fails, so it can be used in scripts.\n\n" +
 			"doctor is CLI-local: it does not require a running daemon.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			format, err := outputFormat(cmd)
+			format, err := cli.OutputFormat(cmd)
 			if err != nil {
 				return err
 			}

@@ -18,20 +18,20 @@ func newStatusCmd() *cobra.Command {
 			"working directory, or for the repository named by --repository.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			ref, err := resolveRepositoryRef(repository)
+			ref, err := cli.ResolveRepositoryRef(repository)
 			if err != nil {
 				return err
 			}
-			format, err := outputFormat(cmd)
+			format, err := cli.OutputFormat(cmd)
 			if err != nil {
 				return err
 			}
-			return withClient(cmd, func(ctx context.Context, c *client.Client) error {
+			return cli.WithClient(cmd, func(ctx context.Context, c *client.Client) error {
 				repo, err := c.GetRepository(ctx, ref)
 				if err != nil {
 					return err
 				}
-				if err := emitRepositoryDetail(cmd.OutOrStdout(), format, repo); err != nil {
+				if err := cli.EmitRepositoryDetail(cmd.OutOrStdout(), format, repo); err != nil {
 					return err
 				}
 				return cli.PromptSetupConsent(ctx, cmd, c, ref, repo)
@@ -39,6 +39,6 @@ func newStatusCmd() *cobra.Command {
 		},
 	}
 
-	addRepositoryFlag(c, &repository)
+	cli.AddRepositoryFlag(c, &repository)
 	return c
 }

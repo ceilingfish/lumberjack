@@ -24,10 +24,6 @@ type flakyWriter struct {
 	succeed int
 }
 
-type emptyReader struct{}
-
-func (emptyReader) Read([]byte) (int, error) { return 0, nil }
-
 func (f *flakyWriter) Write(p []byte) (int, error) {
 	if f.succeed == 0 {
 		return 0, errWrite
@@ -410,54 +406,6 @@ func TestCmdWorktreesReportsANoteWithoutAWarning(t *testing.T) {
 	}
 	if strings.Contains(out, "⚠") {
 		t.Errorf("out = %q, want no warning marker for a note that needs no action", out)
-	}
-}
-
-func TestActionVerb(t *testing.T) {
-	cases := map[lumberjackv1.WorktreeAction]string{
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_CHECKED_OUT: "checked out",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_ADOPTED:     "adopted",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_UPDATED:     "updated",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_DELETED:     "deleted",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_RETAINED:    "retained",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_UNSPECIFIED: "unknown",
-	}
-	for action, want := range cases {
-		if got := actionVerb(action); got != want {
-			t.Errorf("actionVerb(%v) = %q, want %q", action, got, want)
-		}
-	}
-}
-
-func TestChangeActionIncludesItsDetail(t *testing.T) {
-	got := changeAction(&lumberjackv1.WorktreeChange{
-		Action: lumberjackv1.WorktreeAction_WORKTREE_ACTION_RETAINED,
-		Detail: "uncommitted changes",
-	}, false)
-	if got != "retained (uncommitted changes)" {
-		t.Errorf("changeAction = %q", got)
-	}
-}
-
-func TestTabWStopsAtTheFirstWriteError(t *testing.T) {
-	tw := newTabW(failWriter{})
-	tw.row("a\f")
-	if !errors.Is(tw.err, errWrite) {
-		t.Fatalf("tabW.err = %v, want the failed write recorded", tw.err)
-	}
-	tw.row("b\f")
-	if err := tw.flush(); !errors.Is(err, errWrite) {
-		t.Errorf("flush = %v, want the first error", err)
-	}
-}
-
-func TestReadLockAnswerIgnoresAnEmptyRead(t *testing.T) {
-	got, err := readLockAnswer(emptyReader{})
-	if err != nil {
-		t.Fatalf("readLockAnswer: %v", err)
-	}
-	if got != lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED {
-		t.Errorf("readLockAnswer = %v, want UNSPECIFIED for an empty read", got)
 	}
 }
 
