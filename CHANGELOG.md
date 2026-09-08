@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/ceilingfish/lumberjack/compare/v0.4.0...v0.4.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* link a worktree to a PR whose lifetime falls between sync ticks ([#103](https://github.com/ceilingfish/lumberjack/issues/103)) ([50b5190](https://github.com/ceilingfish/lumberjack/commit/50b5190328a8c88e21734eadfaa098d0837697fa)), closes [#98](https://github.com/ceilingfish/lumberjack/issues/98)
+
 ## [0.4.0](https://github.com/ceilingfish/lumberjack/compare/v0.3.0...v0.4.0) (2026-09-06)
 
 
