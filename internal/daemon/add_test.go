@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/setup"
 )
 
@@ -221,5 +222,42 @@ func TestAddWorktreeFetchFailureAborts(t *testing.T) {
 	}
 	if wts, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(wts) != 0 {
 		t.Errorf("worktrees = %d, want none recorded", len(wts))
+	}
+}
+
+func TestAddWorktreeFailsWhenLookupErrors(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	if err := h.db.Close(); err != nil {
+		t.Fatalf("Close db: %v", err)
+	}
+
+	if _, err := h.svc.AddWorktree(context.Background(), repo, "feature/a"); err == nil {
+		t.Fatal("AddWorktree succeeded with an unusable database")
+	}
+}
+
+func TestAddWorktreeRollsBackDirWhenRecordingFails(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	dir := filepath.Join(h.parent, "n-a")
+	// A row already holds the directory the new branch resolves to, so the
+	// (repository_id, directory_path) uniqueness rejects the insert after git
+	// has already put the worktree on disk.
+	if err := h.db.CreateWorktree(context.Background(), &schema.Worktree{
+		RepositoryID: repo.ID, BranchName: "other", DirectoryPath: dir,
+	}); err != nil {
+		t.Fatalf("seed CreateWorktree: %v", err)
+	}
+
+	_, err := h.svc.AddWorktree(context.Background(), repo, "feature/a")
+	if err == nil {
+		t.Fatal("AddWorktree succeeded despite the directory collision")
+	}
+	if !strings.Contains(err.Error(), "recording worktree for feature/a") {
+		t.Errorf("error = %v, want it to name the failed recording", err)
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Errorf("worktree directory survived the rollback: %v", statErr)
 	}
 }
