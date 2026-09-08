@@ -49,9 +49,5 @@ func runSetupRemove(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	msg := fmt.Sprintf("Removed setup command: %s", command)
-	if format == present.JSON {
-		return present.WriteJSONObject(cmd.OutOrStdout(), setupResult{Message: msg})
-	}
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), msg)
-	return err
+	return present.WriteMessage(cmd.OutOrStdout(), format, msg)
 }

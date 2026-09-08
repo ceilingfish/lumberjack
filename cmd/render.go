@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"text/tabwriter"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -85,7 +86,7 @@ func renderRepositoryDetail(w io.Writer, r *lumberjackv1.Repository, color bool)
 	if r.GetLastSyncError() != "" {
 		t.row("Last error:\t%s\n", present.StatusErr(r.GetLastSyncError(), color))
 	}
-	if setupConsentPending(r) {
+	if cli.SetupConsentPending(r) {
 		t.row("Setup steps:\t⚠ run-command consent pending\n")
 	}
 	return t.flush()

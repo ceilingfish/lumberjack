@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
@@ -791,13 +793,13 @@ func lockedMove() *lumberjackv1.TidyMove {
 func answerLockPrompt(t *testing.T, strategy lumberjackv1.LockStrategy) *[]string {
 	t.Helper()
 	var asked []string
-	prevInteractive, prevPrompter := interactiveTerminal, lockPrompter
-	interactiveTerminal = func() bool { return true }
+	prevInteractive, prevPrompter := cli.InteractiveTerminal, lockPrompter
+	cli.InteractiveTerminal = func() bool { return true }
 	lockPrompter = func(_ *cobra.Command, path, _ string) (lumberjackv1.LockStrategy, error) {
 		asked = append(asked, path)
 		return strategy, nil
 	}
-	t.Cleanup(func() { interactiveTerminal, lockPrompter = prevInteractive, prevPrompter })
+	t.Cleanup(func() { cli.InteractiveTerminal, lockPrompter = prevInteractive, prevPrompter })
 	return &asked
 }
 
@@ -930,9 +932,9 @@ func TestCmdTidyDryRunDoesNotPrompt(t *testing.T) {
 func TestCmdTidyWithoutATerminalDoesNotProbe(t *testing.T) {
 	stub := &stubService{tidyMoves: []*lumberjackv1.TidyMove{lockedMove()}}
 	serveStub(t, stub)
-	prev := interactiveTerminal
-	interactiveTerminal = func() bool { return false }
-	t.Cleanup(func() { interactiveTerminal = prev })
+	prev := cli.InteractiveTerminal
+	cli.InteractiveTerminal = func() bool { return false }
+	t.Cleanup(func() { cli.InteractiveTerminal = prev })
 
 	out, err := run(t, "", "tidy", "--repository", "n")
 	if err != nil {

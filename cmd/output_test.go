@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
@@ -460,8 +462,8 @@ func TestReadLockAnswerIgnoresAnEmptyRead(t *testing.T) {
 }
 
 func TestRawTerminalWithoutATerminal(t *testing.T) {
-	if _, _, err := rawTerminal(); !errors.Is(err, errNoTerminal) {
-		t.Errorf("rawTerminal err = %v, want errNoTerminal under `go test`", err)
+	if _, _, err := cli.RawTerminal(); !errors.Is(err, cli.ErrNoTerminal) {
+		t.Errorf("cli.RawTerminal err = %v, want cli.ErrNoTerminal under `go test`", err)
 	}
 }
 
@@ -575,7 +577,7 @@ func TestPromptSetupConsentSurfacesFailedWrites(t *testing.T) {
 			cmd.SetIn(strings.NewReader("y\n"))
 
 			repo := &lumberjackv1.Repository{DirPrefix: "n", SetupSteps: pendingSetupSteps("make setup")}
-			err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo)
+			err := cli.PromptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo)
 			if !errors.Is(err, errWrite) {
 				t.Errorf("err = %v, want the failed write", err)
 			}
@@ -591,7 +593,7 @@ func TestPromptSetupConsentSurfacesAFailedRecord(t *testing.T) {
 	cmd.SetIn(strings.NewReader("y\n"))
 
 	repo := &lumberjackv1.Repository{DirPrefix: "n", SetupSteps: pendingSetupSteps("make setup")}
-	if err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo); err == nil {
+	if err := cli.PromptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo); err == nil {
 		t.Error("expected the failed consent record to surface")
 	}
 }
@@ -609,7 +611,7 @@ func TestRunInstallDefaultsTheBinDirToTheHomeDirectory(t *testing.T) {
 	if err := runInstall(&out, installOptions{exe: exe, cliOnly: true}); err != nil {
 		t.Fatalf("runInstall: %v", err)
 	}
-	installed := filepath.Join(home, ".local", "bin", cliBinaryName)
+	installed := filepath.Join(home, ".local", "bin", cli.BinaryName)
 	if _, err := os.Stat(installed); err != nil {
 		t.Errorf("expected the CLI at %s: %v", installed, err)
 	}

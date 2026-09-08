@@ -1,12 +1,10 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"io"
-	"strings"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
@@ -88,7 +86,7 @@ func deleteWorktree(ctx context.Context, cmd *cobra.Command, cl *client.Client, 
 	if _, err := fmt.Fprintf(out, "Warning: %s\n", resp.GetMessage()); err != nil {
 		return err
 	}
-	if !confirm(cmd, fmt.Sprintf("Delete %s and lose %d commit(s)?", worktree, resp.GetCommitsAtRisk())) {
+	if !cli.Confirm(cmd, fmt.Sprintf("Delete %s and lose %d commit(s)?", worktree, resp.GetCommitsAtRisk())) {
 		_, err := fmt.Fprintln(out, "Aborted.")
 		return err
 	}
@@ -99,19 +97,4 @@ func deleteWorktree(ctx context.Context, cmd *cobra.Command, cl *client.Client, 
 	}
 	_, err = fmt.Fprintln(out, resp.GetMessage())
 	return err
-}
-
-// confirm prompts for a yes/no answer on the command's input, defaulting to no.
-func confirm(cmd *cobra.Command, prompt string) bool {
-	return confirmOn(cmd, cmd.OutOrStdout(), prompt)
-}
-
-func confirmOn(cmd *cobra.Command, w io.Writer, prompt string) bool {
-	_, _ = fmt.Fprintf(w, "%s [y/N] ", prompt)
-	scanner := bufio.NewScanner(cmd.InOrStdin())
-	if !scanner.Scan() {
-		return false
-	}
-	answer := strings.ToLower(strings.TrimSpace(scanner.Text()))
-	return answer == "y" || answer == "yes"
 }

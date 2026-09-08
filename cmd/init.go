@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
@@ -71,6 +72,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := renderWorktreeChanges(out, adopted, format == present.Color); err != nil {
 			return err
 		}
-		return promptSetupConsent(ctx, cmd, c, repo.GetDirPrefix(), repo)
+		return cli.PromptSetupConsent(ctx, cmd, c, repo.GetDirPrefix(), repo)
 	})
 }

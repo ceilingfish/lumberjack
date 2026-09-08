@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/spf13/cobra"
 )
 
@@ -23,18 +25,18 @@ func (k *keyReader) Read(p []byte) (int, error) {
 
 func scriptTerminal(t *testing.T, keys ...string) {
 	t.Helper()
-	prev := rawTerminal
-	rawTerminal = func() (io.Reader, func(), error) {
+	prev := cli.RawTerminal
+	cli.RawTerminal = func() (io.Reader, func(), error) {
 		return &keyReader{keys: keys}, func() {}, nil
 	}
-	t.Cleanup(func() { rawTerminal = prev })
+	t.Cleanup(func() { cli.RawTerminal = prev })
 }
 
 func failTerminal(t *testing.T, err error) {
 	t.Helper()
-	prev := rawTerminal
-	rawTerminal = func() (io.Reader, func(), error) { return nil, nil, err }
-	t.Cleanup(func() { rawTerminal = prev })
+	prev := cli.RawTerminal
+	cli.RawTerminal = func() (io.Reader, func(), error) { return nil, nil, err }
+	t.Cleanup(func() { cli.RawTerminal = prev })
 }
 
 const (
@@ -130,7 +132,7 @@ func TestPickLoginInputEndsWithoutAnAnswer(t *testing.T) {
 }
 
 func TestPickLoginWithoutATerminal(t *testing.T) {
-	failTerminal(t, errNoTerminal)
+	failTerminal(t, cli.ErrNoTerminal)
 	cmd, _ := pickerCmd(t)
 
 	_, err := pickLogin(cmd, []string{"personal"}, "")

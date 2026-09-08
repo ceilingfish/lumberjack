@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/setup"
 	"github.com/ceilingfish/lumberjack/pkg/client"
@@ -48,7 +49,7 @@ func runSetupRun(cmd *cobra.Command, _ []string) error {
 	// Progress goes to stderr so `--format json` leaves stdout parseable.
 	progress := cmd.ErrOrStderr()
 	if len(res.Config.Steps) == 0 {
-		return writeSetupMessage(cmd, format, "No setup steps configured.")
+		return present.WriteMessage(cmd.OutOrStdout(), format, "No setup steps configured.")
 	}
 	if res.Inherited {
 		if _, err := fmt.Fprintf(progress, "Inheriting setup steps from %s\n", res.ConfigPath); err != nil {
@@ -69,7 +70,7 @@ func runSetupRun(cmd *cobra.Command, _ []string) error {
 	if runErr != nil {
 		return fmt.Errorf("%s failed: %w", failedStep, runErr)
 	}
-	return writeSetupMessage(cmd, format,
+	return present.WriteMessage(cmd.OutOrStdout(), format,
 		fmt.Sprintf("Ran %d setup step(s) in %s", len(res.Config.Steps), res.Worktree))
 }
 
@@ -93,7 +94,7 @@ func consentToRunCommands(cmd *cobra.Command, out io.Writer, res *setup.Resolved
 			return false, err
 		}
 	}
-	if confirmOn(cmd, out, "Run these commands here now?") {
+	if cli.ConfirmOn(cmd, out, "Run these commands here now?") {
 		if _, err := fmt.Fprintln(out, "Running them this once — `lumberjack setup-steps trust` remembers them."); err != nil {
 			return false, err
 		}
@@ -120,14 +121,4 @@ func repositorySetupSteps(cmd *cobra.Command) (steps *lumberjackv1.SetupSteps, r
 		return nil, "this repository's trusted " + setup.ConfigFileName + " could not be read (" + err.Error() + ")"
 	}
 	return steps, ""
-}
-
-// writeSetupMessage prints a one-line outcome in the requested format, shared
-// by the setup subcommands that only report what they did.
-func writeSetupMessage(cmd *cobra.Command, format present.Format, msg string) error {
-	if format == present.JSON {
-		return present.WriteJSONObject(cmd.OutOrStdout(), setupResult{Message: msg})
-	}
-	_, err := fmt.Fprintln(cmd.OutOrStdout(), msg)
-	return err
 }

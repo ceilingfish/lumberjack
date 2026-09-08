@@ -6,14 +6,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 )
 
 func onATerminal(t *testing.T) {
 	t.Helper()
-	prev := interactiveTerminal
-	interactiveTerminal = func() bool { return true }
-	t.Cleanup(func() { interactiveTerminal = prev })
+	prev := cli.InteractiveTerminal
+	cli.InteractiveTerminal = func() bool { return true }
+	t.Cleanup(func() { cli.InteractiveTerminal = prev })
 }
 
 func TestPromptLockStrategy(t *testing.T) {
@@ -72,9 +74,9 @@ func TestPromptLockStrategyInputEndsWithoutAnAnswer(t *testing.T) {
 }
 
 func TestPromptLockStrategyWithoutATerminal(t *testing.T) {
-	prev := interactiveTerminal
-	interactiveTerminal = func() bool { return false }
-	t.Cleanup(func() { interactiveTerminal = prev })
+	prev := cli.InteractiveTerminal
+	cli.InteractiveTerminal = func() bool { return false }
+	t.Cleanup(func() { cli.InteractiveTerminal = prev })
 	cmd, _ := pickerCmd(t)
 
 	_, err := promptLockStrategy(cmd, "/elsewhere/foo", "")

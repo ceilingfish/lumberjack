@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ceilingfish/lumberjack/internal/daemon"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
@@ -21,7 +22,7 @@ func newDaemonStopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			svc, err := newLifecycle("", "")
+			svc, err := daemon.NewLifecycle("", "", version)
 			if err != nil {
 				return err
 			}
@@ -32,19 +33,19 @@ func newDaemonStopCmd() *cobra.Command {
 
 // stopDaemon checks status first so stopping an already-stopped daemon reports
 // clearly instead of surfacing a manager error, then stops the daemon.
-func stopDaemon(out io.Writer, svc lifecycle, format present.Format) error {
+func stopDaemon(out io.Writer, svc daemon.Lifecycle, format present.Format) error {
 	status, err := svc.Status()
 	if err != nil {
 		if errors.Is(err, service.ErrNotInstalled) {
-			return errNotInstalled
+			return daemon.ErrNotInstalled
 		}
 		return fmt.Errorf("checking daemon status: %w", err)
 	}
 	if status != service.StatusRunning {
-		return emitDaemonMessage(out, format, "lumberjack daemon is not running.")
+		return present.WriteMessage(out, format, "lumberjack daemon is not running.")
 	}
 	if err := svc.Stop(); err != nil {
 		return fmt.Errorf("stopping daemon: %w", err)
 	}
-	return emitDaemonMessage(out, format, "lumberjack daemon stopped.")
+	return present.WriteMessage(out, format, "lumberjack daemon stopped.")
 }

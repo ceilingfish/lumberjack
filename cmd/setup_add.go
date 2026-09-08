@@ -8,12 +8,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// setupResult is the json Format view model for `setup-steps add`/`setup-steps remove`,
-// which otherwise only print a human-readable confirmation line.
-type setupResult struct {
-	Message string `json:"message"`
-}
-
 func newSetupAddCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add COMMAND",
@@ -43,9 +37,5 @@ func runSetupAdd(cmd *cobra.Command, args []string) error {
 		}
 		msg = fmt.Sprintf("Added setup command: %s", command)
 	}
-	if format == present.JSON {
-		return present.WriteJSONObject(cmd.OutOrStdout(), setupResult{Message: msg})
-	}
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), msg)
-	return err
+	return present.WriteMessage(cmd.OutOrStdout(), format, msg)
 }

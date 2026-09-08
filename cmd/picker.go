@@ -4,10 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // errPickCancelled is returned by the picker when the user aborts the menu.
@@ -17,20 +16,6 @@ var errPickCancelled = errors.New("cancelled")
 // var so tests can substitute a deterministic selection for the raw-terminal
 // UI.
 var loginPicker = pickLogin
-
-var errNoTerminal = errors.New("no interactive terminal")
-
-var rawTerminal = func() (io.Reader, func(), error) {
-	fd := int(os.Stdin.Fd())
-	if !term.IsTerminal(fd) {
-		return nil, nil, errNoTerminal
-	}
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		return nil, nil, fmt.Errorf("entering raw terminal mode: %w", err)
-	}
-	return os.Stdin, func() { _ = term.Restore(fd, oldState) }, nil
-}
 
 // keyAction is what a keypress maps to in the menu loop.
 type keyAction int
@@ -50,8 +35,8 @@ const (
 // read from, there is nothing to choose with, so it errors and tells the caller
 // to pass a login explicitly.
 func pickLogin(cmd *cobra.Command, logins []string, current string) (string, error) {
-	in, restore, err := rawTerminal()
-	if errors.Is(err, errNoTerminal) {
+	in, restore, err := cli.RawTerminal()
+	if errors.Is(err, cli.ErrNoTerminal) {
 		return "", errors.New("no login given and no interactive terminal to choose one; pass a login, e.g. `lumberjack set-login LOGIN`")
 	}
 	if err != nil {

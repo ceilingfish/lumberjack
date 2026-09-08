@@ -4,17 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/kardianos/service"
+	"github.com/ceilingfish/lumberjack/internal/autocomplete"
+	"github.com/ceilingfish/lumberjack/internal/cli"
+	"github.com/ceilingfish/lumberjack/internal/daemon"
 	"github.com/spf13/cobra"
 )
-
-// cliBinaryName is the filename the CLI is installed under.
-const cliBinaryName = "lumberjack"
 
 // newInstallCmd is the top-level `install`. By default it installs both the
 // CLI (copying the running executable to a directory on PATH) and the daemon
@@ -69,12 +67,12 @@ func newInstallCmd() *cobra.Command {
 		"Unix socket path baked into the installed daemon service (default: ~/.lumberjack/daemon.sock)")
 	c.Flags().StringVar(&autocompleteShell, "autocomplete-shell", "",
 		fmt.Sprintf("Wire shell completion into this shell's rc file without prompting (one of %v)",
-			completionShellValues()))
+			autocomplete.ShellValues()))
 	c.Flags().BoolVar(&noAutocomplete, "no-autocomplete", false,
 		"Skip wiring shell completion into the shell rc file")
 	_ = c.RegisterFlagCompletionFunc("autocomplete-shell",
 		func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-			return completionShellValues(), cobra.ShellCompDirectiveNoFileComp
+			return autocomplete.ShellValues(), cobra.ShellCompDirectiveNoFileComp
 		})
 	return c
 }
@@ -82,7 +80,7 @@ func newInstallCmd() *cobra.Command {
 // installOptions is the parsed, validated input to runInstall.
 type installOptions struct {
 	exe               string // the currently-running executable (os.Executable())
-	binDir            string // --bin-dir override; "" means defaultBinDir()
+	binDir            string // --bin-dir override; "" means cli.DefaultBinDir()
 	daemonOnly        bool
 	cliOnly           bool
 	force             bool
@@ -100,19 +98,19 @@ func runInstall(out io.Writer, opts installOptions) error {
 	if opts.daemonOnly && opts.cliOnly {
 		return errors.New("--daemon-only and --cli-only are mutually exclusive")
 	}
-	if err := validateAutocompleteOptions(opts.autocompleteShell, opts.noAutocomplete); err != nil {
+	if err := autocomplete.Validate(opts.autocompleteShell, opts.noAutocomplete); err != nil {
 		return err
 	}
 
 	binDir := opts.binDir
 	if binDir == "" {
-		d, err := defaultBinDir()
+		d, err := cli.DefaultBinDir()
 		if err != nil {
 			return err
 		}
 		binDir = d
 	}
-	cliPath := filepath.Join(binDir, cliBinaryName)
+	cliPath := filepath.Join(binDir, cli.BinaryName)
 
 	var daemonExe string
 	if !opts.daemonOnly {
@@ -141,7 +139,7 @@ func runInstall(out io.Writer, opts installOptions) error {
 			}
 			daemonExe = resolved
 		}
-		svc, err := newLifecycle(opts.socketPath, daemonExe)
+		svc, err := daemon.NewLifecycle(opts.socketPath, daemonExe, version)
 		if err != nil {
 			return err
 		}
@@ -154,7 +152,12 @@ func runInstall(out io.Writer, opts installOptions) error {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
-	installCompletion(out, errOut, opts)
+	if !opts.daemonOnly {
+		autocomplete.Install(out, errOut, autocomplete.Options{
+			Shell:    opts.autocompleteShell,
+			Disabled: opts.noAutocomplete,
+		})
+	}
 	return nil
 }
 
@@ -173,21 +176,11 @@ func resolveDaemonExecutable(exe, cliPath string, cliInstalled bool) (string, er
 	return exe, nil
 }
 
-// defaultBinDir is the per-user install location: ~/.local/bin. No sudo is
-// required, matching the per-user daemon LaunchAgent.
-func defaultBinDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("resolving home directory: %w", err)
-	}
-	return filepath.Join(home, ".local", "bin"), nil
-}
-
 // installCLI copies exe into destDir/lumberjack with executable permissions.
 // An existing file is left alone unless force is set — install never silently
 // clobbers an existing install.
 func installCLI(out io.Writer, exe, destDir string, force bool) (string, error) {
-	dest := filepath.Join(destDir, cliBinaryName)
+	dest := filepath.Join(destDir, cli.BinaryName)
 	if _, err := os.Stat(dest); err == nil {
 		if !force {
 			return "", fmt.Errorf("%s already exists; pass --force to overwrite", dest)
@@ -286,7 +279,7 @@ func isEphemeralBuild(path string) bool {
 // installDaemon registers svc with the service manager and reports next steps.
 // When force is set, an existing install is removed first so the registration is
 // refreshed with the current binary path and environment — the upgrade path.
-func installDaemon(out io.Writer, svc lifecycle, force bool) error {
+func installDaemon(out io.Writer, svc daemon.Lifecycle, force bool) error {
 	if force {
 		if err := reinstallDaemon(svc); err != nil {
 			return err
@@ -303,22 +296,15 @@ func installDaemon(out io.Writer, svc lifecycle, force bool) error {
 // service is stopped before removal so an upgrade never leaves an orphaned
 // process holding the socket. Missing pieces (not installed, not running) are
 // not errors — the goal state is a fresh install regardless of the starting one.
-func reinstallDaemon(svc lifecycle) error {
+func reinstallDaemon(svc daemon.Lifecycle) error {
 	// Stop is best-effort: a not-running service errors here on most platforms,
 	// and Uninstall unloads it anyway. What matters is that Install succeeds.
 	_ = svc.Stop()
-	if err := svc.Uninstall(); err != nil && !isNotInstalled(err) {
+	if err := svc.Uninstall(); err != nil && !daemon.IsNotInstalled(err) {
 		return fmt.Errorf("removing existing daemon for reinstall: %w", err)
 	}
 	if err := svc.Install(); err != nil {
 		return fmt.Errorf("installing daemon: %w", err)
 	}
 	return nil
-}
-
-// isNotInstalled reports whether err means "there was nothing to remove".
-// launchd's backend surfaces a missing plist as a raw path error rather than
-// service.ErrNotInstalled, so both spellings count.
-func isNotInstalled(err error) bool {
-	return errors.Is(err, service.ErrNotInstalled) || errors.Is(err, fs.ErrNotExist)
 }

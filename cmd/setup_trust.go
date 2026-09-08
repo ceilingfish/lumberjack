@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/setup"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	"github.com/spf13/cobra"
@@ -48,6 +49,6 @@ func runSetupTrust(cmd *cobra.Command, _ []string) error {
 		if _, err := cl.TrustSetupSteps(ctx, ref, setup.Fingerprint(res.Raw)); err != nil {
 			return err
 		}
-		return writeSetupMessage(cmd, format, "Trusted the setup steps in "+res.ConfigPath)
+		return present.WriteMessage(cmd.OutOrStdout(), format, "Trusted the setup steps in "+res.ConfigPath)
 	})
 }

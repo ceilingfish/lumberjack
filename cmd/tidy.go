@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
@@ -65,7 +66,7 @@ func newTidyCmd() *cobra.Command {
 				// when there is a terminal to ask on. A dry run moves nothing, so
 				// there is nothing to consent to: it reports locked worktrees as
 				// skipped instead.
-				if strategy == lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED && !dryRun && interactiveTerminal() {
+				if strategy == lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED && !dryRun && cli.InteractiveTerminal() {
 					decisions, err := resolveLockedWorktrees(ctx, cmd, cl, opts)
 					if err != nil {
 						return err
