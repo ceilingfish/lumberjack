@@ -52,6 +52,14 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 	// A merged PR's commits are on the base branch, so they must not be counted
 	// as commits-at-risk when warning before deletion.
 	state := worktree.PRGone
+	// A worktree carrying no PR number may still have one: a PR whose whole
+	// lifetime fell between two syncs was never seen open, so link it now rather
+	// than warning about commits that are safely on the base branch.
+	if wt.GithubPRNumber == nil {
+		if _, lerr := s.linkHistoricalPR(ctx, repo, wt); lerr != nil {
+			return DeleteResult{}, lerr
+		}
+	}
 	if wt.GithubPRNumber != nil {
 		merged, merr := s.gh.PRMerged(ctx, repoInfo(repo), *wt.GithubPRNumber)
 		if merr != nil {
