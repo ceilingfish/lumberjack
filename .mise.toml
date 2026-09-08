@@ -59,9 +59,16 @@ run = "gofumpt -w ."
 description = "Check Go formatting with gofumpt; fails on a diff without writing"
 run = "scripts/format-check.sh"
 
+# Two passes: golangci-lint for general Go correctness and style, then cmdlint
+# for the structural rules golangci-lint cannot express — that every file under
+# cmd/ implements exactly one Cobra command, and that no command shares code
+# with another command or is imported from internal/.
 [tasks."cli:lint"]
-description = "Run golangci-lint"
-run = "golangci-lint run"
+description = "Run golangci-lint and the cmd/ structure checks"
+run = [
+  "golangci-lint run",
+  "go run ./scripts/cmdlint .",
+]
 
 # swift-format ships with the Swift 6 toolchain the app already requires (see
 # macos/README.md), so linting and formatting Swift adds no new dependency.
