@@ -104,26 +104,6 @@ func (s *Server) decorateSetupSteps(ctx context.Context, pb *lumberjackv1.Reposi
 		IsTrusted:        steps.IsTrusted,
 		Steps:            steps.Steps,
 	}
-	pb.SetupConsentPending = !steps.IsTrusted //nolint:staticcheck
-}
-
-// Deprecated: clients should read Repository.setup_steps.
-func (s *Server) GetSetupConsent(ctx context.Context, req *lumberjackv1.GetSetupConsentRequest) (*lumberjackv1.GetSetupConsentResponse, error) {
-	if req.GetRepository() == "" {
-		return nil, status.Error(codes.InvalidArgument, "repository is required")
-	}
-	repo, err := s.db.FindRepository(ctx, req.GetRepository())
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	steps, err := s.svc.GetSetupSteps(ctx, repo)
-	if err != nil {
-		return nil, toStatus(err)
-	}
-	return &lumberjackv1.GetSetupConsentResponse{
-		Pending:     !steps.IsTrusted,
-		RunCommands: steps.Steps,
-	}, nil
 }
 
 func (s *Server) SetSetupConsent(ctx context.Context, req *lumberjackv1.SetSetupConsentRequest) (*lumberjackv1.SetSetupConsentResponse, error) {

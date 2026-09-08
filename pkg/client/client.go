@@ -136,15 +136,6 @@ func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, c
 	return resp.GetLogins(), resp.GetCurrent(), nil
 }
 
-// Deprecated: read Repository.GetSetupSteps() from GetRepository instead.
-func (c *Client) GetSetupConsent(ctx context.Context, ref string) (pending bool, commands []string, err error) {
-	resp, err := c.svc.GetSetupConsent(ctx, &lumberjackv1.GetSetupConsentRequest{Repository: ref}) //nolint:staticcheck
-	if err != nil {
-		return false, nil, mapError(err)
-	}
-	return resp.GetPending(), resp.GetRunCommands(), nil
-}
-
 func (c *Client) SetSetupConsent(ctx context.Context, ref, checksum string) (*lumberjackv1.Repository, bool, error) {
 	resp, err := c.svc.SetSetupConsent(ctx, &lumberjackv1.SetSetupConsentRequest{
 		Repository: ref, Checksum: checksum,
