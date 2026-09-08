@@ -14,7 +14,7 @@ import (
 	"github.com/kardianos/service"
 )
 
-// fakeLifecycle is a controllable lifecycle for driving the install/start/stop/
+// fakeLifecycle is a controllable daemon.Lifecycle for driving the install/start/stop/
 // status logic without touching the real service manager. It records which
 // control methods were called.
 type fakeLifecycle struct {
@@ -39,23 +39,9 @@ func (f *fakeLifecycle) Stop() error                     { f.stopped = true; ret
 
 // TestNewService: the shared service handle builds for both the default and an
 // explicit socket path, and reports a platform (proving kardianos wired up).
-func TestNewService(t *testing.T) {
-	for _, socket := range []string{"", "/tmp/lj.sock"} {
-		svc, err := newService(socket, "")
-		if err != nil {
-			t.Fatalf("newService(%q): %v", socket, err)
-		}
-		if svc == nil {
-			t.Fatalf("newService(%q) returned nil service", socket)
-		}
-		if svc.Platform() == "" {
-			t.Errorf("newService(%q): empty platform", socket)
-		}
-	}
-}
 
 // TestCmdDaemonHelp: the bare `daemon` command prints help listing every
-// lifecycle subcommand, and does not error. `install` moved to the top level,
+// daemon.Lifecycle subcommand, and does not error. `install` moved to the top level,
 // so it is no longer expected here.
 func TestCmdDaemonHelp(t *testing.T) {
 	out, err := run(t, "", "daemon")
@@ -93,7 +79,7 @@ func TestStartDaemon(t *testing.T) {
 	}{
 		{"stopped starts", &fakeLifecycle{status: service.StatusStopped}, true, nil, "started"},
 		{"already running", &fakeLifecycle{status: service.StatusRunning}, false, nil, "already running"},
-		{"not installed", &fakeLifecycle{statusErr: service.ErrNotInstalled}, false, errNotInstalled, ""},
+		{"not installed", &fakeLifecycle{statusErr: service.ErrNotInstalled}, false, daemon.ErrNotInstalled, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -122,7 +108,7 @@ func TestStopDaemon(t *testing.T) {
 	}{
 		{"running stops", &fakeLifecycle{status: service.StatusRunning}, true, nil, "stopped"},
 		{"already stopped", &fakeLifecycle{status: service.StatusStopped}, false, nil, "not running"},
-		{"not installed", &fakeLifecycle{statusErr: service.ErrNotInstalled}, false, errNotInstalled, ""},
+		{"not installed", &fakeLifecycle{statusErr: service.ErrNotInstalled}, false, daemon.ErrNotInstalled, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -153,7 +139,7 @@ func TestReportStatus(t *testing.T) {
 		{"running", &fakeLifecycle{status: service.StatusRunning}, nil, "running"},
 		{"stopped", &fakeLifecycle{status: service.StatusStopped}, nil, "installed, stopped"},
 		{"unknown", &fakeLifecycle{status: service.StatusUnknown}, nil, "status unknown"},
-		{"not installed", &fakeLifecycle{statusErr: service.ErrNotInstalled}, errNotInstalled, "not installed"},
+		{"not installed", &fakeLifecycle{statusErr: service.ErrNotInstalled}, daemon.ErrNotInstalled, "not installed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

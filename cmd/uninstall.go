@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ceilingfish/lumberjack/internal/autocomplete"
+	"github.com/ceilingfish/lumberjack/internal/cli"
+	"github.com/ceilingfish/lumberjack/internal/daemon"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +46,7 @@ func newUninstallCmd() *cobra.Command {
 
 // uninstallOptions is the parsed, validated input to runUninstall.
 type uninstallOptions struct {
-	binDir     string // --bin-dir override; "" means defaultBinDir()
+	binDir     string // --bin-dir override; "" means cli.DefaultBinDir()
 	daemonOnly bool
 	cliOnly    bool
 	errOut     io.Writer // where advisory warnings go; nil means os.Stderr
@@ -55,7 +58,7 @@ func runUninstall(out io.Writer, opts uninstallOptions) error {
 	}
 
 	if !opts.cliOnly {
-		svc, err := newLifecycle("", "")
+		svc, err := daemon.NewLifecycle("", "", cli.Version)
 		if err != nil {
 			return err
 		}
@@ -67,7 +70,7 @@ func runUninstall(out io.Writer, opts uninstallOptions) error {
 	if !opts.daemonOnly {
 		binDir := opts.binDir
 		if binDir == "" {
-			d, err := defaultBinDir()
+			d, err := cli.DefaultBinDir()
 			if err != nil {
 				return err
 			}
@@ -82,15 +85,17 @@ func runUninstall(out io.Writer, opts uninstallOptions) error {
 	if errOut == nil {
 		errOut = os.Stderr
 	}
-	uninstallCompletion(out, errOut, opts.daemonOnly)
+	if !opts.daemonOnly {
+		autocomplete.Uninstall(out, errOut)
+	}
 	return nil
 }
 
 // uninstallDaemon stops and deregisters svc. A not-installed daemon is not an
 // error — uninstall's goal state (no registration) is already met.
-func uninstallDaemon(out io.Writer, svc lifecycle) error {
+func uninstallDaemon(out io.Writer, svc daemon.Lifecycle) error {
 	_ = svc.Stop()
-	if err := svc.Uninstall(); err != nil && !isNotInstalled(err) {
+	if err := svc.Uninstall(); err != nil && !daemon.IsNotInstalled(err) {
 		return fmt.Errorf("uninstalling daemon: %w", err)
 	}
 	_, err := fmt.Fprintln(out, "lumberjack daemon uninstalled.")
@@ -100,7 +105,7 @@ func uninstallDaemon(out io.Writer, svc lifecycle) error {
 // uninstallCLI removes the installed CLI binary from binDir. A missing binary
 // is reported, not an error — uninstall's goal state is already met.
 func uninstallCLI(out io.Writer, binDir string) error {
-	dest := filepath.Join(binDir, cliBinaryName)
+	dest := filepath.Join(binDir, cli.BinaryName)
 	if err := os.Remove(dest); err != nil {
 		if os.IsNotExist(err) {
 			_, werr := fmt.Fprintf(out, "lumberjack CLI not found at %s; nothing to remove.\n", dest)

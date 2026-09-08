@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"errors"
@@ -11,9 +11,9 @@ import (
 
 func onATerminal(t *testing.T) {
 	t.Helper()
-	prev := interactiveTerminal
-	interactiveTerminal = func() bool { return true }
-	t.Cleanup(func() { interactiveTerminal = prev })
+	prev := InteractiveTerminal
+	InteractiveTerminal = func() bool { return true }
+	t.Cleanup(func() { InteractiveTerminal = prev })
 }
 
 func TestPromptLockStrategy(t *testing.T) {
@@ -72,9 +72,9 @@ func TestPromptLockStrategyInputEndsWithoutAnAnswer(t *testing.T) {
 }
 
 func TestPromptLockStrategyWithoutATerminal(t *testing.T) {
-	prev := interactiveTerminal
-	interactiveTerminal = func() bool { return false }
-	t.Cleanup(func() { interactiveTerminal = prev })
+	prev := InteractiveTerminal
+	InteractiveTerminal = func() bool { return false }
+	t.Cleanup(func() { InteractiveTerminal = prev })
 	cmd, _ := pickerCmd(t)
 
 	_, err := promptLockStrategy(cmd, "/elsewhere/foo", "")
@@ -95,14 +95,14 @@ func TestPromptLockStrategyRawModeFailure(t *testing.T) {
 }
 
 func TestLockStrategyValuesAreSorted(t *testing.T) {
-	got := lockStrategyValues()
+	got := LockStrategyValues()
 	want := []string{"abort", "delete", "skip", "unlock"}
 	if len(got) != len(want) {
-		t.Fatalf("lockStrategyValues = %v, want %v", got, want)
+		t.Fatalf("LockStrategyValues = %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Fatalf("lockStrategyValues = %v, want %v", got, want)
+			t.Fatalf("LockStrategyValues = %v, want %v", got, want)
 		}
 	}
 }

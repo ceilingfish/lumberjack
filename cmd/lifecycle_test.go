@@ -9,41 +9,43 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+	"github.com/ceilingfish/lumberjack/internal/daemon"
+
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/kardianos/service"
-	"go.uber.org/fx"
 )
 
 func fakeServiceManager(t *testing.T, f *fakeLifecycle) {
 	t.Helper()
-	prev := newLifecycle
-	newLifecycle = func(string, string) (lifecycle, error) { return f, nil }
-	t.Cleanup(func() { newLifecycle = prev })
+	prev := daemon.NewLifecycle
+	daemon.NewLifecycle = func(string, string, string) (daemon.Lifecycle, error) { return f, nil }
+	t.Cleanup(func() { daemon.NewLifecycle = prev })
 }
 
 func unavailableServiceManager(t *testing.T, err error) {
 	t.Helper()
-	prev := newLifecycle
-	newLifecycle = func(string, string) (lifecycle, error) { return nil, err }
-	t.Cleanup(func() { newLifecycle = prev })
+	prev := daemon.NewLifecycle
+	daemon.NewLifecycle = func(string, string, string) (daemon.Lifecycle, error) { return nil, err }
+	t.Cleanup(func() { daemon.NewLifecycle = prev })
 }
 
 func recordingServiceManager(t *testing.T, f *fakeLifecycle) *string {
 	t.Helper()
 	var registered string
-	prev := newLifecycle
-	newLifecycle = func(_, executable string) (lifecycle, error) {
+	prev := daemon.NewLifecycle
+	daemon.NewLifecycle = func(_, executable, _ string) (daemon.Lifecycle, error) {
 		registered = executable
 		return f, nil
 	}
-	t.Cleanup(func() { newLifecycle = prev })
+	t.Cleanup(func() { daemon.NewLifecycle = prev })
 	return &registered
 }
 
 func installedCLI(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(binDir, cliBinaryName), []byte("binary"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(binDir, cli.BinaryName), []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return binDir
@@ -152,7 +154,7 @@ func TestRunInstallRegistersTheDaemonAgainstTheInstalledCLI(t *testing.T) {
 	if err := runInstall(&out, installOptions{exe: exe, binDir: binDir}); err != nil {
 		t.Fatalf("runInstall: %v", err)
 	}
-	want := filepath.Join(binDir, cliBinaryName)
+	want := filepath.Join(binDir, cli.BinaryName)
 	if *registered != want {
 		t.Errorf("daemon registered against %q, want the installed CLI copy %q", *registered, want)
 	}
@@ -174,7 +176,7 @@ func TestRunInstallDaemonOnlyUsesTheInstalledCLIWhenPresent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("runInstall --daemon-only: %v", err)
 	}
-	if *registered != filepath.Join(binDir, cliBinaryName) {
+	if *registered != filepath.Join(binDir, cli.BinaryName) {
 		t.Errorf("registered %q, want the installed CLI copy", *registered)
 	}
 }
@@ -237,7 +239,7 @@ func TestCmdUninstall(t *testing.T) {
 	if !f.stopped || !f.uninstalled {
 		t.Errorf("uninstall did not deregister the daemon (stopped=%v uninstalled=%v)", f.stopped, f.uninstalled)
 	}
-	if _, err := os.Stat(filepath.Join(binDir, cliBinaryName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(binDir, cli.BinaryName)); !os.IsNotExist(err) {
 		t.Errorf("expected the installed CLI to be removed, got %v", err)
 	}
 	if !strings.Contains(out, "daemon uninstalled") || !strings.Contains(out, "CLI removed") {
@@ -353,24 +355,6 @@ func TestCopyExecutableFailures(t *testing.T) {
 	}
 }
 
-func TestDefaultBinDir(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-
-	got, err := defaultBinDir()
-	if err != nil {
-		t.Fatalf("defaultBinDir: %v", err)
-	}
-	if want := filepath.Join(home, ".local", "bin"); got != want {
-		t.Errorf("defaultBinDir = %q, want %q", got, want)
-	}
-
-	t.Setenv("HOME", "")
-	if _, err := defaultBinDir(); err == nil {
-		t.Error("expected defaultBinDir to fail with no home directory")
-	}
-}
-
 func TestReportStatusSurfacesAFailedWrite(t *testing.T) {
 	err := reportStatus(failWriter{}, &fakeLifecycle{statusErr: service.ErrNotInstalled}, present.Structured)
 	if !errors.Is(err, errWrite) {
@@ -403,54 +387,5 @@ func TestStartStopDaemonSurfaceManagerFailures(t *testing.T) {
 	if err := stopDaemon(io.Discard, &fakeLifecycle{status: service.StatusRunning, stopErr: boom}, present.Structured); err == nil ||
 		!strings.Contains(err.Error(), "stopping daemon") {
 		t.Errorf("stopDaemon err = %v, want the wrapped stop failure", err)
-	}
-}
-
-func TestEmitDaemonMessageJSON(t *testing.T) {
-	var out bytes.Buffer
-	if err := emitDaemonMessage(&out, present.JSON, "hello"); err != nil {
-		t.Fatalf("emitDaemonMessage: %v", err)
-	}
-	if !strings.Contains(out.String(), `"message"`) || !strings.Contains(out.String(), "hello") {
-		t.Errorf("out = %q, want a JSON view model", out.String())
-	}
-}
-
-func TestServiceEnvCarriesPath(t *testing.T) {
-	t.Setenv("PATH", "/opt/homebrew/bin")
-	if got := serviceEnv()["PATH"]; got != "/opt/homebrew/bin" {
-		t.Errorf("serviceEnv PATH = %q, want the install-time PATH", got)
-	}
-
-	t.Setenv("PATH", "")
-	if _, ok := serviceEnv()["PATH"]; ok {
-		t.Error("serviceEnv should omit an empty PATH rather than pinning it")
-	}
-}
-
-func TestProgramStartSurfacesAWiringFailure(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	blocked := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LUMBERJACK_DB_PATH", filepath.Join(blocked, "db.sqlite"))
-
-	p := &program{socketPath: filepath.Join(t.TempDir(), "d.sock")}
-	if err := p.Start(nil); err == nil {
-		t.Error("expected Start to fail when the database cannot be opened")
-		_ = p.Stop(nil)
-	}
-}
-
-func TestProgramStopWithoutAStartedApp(t *testing.T) {
-	p := &program{}
-	if err := p.Stop(nil); err != nil {
-		t.Errorf("Stop before Start = %v, want nil", err)
-	}
-
-	p.app = fx.New(fx.NopLogger)
-	if err := p.Stop(nil); err != nil {
-		t.Errorf("Stop = %v, want nil", err)
 	}
 }

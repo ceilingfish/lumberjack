@@ -1,15 +1,13 @@
-package cmd
+package cli
 
 import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sort"
 
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 // lockStrategyNames maps the --lock-strategy values to the proto enum. They are
@@ -22,9 +20,9 @@ var lockStrategyNames = map[string]lumberjackv1.LockStrategy{
 	"abort":  lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT,
 }
 
-// lockStrategyValues lists the accepted --lock-strategy values, for the flag's
+// LockStrategyValues lists the accepted --lock-strategy values, for the flag's
 // error message and its shell completion.
-func lockStrategyValues() []string {
+func LockStrategyValues() []string {
 	names := make([]string, 0, len(lockStrategyNames))
 	for name := range lockStrategyNames {
 		names = append(names, name)
@@ -33,42 +31,32 @@ func lockStrategyValues() []string {
 	return names
 }
 
-// parseLockStrategy resolves a --lock-strategy value. An empty value leaves the
+// ParseLockStrategy resolves a --lock-strategy value. An empty value leaves the
 // strategy unspecified, which is how the caller knows to prompt instead.
-func parseLockStrategy(value string) (lumberjackv1.LockStrategy, error) {
+func ParseLockStrategy(value string) (lumberjackv1.LockStrategy, error) {
 	if value == "" {
 		return lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED, nil
 	}
 	s, ok := lockStrategyNames[value]
 	if !ok {
-		return 0, fmt.Errorf("invalid --lock-strategy %q: want one of %v", value, lockStrategyValues())
+		return 0, fmt.Errorf("invalid --lock-strategy %q: want one of %v", value, LockStrategyValues())
 	}
 	return s, nil
 }
 
-// lockPrompter asks what to do about one locked worktree. It is a package var so
+// LockPrompter asks what to do about one locked worktree. It is a package var so
 // tests can substitute a scripted answer for the raw-terminal UI.
-var lockPrompter = promptLockStrategy
-
-// interactiveTerminal reports whether there is a terminal to prompt on. Both
-// ends have to be one: stdin because the answer is read from it, and stderr
-// because the question is written there — with stderr redirected,
-// `lumberjack tidy 2>/dev/null` would otherwise sit in raw mode waiting for an
-// answer to a question the user never saw. A package var so tests can
-// substitute a scripted answer for the raw-terminal UI.
-var interactiveTerminal = func() bool {
-	return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
-}
+var LockPrompter = promptLockStrategy
 
 // promptLockStrategy asks, on the controlling terminal, what to do about the
 // locked worktree at path (reason being the message git recorded with the lock,
 // if any). Enter takes the default: unlock for the move and lock it again
 // afterwards, which leaves the worktree as the user left it.
 func promptLockStrategy(cmd *cobra.Command, path, reason string) (lumberjackv1.LockStrategy, error) {
-	if !interactiveTerminal() {
+	if !InteractiveTerminal() {
 		return 0, errors.New("no interactive terminal to ask about a locked worktree; pass --lock-strategy")
 	}
-	in, restore, err := rawTerminal()
+	in, restore, err := RawTerminal()
 	if err != nil {
 		return 0, err
 	}

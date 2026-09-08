@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"bytes"
@@ -23,18 +23,18 @@ func (k *keyReader) Read(p []byte) (int, error) {
 
 func scriptTerminal(t *testing.T, keys ...string) {
 	t.Helper()
-	prev := rawTerminal
-	rawTerminal = func() (io.Reader, func(), error) {
+	prev := RawTerminal
+	RawTerminal = func() (io.Reader, func(), error) {
 		return &keyReader{keys: keys}, func() {}, nil
 	}
-	t.Cleanup(func() { rawTerminal = prev })
+	t.Cleanup(func() { RawTerminal = prev })
 }
 
 func failTerminal(t *testing.T, err error) {
 	t.Helper()
-	prev := rawTerminal
-	rawTerminal = func() (io.Reader, func(), error) { return nil, nil, err }
-	t.Cleanup(func() { rawTerminal = prev })
+	prev := RawTerminal
+	RawTerminal = func() (io.Reader, func(), error) { return nil, nil, err }
+	t.Cleanup(func() { RawTerminal = prev })
 }
 
 const (
@@ -111,8 +111,8 @@ func TestPickLoginCancelled(t *testing.T) {
 	scriptTerminal(t, "q")
 	cmd, _ := pickerCmd(t)
 
-	if _, err := pickLogin(cmd, []string{"personal"}, ""); !errors.Is(err, errPickCancelled) {
-		t.Errorf("err = %v, want errPickCancelled", err)
+	if _, err := pickLogin(cmd, []string{"personal"}, ""); !errors.Is(err, ErrPickCancelled) {
+		t.Errorf("err = %v, want ErrPickCancelled", err)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestPickLoginInputEndsWithoutAnAnswer(t *testing.T) {
 }
 
 func TestPickLoginWithoutATerminal(t *testing.T) {
-	failTerminal(t, errNoTerminal)
+	failTerminal(t, ErrNoTerminal)
 	cmd, _ := pickerCmd(t)
 
 	_, err := pickLogin(cmd, []string{"personal"}, "")
@@ -146,14 +146,5 @@ func TestPickLoginRawModeFailure(t *testing.T) {
 
 	if _, err := pickLogin(cmd, []string{"personal"}, ""); !errors.Is(err, boom) {
 		t.Errorf("err = %v, want the raw-mode failure", err)
-	}
-}
-
-func TestCmdSetLoginPickerCancelled(t *testing.T) {
-	serveService(t, &coverStub{logins: []string{"personal"}})
-	scriptTerminal(t, "q")
-
-	if _, err := run(t, "", "set-login", "--repository", "n"); !errors.Is(err, errPickCancelled) {
-		t.Errorf("err = %v, want the cancelled pick to abort set-login", err)
 	}
 }

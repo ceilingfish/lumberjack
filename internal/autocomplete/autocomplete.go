@@ -1,4 +1,4 @@
-package cmd
+package autocomplete
 
 import (
 	"errors"
@@ -12,21 +12,22 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 )
 
-const completionMarker = "lumberjack completion"
+const marker = "lumberjack completion"
 
-var completionLines = map[string]string{
+var lines = map[string]string{
 	"bash":       `eval "$(lumberjack completion bash)"`,
 	"fish":       "lumberjack completion fish | source",
 	"powershell": "lumberjack completion powershell | Out-String | Invoke-Expression",
 	"zsh":        `eval "$(lumberjack completion zsh)"`,
 }
 
-func completionShellValues() []string {
-	names := make([]string, 0, len(completionLines))
-	for name := range completionLines {
+func ShellValues() []string {
+	names := make([]string, 0, len(lines))
+	for name := range lines {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -55,7 +56,7 @@ func normaliseShellName(raw string) string {
 	if name == "pwsh" {
 		name = "powershell"
 	}
-	if _, ok := completionLines[name]; !ok {
+	if _, ok := lines[name]; !ok {
 		return ""
 	}
 	return name
@@ -68,7 +69,7 @@ func detectShell(parent, shellEnv string) string {
 	return normaliseShellName(shellEnv)
 }
 
-func completionRCPath(shell, goos, home string, exists func(string) bool) (string, error) {
+func rcPath(shell, goos, home string, exists func(string) bool) (string, error) {
 	switch shell {
 	case "zsh":
 		return filepath.Join(home, ".zshrc"), nil
@@ -79,7 +80,7 @@ func completionRCPath(shell, goos, home string, exists func(string) bool) (strin
 	case "bash":
 		return bashRCPath(goos, home, exists), nil
 	default:
-		return "", fmt.Errorf("unsupported shell %q: want one of %v", shell, completionShellValues())
+		return "", fmt.Errorf("unsupported shell %q: want one of %v", shell, ShellValues())
 	}
 }
 
@@ -113,7 +114,7 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-func completionCandidateRCPaths(goos, home string) []string {
+func candidateRCPaths(goos, home string) []string {
 	paths := []string{
 		filepath.Join(home, ".zshrc"),
 		filepath.Join(home, ".bashrc"),
@@ -133,7 +134,7 @@ func completionCandidateRCPaths(goos, home string) []string {
 	return unique
 }
 
-func rcMentionsCompletion(path string) (bool, error) {
+func rcMentions(path string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -142,14 +143,14 @@ func rcMentionsCompletion(path string) (bool, error) {
 		return false, err
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if strings.Contains(line, completionMarker) && !strings.HasPrefix(strings.TrimSpace(line), "#") {
+		if strings.Contains(line, marker) && !strings.HasPrefix(strings.TrimSpace(line), "#") {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func appendCompletionLine(path, line string) error {
+func appendLine(path, line string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -175,7 +176,7 @@ func appendCompletionLine(path, line string) error {
 	return f.Close()
 }
 
-func removeCompletionLines(path string) (bool, error) {
+func removeLines(path string) (bool, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -187,7 +188,7 @@ func removeCompletionLines(path string) (bool, error) {
 	kept := make([]string, 0, len(lines))
 	removed := false
 	for _, line := range lines {
-		if strings.Contains(line, completionMarker) && !strings.HasPrefix(strings.TrimSpace(line), "#") {
+		if strings.Contains(line, marker) && !strings.HasPrefix(strings.TrimSpace(line), "#") {
 			removed = true
 			continue
 		}
@@ -204,28 +205,30 @@ func removeCompletionLines(path string) (bool, error) {
 	return true, os.WriteFile(path, []byte(strings.Join(kept, "\n")), mode)
 }
 
-func completionColorEnabled() bool {
+func colorEnabled() bool {
 	_, noColorSet := os.LookupEnv("NO_COLOR")
-	return present.ColorGate(interactiveTerminal(), noColorSet)
+	return present.ColorGate(cli.InteractiveTerminal(), noColorSet)
 }
 
-func warnCompletion(errOut io.Writer, format string, args ...any) {
-	_, _ = fmt.Fprintln(errOut, present.StatusWarn(fmt.Sprintf(format, args...), completionColorEnabled()))
+func warn(errOut io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprintln(errOut, present.StatusWarn(fmt.Sprintf(format, args...), colorEnabled()))
 }
 
-func manualCompletionInstruction(errOut io.Writer, rc, line string) {
+func manualInstruction(errOut io.Writer, rc, line string) {
 	if rc == "" {
-		warnCompletion(errOut,
+		warn(errOut,
 			"shell completion was not configured; add the line for your shell from `lumberjack completion --help` to your shell rc file.")
 		return
 	}
-	warnCompletion(errOut, "shell completion was not configured; add this line to %s by hand:\n    %s", rc, line)
+	warn(errOut, "shell completion was not configured; add this line to %s by hand:\n    %s", rc, line)
 }
 
-var completionConfirmer = confirmCompletion
+// Confirmer asks whether to edit rc. A package var so tests can substitute a
+// scripted answer for the raw-terminal UI.
+var Confirmer = confirmAppend
 
-func confirmCompletion(errOut io.Writer, rc, line string) (bool, error) {
-	in, restore, err := rawTerminal()
+func confirmAppend(errOut io.Writer, rc, line string) (bool, error) {
+	in, restore, err := cli.RawTerminal()
 	if err != nil {
 		return false, err
 	}
@@ -250,19 +253,27 @@ func confirmCompletion(errOut io.Writer, rc, line string) (bool, error) {
 	}
 }
 
-func installCompletion(out, errOut io.Writer, opts installOptions) {
-	if opts.daemonOnly || opts.noAutocomplete {
+// Options selects how Install wires completion in: Shell names the shell and
+// skips the prompt, Disabled skips the step entirely, and an empty Shell means
+// detect-and-prompt on a terminal.
+type Options struct {
+	Shell    string
+	Disabled bool
+}
+
+func Install(out, errOut io.Writer, opts Options) {
+	if opts.Disabled {
 		return
 	}
-	shell := opts.autocompleteShell
+	shell := opts.Shell
 	ask := false
 	if shell == "" {
-		if !interactiveTerminal() {
+		if !cli.InteractiveTerminal() {
 			return
 		}
 		shell = detectShell(parentProcessName(), os.Getenv("SHELL"))
 		if shell == "" {
-			manualCompletionInstruction(errOut, "", "")
+			manualInstruction(errOut, "", "")
 			return
 		}
 		ask = true
@@ -270,20 +281,20 @@ func installCompletion(out, errOut io.Writer, opts installOptions) {
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		warnCompletion(errOut, "resolving home directory for shell completion: %v", err)
+		warn(errOut, "resolving home directory for shell completion: %v", err)
 		return
 	}
-	rc, err := completionRCPath(shell, runtime.GOOS, home, fileExists)
+	rc, err := rcPath(shell, runtime.GOOS, home, fileExists)
 	if err != nil {
-		warnCompletion(errOut, "%v", err)
+		warn(errOut, "%v", err)
 		return
 	}
-	line := completionLines[shell]
+	line := lines[shell]
 
-	already, err := rcMentionsCompletion(rc)
+	already, err := rcMentions(rc)
 	if err != nil {
-		warnCompletion(errOut, "reading %s: %v", rc, err)
-		manualCompletionInstruction(errOut, rc, line)
+		warn(errOut, "reading %s: %v", rc, err)
+		manualInstruction(errOut, rc, line)
 		return
 	}
 	if already {
@@ -291,9 +302,9 @@ func installCompletion(out, errOut io.Writer, opts installOptions) {
 	}
 
 	if ask {
-		ok, err := completionConfirmer(errOut, rc, line)
+		ok, err := Confirmer(errOut, rc, line)
 		if err != nil {
-			manualCompletionInstruction(errOut, rc, line)
+			manualInstruction(errOut, rc, line)
 			return
 		}
 		if !ok {
@@ -301,30 +312,27 @@ func installCompletion(out, errOut io.Writer, opts installOptions) {
 		}
 	}
 
-	if err := appendCompletionLine(rc, line); err != nil {
-		warnCompletion(errOut, "writing %s: %v", rc, err)
-		manualCompletionInstruction(errOut, rc, line)
+	if err := appendLine(rc, line); err != nil {
+		warn(errOut, "writing %s: %v", rc, err)
+		manualInstruction(errOut, rc, line)
 		return
 	}
 	_, _ = fmt.Fprintf(out,
 		"shell completion added to %s; run `source %s` or open a new shell to use it.\n", rc, rc)
 }
 
-func uninstallCompletion(out, errOut io.Writer, daemonOnly bool) {
-	if daemonOnly {
-		return
-	}
+func Uninstall(out, errOut io.Writer) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		warnCompletion(errOut, "resolving home directory for shell completion: %v", err)
+		warn(errOut, "resolving home directory for shell completion: %v", err)
 		return
 	}
 
 	var found []string
-	for _, rc := range completionCandidateRCPaths(runtime.GOOS, home) {
-		has, err := rcMentionsCompletion(rc)
+	for _, rc := range candidateRCPaths(runtime.GOOS, home) {
+		has, err := rcMentions(rc)
 		if err != nil {
-			warnCompletion(errOut, "reading %s: %v", rc, err)
+			warn(errOut, "reading %s: %v", rc, err)
 			continue
 		}
 		if has {
@@ -335,25 +343,25 @@ func uninstallCompletion(out, errOut io.Writer, daemonOnly bool) {
 		return
 	}
 
-	if !interactiveTerminal() {
-		warnCompletion(errOut,
+	if !cli.InteractiveTerminal() {
+		warn(errOut,
 			"these files still source lumberjack shell completion; remove the line by hand:\n    %s",
 			strings.Join(found, "\n    "))
 		return
 	}
 
 	for _, rc := range found {
-		ok, err := completionConfirmer(errOut, rc, "remove the lumberjack completion line")
+		ok, err := Confirmer(errOut, rc, "remove the lumberjack completion line")
 		if err != nil {
-			warnCompletion(errOut, "prompting about %s: %v", rc, err)
+			warn(errOut, "prompting about %s: %v", rc, err)
 			return
 		}
 		if !ok {
 			continue
 		}
-		removed, err := removeCompletionLines(rc)
+		removed, err := removeLines(rc)
 		if err != nil {
-			warnCompletion(errOut, "editing %s: %v", rc, err)
+			warn(errOut, "editing %s: %v", rc, err)
 			continue
 		}
 		if removed {
@@ -362,18 +370,24 @@ func uninstallCompletion(out, errOut io.Writer, daemonOnly bool) {
 	}
 }
 
-var errAutocompleteExclusive = errors.New(
+var ErrExclusive = errors.New(
 	"--autocomplete-shell and --no-autocomplete are mutually exclusive")
 
-func validateAutocompleteOptions(shell string, disabled bool) error {
+func Validate(shell string, disabled bool) error {
 	if shell != "" && disabled {
-		return errAutocompleteExclusive
+		return ErrExclusive
 	}
 	if shell == "" {
 		return nil
 	}
-	if _, ok := completionLines[shell]; !ok {
-		return fmt.Errorf("invalid --autocomplete-shell %q: want one of %v", shell, completionShellValues())
+	if _, ok := lines[shell]; !ok {
+		return fmt.Errorf("invalid --autocomplete-shell %q: want one of %v", shell, ShellValues())
 	}
 	return nil
+}
+
+// Line is the rc-file line that enables completion for shell, empty for a
+// shell completion is not supported on.
+func Line(shell string) string {
+	return lines[shell]
 }

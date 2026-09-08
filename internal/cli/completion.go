@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"context"
@@ -29,9 +29,9 @@ func completionClient(cmd *cobra.Command, fn func(context.Context, *client.Clien
 	return fn(ctx, cl)
 }
 
-// completeRepositoryNames suggests the names of every tracked repository,
+// CompleteRepositoryNames suggests the names of every tracked repository,
 // matching what --repository resolves against.
-func completeRepositoryNames(cmd *cobra.Command) []string {
+func CompleteRepositoryNames(cmd *cobra.Command) []string {
 	return completionClient(cmd, func(ctx context.Context, cl *client.Client) []string {
 		repos, err := cl.ListRepositories(ctx)
 		if err != nil {
@@ -45,9 +45,9 @@ func completeRepositoryNames(cmd *cobra.Command) []string {
 	})
 }
 
-// completeLogins suggests the gh accounts authenticated for the host of the
+// CompleteLogins suggests the gh accounts authenticated for the host of the
 // repository resolved by ref.
-func completeLogins(cmd *cobra.Command, ref string) []string {
+func CompleteLogins(cmd *cobra.Command, ref string) []string {
 	return completionClient(cmd, func(ctx context.Context, cl *client.Client) []string {
 		logins, _, err := cl.ListLogins(ctx, ref)
 		if err != nil {

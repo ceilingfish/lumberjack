@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
@@ -24,15 +26,15 @@ func newWorktreeAddCmd() *cobra.Command {
 			"off the default branch.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ref, err := resolveRepositoryRef(repository)
+			ref, err := cli.ResolveRepositoryRef(repository)
 			if err != nil {
 				return err
 			}
-			format, err := outputFormat(cmd)
+			format, err := cli.OutputFormat(cmd)
 			if err != nil {
 				return err
 			}
-			return withClient(cmd, func(ctx context.Context, cl *client.Client) error {
+			return cli.WithClient(cmd, func(ctx context.Context, cl *client.Client) error {
 				resp, err := cl.AddWorktree(ctx, ref, args[0])
 				if err != nil {
 					return err
@@ -42,7 +44,7 @@ func newWorktreeAddCmd() *cobra.Command {
 		},
 	}
 
-	addRepositoryFlag(c, &repository)
+	cli.AddRepositoryFlag(c, &repository)
 	return c
 }
 

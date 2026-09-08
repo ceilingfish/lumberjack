@@ -1,6 +1,10 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/ceilingfish/lumberjack/internal/cli"
+	"github.com/ceilingfish/lumberjack/internal/daemon"
+	"github.com/spf13/cobra"
+)
 
 // newDaemonRunCmd runs the daemon in the foreground. It blocks until the process
 // is signalled (SIGINT/SIGTERM) and is also the entry point the service manager
@@ -14,7 +18,7 @@ func newDaemonRunCmd() *cobra.Command {
 		Short: "Run the daemon in the foreground",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			svc, err := newService(socketPath, "")
+			svc, err := daemon.NewPlatformService(socketPath, "", cli.Version)
 			if err != nil {
 				return err
 			}

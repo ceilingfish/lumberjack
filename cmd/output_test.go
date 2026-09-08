@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
@@ -21,10 +23,6 @@ import (
 type flakyWriter struct {
 	succeed int
 }
-
-type emptyReader struct{}
-
-func (emptyReader) Read([]byte) (int, error) { return 0, nil }
 
 func (f *flakyWriter) Write(p []byte) (int, error) {
 	if f.succeed == 0 {
@@ -411,57 +409,9 @@ func TestCmdWorktreesReportsANoteWithoutAWarning(t *testing.T) {
 	}
 }
 
-func TestActionVerb(t *testing.T) {
-	cases := map[lumberjackv1.WorktreeAction]string{
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_CHECKED_OUT: "checked out",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_ADOPTED:     "adopted",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_UPDATED:     "updated",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_DELETED:     "deleted",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_RETAINED:    "retained",
-		lumberjackv1.WorktreeAction_WORKTREE_ACTION_UNSPECIFIED: "unknown",
-	}
-	for action, want := range cases {
-		if got := actionVerb(action); got != want {
-			t.Errorf("actionVerb(%v) = %q, want %q", action, got, want)
-		}
-	}
-}
-
-func TestChangeActionIncludesItsDetail(t *testing.T) {
-	got := changeAction(&lumberjackv1.WorktreeChange{
-		Action: lumberjackv1.WorktreeAction_WORKTREE_ACTION_RETAINED,
-		Detail: "uncommitted changes",
-	}, false)
-	if got != "retained (uncommitted changes)" {
-		t.Errorf("changeAction = %q", got)
-	}
-}
-
-func TestTabWStopsAtTheFirstWriteError(t *testing.T) {
-	tw := newTabW(failWriter{})
-	tw.row("a\f")
-	if !errors.Is(tw.err, errWrite) {
-		t.Fatalf("tabW.err = %v, want the failed write recorded", tw.err)
-	}
-	tw.row("b\f")
-	if err := tw.flush(); !errors.Is(err, errWrite) {
-		t.Errorf("flush = %v, want the first error", err)
-	}
-}
-
-func TestReadLockAnswerIgnoresAnEmptyRead(t *testing.T) {
-	got, err := readLockAnswer(emptyReader{})
-	if err != nil {
-		t.Fatalf("readLockAnswer: %v", err)
-	}
-	if got != lumberjackv1.LockStrategy_LOCK_STRATEGY_UNSPECIFIED {
-		t.Errorf("readLockAnswer = %v, want UNSPECIFIED for an empty read", got)
-	}
-}
-
 func TestRawTerminalWithoutATerminal(t *testing.T) {
-	if _, _, err := rawTerminal(); !errors.Is(err, errNoTerminal) {
-		t.Errorf("rawTerminal err = %v, want errNoTerminal under `go test`", err)
+	if _, _, err := cli.RawTerminal(); !errors.Is(err, cli.ErrNoTerminal) {
+		t.Errorf("cli.RawTerminal err = %v, want cli.ErrNoTerminal under `go test`", err)
 	}
 }
 
@@ -575,7 +525,7 @@ func TestPromptSetupConsentSurfacesFailedWrites(t *testing.T) {
 			cmd.SetIn(strings.NewReader("y\n"))
 
 			repo := &lumberjackv1.Repository{DirPrefix: "n", SetupSteps: pendingSetupSteps("make setup")}
-			err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo)
+			err := cli.PromptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo)
 			if !errors.Is(err, errWrite) {
 				t.Errorf("err = %v, want the failed write", err)
 			}
@@ -591,7 +541,7 @@ func TestPromptSetupConsentSurfacesAFailedRecord(t *testing.T) {
 	cmd.SetIn(strings.NewReader("y\n"))
 
 	repo := &lumberjackv1.Repository{DirPrefix: "n", SetupSteps: pendingSetupSteps("make setup")}
-	if err := promptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo); err == nil {
+	if err := cli.PromptSetupConsent(context.Background(), cmd, dialStub(t), "n", repo); err == nil {
 		t.Error("expected the failed consent record to surface")
 	}
 }
@@ -609,7 +559,7 @@ func TestRunInstallDefaultsTheBinDirToTheHomeDirectory(t *testing.T) {
 	if err := runInstall(&out, installOptions{exe: exe, cliOnly: true}); err != nil {
 		t.Fatalf("runInstall: %v", err)
 	}
-	installed := filepath.Join(home, ".local", "bin", cliBinaryName)
+	installed := filepath.Join(home, ".local", "bin", cli.BinaryName)
 	if _, err := os.Stat(installed); err != nil {
 		t.Errorf("expected the CLI at %s: %v", installed, err)
 	}

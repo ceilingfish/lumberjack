@@ -3,16 +3,12 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/internal/setup"
 	"github.com/spf13/cobra"
 )
-
-// setupResult is the json Format view model for `setup-steps add`/`setup-steps remove`,
-// which otherwise only print a human-readable confirmation line.
-type setupResult struct {
-	Message string `json:"message"`
-}
 
 func newSetupAddCmd() *cobra.Command {
 	return &cobra.Command{
@@ -27,12 +23,12 @@ func newSetupAddCmd() *cobra.Command {
 }
 
 func runSetupAdd(cmd *cobra.Command, args []string) error {
-	format, err := outputFormat(cmd)
+	format, err := cli.OutputFormat(cmd)
 	if err != nil {
 		return err
 	}
 	command := args[0]
-	root, cfg, err := loadWorktreeConfig()
+	root, cfg, err := cli.LoadWorktreeConfig()
 	if err != nil {
 		return err
 	}
@@ -43,9 +39,5 @@ func runSetupAdd(cmd *cobra.Command, args []string) error {
 		}
 		msg = fmt.Sprintf("Added setup command: %s", command)
 	}
-	if format == present.JSON {
-		return present.WriteJSONObject(cmd.OutOrStdout(), setupResult{Message: msg})
-	}
-	_, err = fmt.Fprintln(cmd.OutOrStdout(), msg)
-	return err
+	return present.WriteMessage(cmd.OutOrStdout(), format, msg)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
@@ -33,7 +34,7 @@ func newInitCmd() *cobra.Command {
 
 // runInit resolves the target path and registers it, reporting the tracking
 // defaults and any worktrees adopted during registration, then prompts for
-// setup-steps consent if the repository's trusted `.lumberjack.yml` declares
+// setup-steps consent if the repository's governing `.lumberjack.yml` declares
 // run-command steps not yet consented to.
 func runInit(cmd *cobra.Command, args []string) error {
 	path := "."
@@ -44,11 +45,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolving path %q: %w", path, err)
 	}
-	format, err := outputFormat(cmd)
+	format, err := cli.OutputFormat(cmd)
 	if err != nil {
 		return err
 	}
-	return withClient(cmd, func(ctx context.Context, c *client.Client) error {
+	return cli.WithClient(cmd, func(ctx context.Context, c *client.Client) error {
 		repo, adopted, err := c.InitRepository(ctx, abs)
 		if err != nil {
 			return err
@@ -68,9 +69,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		// A branch/PR/action table of the worktrees adopted during registration.
-		if err := renderWorktreeChanges(out, adopted, format == present.Color); err != nil {
+		if err := cli.RenderWorktreeChanges(out, adopted, format == present.Color); err != nil {
 			return err
 		}
-		return promptSetupConsent(ctx, cmd, c, repo.GetDirPrefix(), repo)
+		return cli.PromptSetupConsent(ctx, cmd, c, repo.GetDirPrefix(), repo)
 	})
 }

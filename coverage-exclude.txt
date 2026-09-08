@@ -29,3 +29,7 @@ internal/database/migrations/embed.go
 # SwiftUI view bodies are not unit-testable in isolation. Logic belonging
 # under test should be moved out of the view rather than exempted.
 MenuBarView.swift
+
+# The cmdlint entrypoint: argument handling, printing and the exit code, around
+# a Check() that its own tests cover in full. Testing it tests os.Exit.
+/scripts/cmdlint/main.go

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ceilingfish/lumberjack/internal/cli"
+
 	"github.com/kardianos/service"
 )
 
@@ -224,7 +226,7 @@ func TestRunInstallCLIOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runInstall: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(binDir, cliBinaryName)); err != nil {
+	if _, err := os.Stat(filepath.Join(binDir, cli.BinaryName)); err != nil {
 		t.Errorf("CLI was not installed: %v", err)
 	}
 	if !strings.Contains(buf.String(), "warning") || !strings.Contains(buf.String(), "PATH") {
@@ -261,7 +263,7 @@ func TestRunUninstallMutualExclusivity(t *testing.T) {
 // one without erroring, since uninstall's goal state is already met.
 func TestUninstallCLI(t *testing.T) {
 	binDir := t.TempDir()
-	dest := filepath.Join(binDir, cliBinaryName)
+	dest := filepath.Join(binDir, cli.BinaryName)
 	if err := os.WriteFile(dest, []byte("binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}

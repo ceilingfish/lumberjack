@@ -1,4 +1,4 @@
-package cmd
+package cli
 
 import (
 	"strings"
@@ -47,15 +47,15 @@ func TestParseLockStrategy(t *testing.T) {
 		"abort":  lumberjackv1.LockStrategy_LOCK_STRATEGY_ABORT,
 	}
 	for value, want := range cases {
-		got, err := parseLockStrategy(value)
+		got, err := ParseLockStrategy(value)
 		if err != nil {
-			t.Fatalf("parseLockStrategy(%q): %v", value, err)
+			t.Fatalf("ParseLockStrategy(%q): %v", value, err)
 		}
 		if got != want {
-			t.Errorf("parseLockStrategy(%q) = %v, want %v", value, got, want)
+			t.Errorf("ParseLockStrategy(%q) = %v, want %v", value, got, want)
 		}
 	}
-	if _, err := parseLockStrategy("unlck"); err == nil {
-		t.Error("parseLockStrategy accepted a misspelt value")
+	if _, err := ParseLockStrategy("unlck"); err == nil {
+		t.Error("ParseLockStrategy accepted a misspelt value")
 	}
 }

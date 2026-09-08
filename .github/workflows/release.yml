@@ -76,7 +76,7 @@ jobs:
           mkdir -p dist
           for arch in arm64 amd64; do
             CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
-              -ldflags "-X github.com/ceilingfish/lumberjack/cmd.version=${TAG}" \
+              -ldflags "-X github.com/ceilingfish/lumberjack/internal/cli.Version=${TAG}" \
               -o "dist/lumberjack-darwin-$arch" .
           done
       - name: Attach binaries to the GitHub release
