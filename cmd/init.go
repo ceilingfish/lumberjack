@@ -33,7 +33,7 @@ func newInitCmd() *cobra.Command {
 
 // runInit resolves the target path and registers it, reporting the tracking
 // defaults and any worktrees adopted during registration, then prompts for
-// setup-steps consent if the repository's trusted `.lumberjack.yml` declares
+// setup-steps consent if the repository's governing `.lumberjack.yml` declares
 // run-command steps not yet consented to.
 func runInit(cmd *cobra.Command, args []string) error {
 	path := "."

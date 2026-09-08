@@ -25,17 +25,13 @@ func (s *Service) runSetupSteps(
 	ctx context.Context, repo *schema.Repository, dir string, worktreeID int64,
 	preserveExisting bool,
 ) string {
-	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
+	cfg, raw, err := s.loadSetupConfig(ctx, repo)
 	if err != nil {
 		msg := fmt.Sprintf("loading %s: %v", setup.ConfigFileName, err)
 		s.recordSetupError(ctx, worktreeID, &msg)
 		return msg
 	}
 	if cfg == nil || len(cfg.Steps) == 0 {
-		if msg := s.untrustedSetupConfigNotice(ctx, repo); msg != "" {
-			s.recordSetupError(ctx, worktreeID, &msg)
-			return msg
-		}
 		s.recordSetupError(ctx, worktreeID, nil)
 		return ""
 	}
@@ -74,26 +70,6 @@ func (s *Service) recordSetupError(ctx context.Context, worktreeID int64, msg *s
 	_ = s.db.SetWorktreeSetupError(ctx, worktreeID, msg)
 }
 
-// untrustedSetupConfigNotice explains why a worktree came up unconfigured
-// when the local checkout has setup steps that the trusted default-branch tip
-// does not: the config has not been merged and pushed yet. Reading only the
-// pushed default branch is the trust boundary and stays; this makes the
-// resulting skip visible instead of looking like a success. It returns "" when
-// there is nothing to explain, including when the local config cannot be read
-// — a notice is not worth failing or misreporting a worktree over.
-func (s *Service) untrustedSetupConfigNotice(ctx context.Context, repo *schema.Repository) string {
-	local, err := setup.Resolve(repo.LocalPath)
-	if err != nil || local.Config == nil || len(local.Config.Steps) == 0 {
-		return ""
-	}
-	ref, err := s.trustedRef(ctx, repo)
-	if err != nil {
-		return ""
-	}
-	return fmt.Sprintf("local %s has %d step(s) that are not on %s, so no setup steps ran",
-		setup.ConfigFileName, len(local.Config.Steps), ref)
-}
-
 // applySetupError folds a persisted setup failure into a live reconciliation
 // Status, so it surfaces through the same reconciliation-note/status field
 // the CLI already renders. A setup failure always needs attention, regardless
@@ -110,11 +86,18 @@ func applySetupError(st *worktree.Status, setupErr *string) {
 	st.Note += "; setup: " + *setupErr
 }
 
-// loadTrustedSetupConfig reads and parses `.lumberjack.yml` from repo's
-// trusted default-branch tip — never the branch being cloned, so a PR author
-// cannot use it to run arbitrary code on the user's machine. It returns
-// (nil, nil, nil) when the repository has no such file there.
-func (s *Service) loadTrustedSetupConfig(ctx context.Context, repo *schema.Repository) (*setup.Config, []byte, error) {
+// loadSetupConfig reads and parses the `.lumberjack.yml` governing repo. The
+// main checkout's own file wins when it has one — it is the user's working
+// tree, so steps they are still iterating on run without having to push them
+// first — and the repository's trusted default-branch tip is the fallback.
+// Neither source is ever the branch being cloned, so a PR author cannot use
+// this to run arbitrary code on the user's machine; run-commands from either
+// source still need the local user's consent. It returns (nil, nil, nil) when
+// there is no config in either place.
+func (s *Service) loadSetupConfig(ctx context.Context, repo *schema.Repository) (*setup.Config, []byte, error) {
+	if local, err := setup.Resolve(repo.LocalPath); err == nil && local.ConfigPath != "" {
+		return local.Config, local.Raw, nil
+	}
 	ref, err := s.trustedRef(ctx, repo)
 	if err != nil {
 		return nil, nil, err
@@ -152,7 +135,7 @@ type SetupSteps struct {
 }
 
 func (s *Service) GetSetupSteps(ctx context.Context, repo *schema.Repository) (SetupSteps, error) {
-	cfg, raw, err := s.loadTrustedSetupConfig(ctx, repo)
+	cfg, raw, err := s.loadSetupConfig(ctx, repo)
 	if err != nil {
 		return SetupSteps{}, err
 	}
@@ -179,7 +162,7 @@ func (s *Service) TrustSetupSteps(ctx context.Context, repo *schema.Repository, 
 func (s *Service) SetSetupConsent(
 	ctx context.Context, repo *schema.Repository, checksum string,
 ) (bool, error) {
-	_, raw, err := s.loadTrustedSetupConfig(ctx, repo)
+	_, raw, err := s.loadSetupConfig(ctx, repo)
 	if err != nil {
 		return false, err
 	}

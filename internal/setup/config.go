@@ -1,9 +1,10 @@
 // Package setup parses and runs the `.lumberjack.yml` setup steps that the
 // daemon executes against a freshly cloned worktree (see the Feature #5
-// design notes). The config is always read from the repository's trusted
-// default-branch tip — never the branch being cloned — so a PR author cannot
-// smuggle arbitrary run-commands onto the user's machine; that trust decision
-// is enforced by the caller (internal/daemon), not this package.
+// design notes). The config is read from the main checkout when it has one and
+// from the repository's trusted default-branch tip otherwise — never from the
+// branch being cloned, so a PR author cannot smuggle arbitrary run-commands
+// onto the user's machine; that trust decision is enforced by the caller
+// (internal/daemon), not this package.
 package setup
 
 import (
