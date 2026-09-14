@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/ceilingfish/lumberjack/compare/v0.4.0...v0.5.0) (2026-09-14)
+
+
+### Features
+
+* add an in-repo Homebrew tap that builds from source ([#102](https://github.com/ceilingfish/lumberjack/issues/102)) ([4755c2a](https://github.com/ceilingfish/lumberjack/commit/4755c2ad6afb76c14d7f2ef71c65ff0d9e0bbb28))
+
+
+### Bug Fixes
+
+* link a worktree to a PR whose lifetime falls between sync ticks ([#103](https://github.com/ceilingfish/lumberjack/issues/103)) ([50b5190](https://github.com/ceilingfish/lumberjack/commit/50b5190328a8c88e21734eadfaa098d0837697fa)), closes [#98](https://github.com/ceilingfish/lumberjack/issues/98)
+
 ## [0.4.0](https://github.com/ceilingfish/lumberjack/compare/v0.3.0...v0.4.0) (2026-09-06)
 
 
