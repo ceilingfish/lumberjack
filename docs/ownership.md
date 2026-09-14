@@ -25,6 +25,18 @@ Automation aimed at one is actively harmful applied to the other. Rewriting a
 colleague's branch to fix their lint errors is not a feature. So ownership is
 not a display nicety; it is the safety boundary that lets any of the rest exist.
 
+### A note on `gh api` and doctrine
+
+Condition 3 reads commit authorship from the GitHub API rather than from local
+git. This is not a departure from the "shell out to `git` and `gh`" rule in
+AGENTS.md: `gh api` *is* `gh`, so Lumberjack still inherits `gh auth login`
+credentials, stores no tokens, and adds no HTTP client or API dependency.
+
+Git remains the source for everything only git knows — worktree registration,
+dirtiness, local tips, merge bases — and `gh` answers the questions that are
+GitHub's to answer. Email-to-account resolution is one of those: it depends on
+verified-address state held server-side that no client can see.
+
 ## Determining ownership
 
 Three independent facts can establish that a worktree is owned. They differ in
@@ -62,40 +74,90 @@ is, and it is immutable for the life of the PR — the same property that makes
 `--json` selection (`gh` returns `author.login`). `FindPRForBranch` adds the
 same, so a PR discovered after the fact between sync ticks is classified too.
 
-Ownership is then `author_login == repositories.login` — the `gh` account the
-repository was registered under, which the daemon already switches to before
-every operation. Comparison is case-insensitive; GitHub logins are not
-case-sensitive. A repository with an empty `login` (tracked before that column
-existed) cannot evaluate this condition and falls through to condition 3.
-
-The comparison is **derived at read time, not stored**. Both operands are
-already in the database, the join is trivial, and persisting the verdict would
-create a third copy of a fact that goes stale the moment `lumberjack set-login`
-changes the account.
+Ownership is then "the author is one of the user's identities" — see "Identity
+sets" below, which is not the single-login comparison an earlier draft of this
+spec assumed. The comparison is **derived at read time, not stored**: both
+operands are already in the database, and persisting the verdict would create a
+third copy of a fact that goes stale the moment the identity set changes.
 
 ### 3. Every commit on the branch is the user's
 
 This covers the case the other two miss: a branch pushed and adopted, with no
 PR yet. If the only commits between the default branch and the branch tip were
-made by the user, it is their work.
+authored by the user, it is their work.
 
-This is live git state and changes with every push, so it is **derived, never
-stored** — `git log <base>..<branch> --format=%ae` against the merge base.
+**Do not compute the email → account association locally.** GitHub already
+performs it, against the full set of verified addresses on an account plus the
+`users.noreply` forms, and neither of those is knowable from the client. Every
+commit object the API returns carries both the raw git trailer and the resolved
+account:
 
-The wrinkle is identity matching: git commits carry an email and name, `gh`
-carries a login, and nothing guarantees they agree. Resolve the login to a set
-of acceptable commit identities once per repository, cached for the daemon's
-lifetime:
+```
+$ gh api "repos/ceilingfish/lumberjack/compare/0f1d30f...main" \
+    --jq '[.commits[] | {e: .commit.author.email, login: (.author.login // "UNRESOLVED")}]'
+[{"e":"ceilingfish@gmail.com","login":"ceilingfish"}, ...]
+```
 
-- GitHub's noreply form, `<id>+<login>@users.noreply.github.com` and the older
-  `<login>@users.noreply.github.com`, which embed the login directly.
-- The addresses on the account, from `gh api user/emails --jq '.[].email'`.
-- The local `user.email` configured in the main checkout, which is what the
-  user's own commits will actually carry in practice.
+Three properties of this data decide the design:
 
-An empty commit range (branch tip equals the merge base) is **not** owned —
-a freshly adopted branch with no commits of its own tells us nothing, and
+- **Key on `author`, never `committer`.** On this repository's own `main` the
+  committer resolves to `web-flow` — GitHub's web-UI merge bot, email
+  `noreply@github.com` — because the commits were squash-merged through the web
+  UI. Committer identifies whoever applied the commit; author identifies who
+  wrote it, which is the question ownership asks.
+- **`author` may be null.** An address belonging to no GitHub account resolves
+  to nothing. Null means *unknown*, and must fall to the `unknown` ownership
+  state — never to `incoming`, and never to a local email comparison as a
+  fallback.
+- **`compare/BASE...HEAD` is the right endpoint.** It returns exactly the
+  commits between the merge base and the head in a single call, already
+  resolved. `commits?sha=<branch>` walks the entire history and forces the
+  caller to paginate until it finds the divergence point.
+
+So condition 3 resolves in layers, and needs no local identity matching at all:
+
+| branch state          | source                                              |
+| --------------------- | --------------------------------------------------- |
+| PR exists             | `gh pr view --json commits` → `authors[].login`, already fetched; no extra call |
+| pushed, no PR         | `gh api repos/O/N/compare/<default>...<branch>`      |
+| never pushed          | GitHub knows nothing — and a branch that exists only locally is the user's by construction. Owned, no lookup |
+
+An empty commit range (branch tip equals the merge base) is **not** owned — a
+freshly adopted branch with no commits of its own tells us nothing, and
 defaulting to owned arms automation on the strength of no evidence.
+
+Author resolution is keyed on an immutable commit SHA, so it is cacheable
+indefinitely rather than per-tick.
+
+Two limits to respect: `compare` truncates at 250 commits, so a very long branch
+needs the paginated commits endpoint or an explicit "too large to classify"
+answer; and the API only knows commits that have been pushed.
+
+### Identity sets
+
+A single `repositories.login` comparison is **not sufficient**, and this
+repository is itself the counterexample. It is registered under login
+`ceilingfish`, its local `user.email` is `tom.parrish@parall.ax` resolving to
+`ceilingfish-parallax`, and both accounts author commits on it. Under a
+single-login check the user's own PRs classify as `incoming`.
+
+One human routinely has several GitHub accounts — personal and work, or one per
+client — and `gh` already models this: it authenticates several accounts per
+host, and `ListLogins` already returns them. So ownership compares the PR author
+against an **identity set**:
+
+1. `repositories.login`, the account the repo was registered under.
+2. Every other login `gh` is authenticated as for that host (`gh auth status`),
+   which is already available via `github.Client.ListLogins`.
+3. Any additional logins configured per-repository, for accounts `gh` does not
+   hold — a shared bot, or a second machine's account.
+
+Comparison is case-insensitive; GitHub logins are not case-sensitive. Set 2
+means the common multi-account case needs no configuration at all, which is why
+it is worth preferring over asking the user to list identities up front.
+
+This needs CLI surface to inspect and amend — the user must be able to see why
+a PR was classified the way it was, and correct it.
 
 ### Resolution order
 
@@ -296,10 +358,14 @@ Each of these is a mergeable PR on its own.
 
 1. **Ownership modelling.** `origin` on `worktrees`, `author_login` on
    `pull_requests`, migration `00006`, `AuthorLogin` on `github.PR`, sync
-   wiring, the three-condition resolver with its git-identity matching, the
-   `Ownership` enum on the worktree view, and surfacing in `lumberjack
-   worktrees` and the macOS app. No automation. This is the whole safety
-   boundary and everything else depends on it.
+   wiring, the identity set, the three-condition resolver, the `Ownership` enum
+   on the worktree view, and surfacing in `lumberjack worktrees` and the macOS
+   app. No automation. This is the whole safety boundary and everything else
+   depends on it.
+
+   Worth splitting: conditions 1 and 2 plus the identity set are one PR and
+   deliver most of the value; condition 3, which needs the `compare` fetch and
+   its SHA cache, is a second.
 2. **Mergeability rollup.** The batched GraphQL fetch and `PullRequestState` on
    the worktree view. Coordinate with issue #100 so there is one merge-state
    story, not two.
@@ -321,10 +387,9 @@ Each of these is a mergeable PR on its own.
 - **Interaction with issue #84 (sync scope).** Ownership is arguably a scope
   dimension too: "sync my PRs only" is a thing people will want. Whether that is
   a fourth scope mode or an orthogonal filter should be settled before #84 lands.
-- **Condition 3's cost.** A `git log` per unlinked worktree per tick is cheap
-  individually and not free in aggregate. It may need the same
-  cache-the-negative-answer treatment the no-PR-for-this-branch lookup already
-  gets.
+- **Condition 3's cost.** One `compare` call per unlinked, pushed, PR-less
+  worktree. Cheap individually, not free in aggregate. Results cache on the
+  immutable head SHA, so steady-state cost is zero and only a moved head pays.
 - **Fork PRs.** An incoming PR from a fork has a head branch that does not exist
   on the origin remote. Worktree creation for those is a pre-existing question,
   but ranking makes it more pressing, since fork PRs are exactly the incoming
