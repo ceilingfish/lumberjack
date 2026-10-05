@@ -216,11 +216,12 @@ func TestClientHealth(t *testing.T) {
 
 func TestClientInitAndAlreadyExists(t *testing.T) {
 	c := startStub(t)
-	repo, _, err := c.InitRepository(context.Background(), "/new")
+	resp, err := c.InitRepository(context.Background(), "/new")
+	repo := resp.GetRepository()
 	if err != nil || repo.GetDirPrefix() != "repo" {
 		t.Errorf("InitRepository = %v, %v", repo, err)
 	}
-	_, _, err = c.InitRepository(context.Background(), "/dupe")
+	_, err = c.InitRepository(context.Background(), "/dupe")
 	if !errors.Is(err, ErrAlreadyExists) {
 		t.Errorf("expected ErrAlreadyExists, got %v", err)
 	}
@@ -510,7 +511,7 @@ func TestEveryMethodMapsServerErrors(t *testing.T) {
 			return err
 		},
 		"InitRepository": func(c *Client) error {
-			_, _, err := c.InitRepository(context.Background(), "/p")
+			_, err := c.InitRepository(context.Background(), "/p")
 			return err
 		},
 		"ListRepositories": func(c *Client) error {

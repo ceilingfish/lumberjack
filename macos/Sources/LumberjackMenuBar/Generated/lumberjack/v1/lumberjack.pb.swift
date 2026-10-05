@@ -541,11 +541,35 @@ nonisolated struct Lumberjack_V1_InitRepositoryResponse: Sendable {
   /// no sibling worktrees.
   var adopted: [Lumberjack_V1_WorktreeChange] = []
 
+  var sshKeychain: Lumberjack_V1_SshKeychainCheck {
+    get {_sshKeychain ?? Lumberjack_V1_SshKeychainCheck()}
+    set {_sshKeychain = newValue}
+  }
+  /// Returns true if `sshKeychain` has been explicitly set.
+  var hasSshKeychain: Bool {self._sshKeychain != nil}
+  /// Clears the value of `sshKeychain`. Subsequent reads from it will return its default value.
+  mutating func clearSshKeychain() {self._sshKeychain = nil}
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
   fileprivate var _repository: Lumberjack_V1_Repository? = nil
+  fileprivate var _sshKeychain: Lumberjack_V1_SshKeychainCheck? = nil
+}
+
+nonisolated struct Lumberjack_V1_SshKeychainCheck: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var lockedKeys: [String] = []
+
+  var useKeychainDisabled: Bool = false
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
 }
 
 nonisolated struct Lumberjack_V1_ListRepositoriesRequest: Sendable {
@@ -965,11 +989,21 @@ nonisolated struct Lumberjack_V1_SyncSummary: Sendable {
   /// Clears the value of `error`. Subsequent reads from it will return its default value.
   mutating func clearError() {self._error = nil}
 
+  var sshKeychain: Lumberjack_V1_SshKeychainCheck {
+    get {_sshKeychain ?? Lumberjack_V1_SshKeychainCheck()}
+    set {_sshKeychain = newValue}
+  }
+  /// Returns true if `sshKeychain` has been explicitly set.
+  var hasSshKeychain: Bool {self._sshKeychain != nil}
+  /// Clears the value of `sshKeychain`. Subsequent reads from it will return its default value.
+  mutating func clearSshKeychain() {self._sshKeychain = nil}
+
   var unknownFields = SwiftProtobuf.UnknownStorage()
 
   init() {}
 
   fileprivate var _error: String? = nil
+  fileprivate var _sshKeychain: Lumberjack_V1_SshKeychainCheck? = nil
 }
 
 /// LockDecision is a strategy chosen for one specific locked worktree, as the
@@ -1606,7 +1640,7 @@ nonisolated extension Lumberjack_V1_InitRepositoryRequest: SwiftProtobuf.Message
 
 nonisolated extension Lumberjack_V1_InitRepositoryResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".InitRepositoryResponse"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{2}\u{2}adopted\0\u{b}adopted_branches\0\u{c}\u{2}\u{1}")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{2}\u{2}adopted\0\u{3}ssh_keychain\0\u{b}adopted_branches\0\u{c}\u{2}\u{1}")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1616,6 +1650,7 @@ nonisolated extension Lumberjack_V1_InitRepositoryResponse: SwiftProtobuf.Messag
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._repository) }()
       case 3: try { try decoder.decodeRepeatedMessageField(value: &self.adopted) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._sshKeychain) }()
       default: break
       }
     }
@@ -1632,12 +1667,51 @@ nonisolated extension Lumberjack_V1_InitRepositoryResponse: SwiftProtobuf.Messag
     if !self.adopted.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.adopted, fieldNumber: 3)
     }
+    try { if let v = self._sshKeychain {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
   static func ==(lhs: Lumberjack_V1_InitRepositoryResponse, rhs: Lumberjack_V1_InitRepositoryResponse) -> Bool {
     if lhs._repository != rhs._repository {return false}
     if lhs.adopted != rhs.adopted {return false}
+    if lhs._sshKeychain != rhs._sshKeychain {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_SshKeychainCheck: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".SshKeychainCheck"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}locked_keys\0\u{3}use_keychain_disabled\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedStringField(value: &self.lockedKeys) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.useKeychainDisabled) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.lockedKeys.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.lockedKeys, fieldNumber: 1)
+    }
+    if self.useKeychainDisabled != false {
+      try visitor.visitSingularBoolField(value: self.useKeychainDisabled, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_SshKeychainCheck, rhs: Lumberjack_V1_SshKeychainCheck) -> Bool {
+    if lhs.lockedKeys != rhs.lockedKeys {return false}
+    if lhs.useKeychainDisabled != rhs.useKeychainDisabled {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2409,7 +2483,7 @@ nonisolated extension Lumberjack_V1_SyncResponse: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension Lumberjack_V1_SyncSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   static let protoMessageName: String = _protobuf_package + ".SyncSummary"
-  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}status\0\u{3}worktrees_created\0\u{3}worktrees_removed\0\u{1}error\0")
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}status\0\u{3}worktrees_created\0\u{3}worktrees_removed\0\u{1}error\0\u{3}ssh_keychain\0")
 
   mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2421,6 +2495,7 @@ nonisolated extension Lumberjack_V1_SyncSummary: SwiftProtobuf.Message, SwiftPro
       case 2: try { try decoder.decodeSingularInt64Field(value: &self.worktreesCreated) }()
       case 3: try { try decoder.decodeSingularInt64Field(value: &self.worktreesRemoved) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self._error) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._sshKeychain) }()
       default: break
       }
     }
@@ -2443,6 +2518,9 @@ nonisolated extension Lumberjack_V1_SyncSummary: SwiftProtobuf.Message, SwiftPro
     try { if let v = self._error {
       try visitor.visitSingularStringField(value: v, fieldNumber: 4)
     } }()
+    try { if let v = self._sshKeychain {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2451,6 +2529,7 @@ nonisolated extension Lumberjack_V1_SyncSummary: SwiftProtobuf.Message, SwiftPro
     if lhs.worktreesCreated != rhs.worktreesCreated {return false}
     if lhs.worktreesRemoved != rhs.worktreesRemoved {return false}
     if lhs._error != rhs._error {return false}
+    if lhs._sshKeychain != rhs._sshKeychain {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
