@@ -34,6 +34,7 @@ func RunSync(ctx context.Context, cmd *cobra.Command, c *client.Client, ref stri
 	// by name keeps this correct regardless of interleaving.
 	changes := map[string][]*lumberjackv1.WorktreeChange{}
 	var results []syncResult
+	var keychain []*lumberjackv1.SshKeychainCheck
 
 	err := c.Sync(ctx, ref, func(e *lumberjackv1.SyncResponse) error {
 		repo := e.GetRepository()
@@ -50,6 +51,7 @@ func RunSync(ctx context.Context, cmd *cobra.Command, c *client.Client, ref stri
 		repoChanges := changes[repo]
 		delete(changes, repo)
 		s := e.GetSummary()
+		keychain = append(keychain, s.GetSshKeychain())
 
 		if format == present.JSON {
 			changeRaws := make([]json.RawMessage, len(repoChanges))
@@ -81,9 +83,11 @@ func RunSync(ctx context.Context, cmd *cobra.Command, c *client.Client, ref stri
 	}
 
 	if format == present.JSON {
-		return present.WriteJSONArray(out, results)
+		if err := present.WriteJSONArray(out, results); err != nil {
+			return err
+		}
 	}
-	return nil
+	return PromptSSHKeychain(cmd, format != present.JSON, keychain...)
 }
 
 func summaryStatus(s *lumberjackv1.SyncSummary, color bool) string {
