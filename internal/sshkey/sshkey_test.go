@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func onDarwin(t *testing.T) {
@@ -298,5 +299,49 @@ func TestKeychainKeysSurfacesSSHAddFailure(t *testing.T) {
 	}}
 	if _, err := c.keychainKeys(context.Background()); err == nil || !strings.Contains(err.Error(), "unknown option") {
 		t.Errorf("keychainKeys err = %v", err)
+	}
+}
+
+func TestNewSurfacesAMissingHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	if _, err := New(); err == nil {
+		t.Error("New err = nil, want the missing home error")
+	}
+}
+
+func TestKeychainKeysSurfacesAgentFailures(t *testing.T) {
+	c := &Checker{Run: func(context.Context, []string, string, ...string) (string, string, error) {
+		t.Error("ssh-add ran despite the agent failing")
+		return "", "", nil
+	}}
+	t.Run("no temp dir", func(t *testing.T) {
+		t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
+		if _, err := c.keychainKeys(context.Background()); err == nil {
+			t.Error("keychainKeys err = nil, want the temp dir failure")
+		}
+	})
+	t.Run("no ssh-agent", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		if _, err := c.keychainKeys(context.Background()); err == nil || !strings.Contains(err.Error(), "starting ssh-agent") {
+			t.Errorf("keychainKeys err = %v", err)
+		}
+	})
+	t.Run("agent never listens", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "ssh-agent"), []byte("#!/bin/sh\nexec sleep 5\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", dir)
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		if _, err := c.keychainKeys(ctx); err == nil || !strings.Contains(err.Error(), "did not start") {
+			t.Errorf("keychainKeys err = %v", err)
+		}
+	})
+}
+
+func TestFirstNonEmptyFallsBackToEmpty(t *testing.T) {
+	if got := firstNonEmpty("", ""); got != "" {
+		t.Errorf("firstNonEmpty = %q", got)
 	}
 }

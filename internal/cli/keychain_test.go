@@ -155,3 +155,65 @@ func TestRunSyncAdvisesOnLockedSSHKeys(t *testing.T) {
 		t.Errorf("stderr = %q, want the fix command", f.stderr.String())
 	}
 }
+
+func TestDescribeSSHKeychainSurfacesFailedWrites(t *testing.T) {
+	for succeed := range 6 {
+		w := &flakyWriter{succeed: succeed}
+		if err := describeSSHKeychain(w, []string{"/k"}, true, "/config"); !errors.Is(err, errWrite) {
+			t.Errorf("succeed=%d: err = %v, want the failed write", succeed, err)
+		}
+	}
+}
+
+func TestPromptSSHKeychainSurfacesAFailedDescription(t *testing.T) {
+	f := newKeychainFixture(t, true)
+	c := cmdWith("", &bytes.Buffer{})
+	c.SetErr(failWriter{})
+	check := &lumberjackv1.SshKeychainCheck{LockedKeys: []string{"/k"}}
+	if err := PromptSSHKeychain(c, true, check); !errors.Is(err, errWrite) {
+		t.Errorf("err = %v, want the failed write", err)
+	}
+	if len(f.added) != 0 {
+		t.Errorf("added = %v, want none", f.added)
+	}
+}
+
+func TestAppendUseKeychainSurfacesAnUnwritableConfig(t *testing.T) {
+	if err := appendUseKeychain(t.TempDir()); err == nil {
+		t.Error("appendUseKeychain err = nil, want the open failure")
+	}
+}
+
+func TestSSHConfigPathDefaultsUnderHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := SSHConfigPath()
+	if err != nil || got != filepath.Join(home, ".ssh", "config") {
+		t.Errorf("SSHConfigPath = %q, %v", got, err)
+	}
+	t.Setenv("HOME", "")
+	if _, err := SSHConfigPath(); err == nil {
+		t.Error("SSHConfigPath err = nil, want the missing home error")
+	}
+}
+
+func TestSSHAddRunsTheKeychainVariant(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "args")
+	script := "#!/bin/sh\necho \"$@\" > " + log + "\necho added >&2\n"
+	if err := os.WriteFile(filepath.Join(dir, "ssh-add"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	var stderr bytes.Buffer
+	c := cmdWith("", &bytes.Buffer{})
+	c.SetErr(&stderr)
+	c.SetContext(context.Background())
+	if err := SSHAdd(c, "/k"); err != nil {
+		t.Fatalf("SSHAdd: %v", err)
+	}
+	args, _ := os.ReadFile(log)
+	if strings.TrimSpace(string(args)) != "--apple-use-keychain /k" || strings.TrimSpace(stderr.String()) != "added" {
+		t.Errorf("args = %q, stderr = %q", args, stderr.String())
+	}
+}
