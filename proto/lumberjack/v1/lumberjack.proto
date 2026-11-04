@@ -229,6 +229,12 @@ message InitRepositoryResponse {
   // with action ADOPTED and no PR number yet). Empty for a fresh checkout with
   // no sibling worktrees.
   repeated WorktreeChange adopted = 3;
+  SshKeychainCheck ssh_keychain = 4;
+}
+
+message SshKeychainCheck {
+  repeated string locked_keys = 1;
+  bool use_keychain_disabled = 2;
 }
 
 message ListRepositoriesRequest {}
@@ -385,6 +391,7 @@ message SyncSummary {
   int64 worktrees_created = 2;
   int64 worktrees_removed = 3;
   optional string error = 4;
+  SshKeychainCheck ssh_keychain = 5;
 }
 
 // LockStrategy is what Tidy does with a misplaced worktree git has locked.

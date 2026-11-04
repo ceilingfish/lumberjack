@@ -16,6 +16,7 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/ghauth"
 	"github.com/ceilingfish/lumberjack/internal/github"
+	"github.com/ceilingfish/lumberjack/internal/sshkey"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
 
@@ -281,6 +282,17 @@ func (f *fakeGit) ShowFile(_ context.Context, _, ref, path string) ([]byte, bool
 }
 
 // fakeGH satisfies GHOps.
+type fakeSSH struct {
+	report  sshkey.Report
+	err     error
+	checked []string
+}
+
+func (f *fakeSSH) Check(_ context.Context, remoteURL string) (sshkey.Report, error) {
+	f.checked = append(f.checked, remoteURL)
+	return f.report, f.err
+}
+
 type fakeGH struct {
 	mu       sync.Mutex
 	info     github.RepoInfo
@@ -402,6 +414,7 @@ type harness struct {
 	svc    *Service
 	db     *database.Client
 	git    *fakeGit
+	ssh    *fakeSSH
 	gh     *fakeGH
 	parent string // worktree parent dir (a temp dir)
 }
@@ -416,10 +429,12 @@ func newHarness(t *testing.T) *harness {
 
 	git := newFakeGit()
 	gh := &fakeGH{info: github.RepoInfo{Owner: "o", Name: "n", Host: "github.com", DefaultBranch: "main"}}
+	ssh := &fakeSSH{}
 	return &harness{
-		svc:    NewService(db, git, gh),
+		svc:    NewService(db, git, gh, ssh),
 		db:     db,
 		git:    git,
+		ssh:    ssh,
 		gh:     gh,
 		parent: t.TempDir(),
 	}

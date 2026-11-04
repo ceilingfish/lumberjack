@@ -62,8 +62,9 @@ func (s *Server) InitRepository(ctx context.Context, req *lumberjackv1.InitRepos
 	pb := toProtoRepository(repo)
 	s.decorateSetupSteps(ctx, pb, repo)
 	return &lumberjackv1.InitRepositoryResponse{
-		Repository: pb,
-		Adopted:    adoptedPB,
+		Repository:  pb,
+		Adopted:     adoptedPB,
+		SshKeychain: toProtoSSHKeychain(s.svc.SSHKeychain(ctx, repo)),
 	}, nil
 }
 
@@ -287,11 +288,13 @@ func (s *Server) syncOne(stream grpc.ServerStreamingServer[lumberjackv1.SyncResp
 	}
 
 	created, removed, syncErr := s.svc.SyncRepository(stream.Context(), repo, progress)
+	summary := toProtoSyncSummary(created, removed, syncErr)
+	summary.SshKeychain = toProtoSSHKeychain(s.svc.SSHKeychain(stream.Context(), repo))
 
 	return stream.Send(&lumberjackv1.SyncResponse{
 		Repository: name,
 		Completed:  true,
-		Summary:    toProtoSyncSummary(created, removed, syncErr),
+		Summary:    summary,
 	})
 }
 

@@ -15,8 +15,13 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 	"github.com/ceilingfish/lumberjack/internal/ghauth"
 	"github.com/ceilingfish/lumberjack/internal/github"
+	"github.com/ceilingfish/lumberjack/internal/sshkey"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
+
+type SSHOps interface {
+	Check(ctx context.Context, remoteURL string) (sshkey.Report, error)
+}
 
 // GitOps is the git surface the sync engine needs. *worktree.Git satisfies it;
 // the interface exists so the engine is unit-testable with a fake git.
@@ -90,6 +95,7 @@ type Service struct {
 	db  *database.Client
 	git GitOps
 	gh  GHOps
+	ssh SSHOps
 	now func() time.Time
 
 	global    sync.RWMutex
@@ -109,8 +115,21 @@ type Service struct {
 
 // NewService constructs the daemon domain Service. fx supplies the concrete
 // dependencies.
-func NewService(db *database.Client, git GitOps, gh GHOps) *Service {
-	return &Service{db: db, git: git, gh: gh, now: time.Now, events: NewBroadcaster()}
+func NewService(db *database.Client, git GitOps, gh GHOps, ssh SSHOps) *Service {
+	return &Service{db: db, git: git, gh: gh, ssh: ssh, now: time.Now, events: NewBroadcaster()}
+}
+
+func (s *Service) SSHKeychain(ctx context.Context, repo *schema.Repository) sshkey.Report {
+	remoteURL, err := s.git.RemoteURL(ctx, repo.LocalPath, repo.DefaultRemote)
+	if err != nil {
+		return sshkey.Report{}
+	}
+	report, err := s.ssh.Check(ctx, remoteURL)
+	if err != nil {
+		log.Printf("ssh keychain check: %s: %v", displayName(repo), err)
+		return sshkey.Report{}
+	}
+	return report
 }
 
 // Subscribe registers a new Watch subscriber; see Broadcaster.Subscribe.
