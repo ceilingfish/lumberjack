@@ -329,47 +329,52 @@ func (c *Client) FindPRForBranch(ctx context.Context, repo RepoInfo, branch stri
 	return PR{Number: raw[best].Number, HeadBranch: raw[best].HeadRefName}, true, nil
 }
 
-// PRMerged reports whether pull request number in repo was merged (as opposed
-// to still open, or closed without merging). Reconciliation uses it to tell a
-// merged worktree — whose branch commits are safely on the base branch, even
-// after a squash merge deletes the head ref — from one abandoned with un-pushed
-// local work.
-func (c *Client) PRMerged(ctx context.Context, repo RepoInfo, number int64) (bool, error) {
-	out, err := c.run(ctx, "", "pr", "view", strconv.FormatInt(number, 10),
-		"--repo", fmt.Sprintf("%s/%s/%s", repo.Host, repo.Owner, repo.Name),
-		"--json", "state")
-	if err != nil {
-		return false, err
-	}
-	var v struct {
-		State string `json:"state"`
-	}
-	if err := json.Unmarshal([]byte(out), &v); err != nil {
-		return false, fmt.Errorf("parsing gh pr view: %w", err)
-	}
-	// gh reports state as OPEN, CLOSED, or MERGED.
-	return v.State == "MERGED", nil
-}
-
 const (
 	mergedBatchSize = 100
 	flagHostname    = "--hostname"
 )
 
-func (c *Client) MergedPRs(ctx context.Context, repo RepoInfo, numbers []int64) (map[int64]bool, error) {
+type MergeResult struct {
+	Merged bool
+	Err    error
+}
+
+func (c *Client) MergedPRs(ctx context.Context, repo RepoInfo, numbers []int64) map[int64]MergeResult {
 	nums := slices.Clone(numbers)
 	slices.Sort(nums)
 	nums = slices.Compact(nums)
-	merged := make(map[int64]bool, len(nums))
+	results := make(map[int64]MergeResult, len(nums))
 	for chunk := range slices.Chunk(nums, mergedBatchSize) {
-		if err := c.mergedChunk(ctx, repo, chunk, merged); err != nil {
-			return nil, err
-		}
+		c.mergedChunk(ctx, repo, chunk, results)
 	}
-	return merged, nil
+	return results
 }
 
-func (c *Client) mergedChunk(ctx context.Context, repo RepoInfo, nums []int64, merged map[int64]bool) error {
+func (c *Client) mergedChunk(ctx context.Context, repo RepoInfo, nums []int64, results map[int64]MergeResult) {
+	states, err := c.queryPRStates(ctx, repo, nums)
+	if err != nil {
+		if len(nums) > 1 && strings.Contains(err.Error(), "GraphQL:") {
+			mid := len(nums) / 2
+			c.mergedChunk(ctx, repo, nums[:mid], results)
+			c.mergedChunk(ctx, repo, nums[mid:], results)
+			return
+		}
+		for _, n := range nums {
+			results[n] = MergeResult{Err: err}
+		}
+		return
+	}
+	for _, n := range nums {
+		state, ok := states[n]
+		if !ok {
+			results[n] = MergeResult{Err: fmt.Errorf("gh api graphql: no state returned for PR #%d", n)}
+			continue
+		}
+		results[n] = MergeResult{Merged: state == "MERGED"}
+	}
+}
+
+func (c *Client) queryPRStates(ctx context.Context, repo RepoInfo, nums []int64) (map[int64]string, error) {
 	var q strings.Builder
 	q.WriteString("query($owner:String!,$name:String!){repository(owner:$owner,name:$name){")
 	for _, n := range nums {
@@ -386,7 +391,7 @@ func (c *Client) mergedChunk(ctx context.Context, repo RepoInfo, nums []int64, m
 		"-f", "name="+repo.Name,
 		"-f", "query="+q.String())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var v struct {
 		Data struct {
@@ -396,16 +401,15 @@ func (c *Client) mergedChunk(ctx context.Context, repo RepoInfo, nums []int64, m
 		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(out), &v); err != nil {
-		return fmt.Errorf("parsing gh api graphql: %w", err)
+		return nil, fmt.Errorf("parsing gh api graphql: %w", err)
 	}
+	states := make(map[int64]string, len(nums))
 	for _, n := range nums {
-		pr := v.Data.Repository["pr"+strconv.FormatInt(n, 10)]
-		if pr == nil {
-			return fmt.Errorf("gh api graphql: no state returned for PR #%d", n)
+		if pr := v.Data.Repository["pr"+strconv.FormatInt(n, 10)]; pr != nil {
+			states[n] = pr.State
 		}
-		merged[n] = pr.State == "MERGED"
 	}
-	return nil
+	return states, nil
 }
 
 // resolveBinary returns the path from envVar if set (verified to exist),

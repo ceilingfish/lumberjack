@@ -243,7 +243,7 @@ func TestShowFileMissing(t *testing.T) {
 	}
 }
 
-func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
+func TestWorkingStateAndLocalOnlyCommits(t *testing.T) {
 	g, main := setupRepos(t)
 	ctx := context.Background()
 	if err := g.Fetch(ctx, main, "origin"); err != nil {
@@ -257,10 +257,6 @@ func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
 	}
 
 	// Clean and fully pushed: no dirt, no local-only commits.
-	dirty, err := g.IsDirty(ctx, dir)
-	if err != nil || dirty {
-		t.Fatalf("IsDirty = %v, %v; want false", dirty, err)
-	}
 	n, err := g.LocalOnlyCommits(ctx, dir, g.UserEmail(ctx, dir))
 	if err != nil || n != 0 {
 		t.Fatalf("LocalOnlyCommits = %d, %v; want 0", n, err)
@@ -272,9 +268,6 @@ func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
 	// Make an uncommitted change: dirty.
 	if err := os.WriteFile(filepath.Join(dir, "foo.txt"), []byte("changed\n"), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	if dirty, _ = g.IsDirty(ctx, dir); !dirty {
-		t.Error("expected dirty after edit")
 	}
 	if dirty, branch, _ := g.WorkingState(ctx, dir); !dirty || branch != "feature/foo" {
 		t.Errorf("WorkingState = %v, %q; want dirty on feature/foo", dirty, branch)
@@ -417,7 +410,7 @@ func TestMoveWorktree(t *testing.T) {
 	}
 
 	// The relocated tree is still usable — a git command run inside it works.
-	if _, err := g.IsDirty(ctx, to); err != nil {
+	if _, _, err := g.WorkingState(ctx, to); err != nil {
 		t.Errorf("moved worktree is not a working checkout: %v", err)
 	}
 }

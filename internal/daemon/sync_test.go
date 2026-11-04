@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -154,6 +155,26 @@ func TestSyncBatchesMergedLookupAcrossWorktrees(t *testing.T) {
 	}
 	if len(h.gh.mergedBatches) != 1 || len(h.gh.mergedBatches[0]) != 6 {
 		t.Errorf("merged lookups = %v, want a single batch of 6", h.gh.mergedBatches)
+	}
+}
+
+func TestSyncUnresolvablePRDoesNotBlockOtherRemovals(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	for n := int64(1); n <= 3; n++ {
+		h.gh.prs = append(h.gh.prs, github.PR{Number: n, HeadBranch: fmt.Sprintf("b%d", n)})
+	}
+	h.seedSync(t, repo)
+	h.gh.prs = nil
+	h.gh.merged = map[int64]bool{1: true, 2: true}
+	h.gh.mergedErrs = map[int64]error{3: errors.New("Could not resolve to a PullRequest")}
+
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, nil)
+	if err == nil || !strings.Contains(err.Error(), "Could not resolve") {
+		t.Errorf("sync error = %v, want the PR #3 failure", err)
+	}
+	if removed != 2 {
+		t.Errorf("removed = %d, want 2", removed)
 	}
 }
 

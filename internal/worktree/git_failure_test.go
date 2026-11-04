@@ -215,18 +215,6 @@ func TestListWorktreesError(t *testing.T) {
 	}
 }
 
-func TestIsDirtyError(t *testing.T) {
-	g := stubGit(t, `echo "fatal: not a git repository" >&2; exit 128`)
-
-	dirty, err := g.IsDirty(context.Background(), t.TempDir())
-	if err == nil {
-		t.Fatal("IsDirty: expected an error")
-	}
-	if dirty {
-		t.Error("IsDirty = true on failure, want false")
-	}
-}
-
 func TestLocalOnlyCommitsErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name, script, wantErr string

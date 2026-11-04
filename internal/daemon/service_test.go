@@ -232,15 +232,6 @@ func (f *fakeGit) UnlockWorktree(_ context.Context, _, dir string) error {
 	return nil
 }
 
-func (f *fakeGit) IsDirty(_ context.Context, dir string) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.dirtyErr[dir]; err != nil {
-		return false, err
-	}
-	return f.dirty[dir], nil
-}
-
 func (f *fakeGit) LocalOnlyCommits(_ context.Context, dir, _ string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -310,10 +301,11 @@ type fakeGH struct {
 	prsErr   error
 	prTokens []string
 	listHook func()
-	// merged reports, per PR number, whether PRMerged answers true; mergedErr
+	// merged reports, per PR number, whether MergedPRs answers true; mergedErr
 	// forces the lookup to fail.
 	merged        map[int64]bool
 	mergedErr     error
+	mergedErrs    map[int64]error
 	mergedBatches [][]int64
 	// branchPRs answers FindPRForBranch: the PR (in any state) whose head is
 	// that branch. branchErr forces the lookup to fail, and branchLookups
@@ -355,27 +347,22 @@ func (f *fakeGH) ListOpenPRs(ctx context.Context, _ github.RepoInfo) ([]github.P
 	return f.prs, f.prsErr
 }
 
-func (f *fakeGH) PRMerged(_ context.Context, _ github.RepoInfo, number int64) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.mergedErr != nil {
-		return false, f.mergedErr
-	}
-	return f.merged[number], nil
-}
-
-func (f *fakeGH) MergedPRs(_ context.Context, _ github.RepoInfo, numbers []int64) (map[int64]bool, error) {
+func (f *fakeGH) MergedPRs(_ context.Context, _ github.RepoInfo, numbers []int64) map[int64]github.MergeResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.mergedBatches = append(f.mergedBatches, numbers)
-	if f.mergedErr != nil {
-		return nil, f.mergedErr
-	}
-	out := make(map[int64]bool, len(numbers))
+	out := make(map[int64]github.MergeResult, len(numbers))
 	for _, n := range numbers {
-		out[n] = f.merged[n]
+		switch {
+		case f.mergedErr != nil:
+			out[n] = github.MergeResult{Err: f.mergedErr}
+		case f.mergedErrs[n] != nil:
+			out[n] = github.MergeResult{Err: f.mergedErrs[n]}
+		default:
+			out[n] = github.MergeResult{Merged: f.merged[n]}
+		}
 	}
-	return out, nil
+	return out
 }
 
 func (f *fakeGH) FindPRForBranch(_ context.Context, _ github.RepoInfo, branch string) (github.PR, bool, error) {

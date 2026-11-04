@@ -30,7 +30,6 @@ type SSHOps interface {
 // the interface exists so the engine is unit-testable with a fake git.
 type GitOps interface {
 	worktree.Prober
-	IsDirty(ctx context.Context, dir string) (bool, error)
 	UserEmail(ctx context.Context, repoPath string) string
 	DefaultRemote(ctx context.Context, repoPath string) (string, error)
 	RemoteURL(ctx context.Context, repoPath, remote string) (string, error)
@@ -80,11 +79,7 @@ type GHOps interface {
 	// ListLogins reports every gh account authenticated for a host — the logins
 	// set-login accepts and the picker offers.
 	ListLogins(ctx context.Context, host string) ([]string, error)
-	// PRMerged reports whether a pull request was merged, so reconciliation can
-	// treat a merged worktree's branch commits as safely on the base branch
-	// rather than as un-pushed work at risk.
-	PRMerged(ctx context.Context, repo github.RepoInfo, number int64) (bool, error)
-	MergedPRs(ctx context.Context, repo github.RepoInfo, numbers []int64) (map[int64]bool, error)
+	MergedPRs(ctx context.Context, repo github.RepoInfo, numbers []int64) map[int64]github.MergeResult
 	// FindPRForBranch resolves a branch to its pull request across every state,
 	// so a worktree whose PR opened and merged between two syncs — and so was
 	// never in the open set — can still be linked to it after the fact.
@@ -279,11 +274,7 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 				return fmt.Errorf("resolving PR state for %s: %w", stored[i].DirectoryPath, serr)
 			}
 		}
-		all := make([]int, len(stored))
-		for i := range all {
-			all[i] = i
-		}
-		statuses, rerrs := s.reconcileAll(ctx, repo, stored, states, all)
+		statuses, rerrs := s.reconcileAll(ctx, stored, states)
 		views = make([]WorktreeView, 0, len(stored))
 		for i, wt := range stored {
 			if rerrs[i] != nil {
@@ -710,7 +701,8 @@ func (s *Service) removeClosed(
 		}
 	}
 	states, serrs := s.prStates(ctx, repo, candidates, openByNum)
-	var probe []int
+	var probe []schema.Worktree
+	var probeStates []worktree.PRState
 	for i, wt := range candidates {
 		switch {
 		case serrs[i] != nil:
@@ -720,16 +712,21 @@ func (s *Service) removeClosed(
 				removed++
 			}
 		case states[i] != worktree.PROpen:
-			probe = append(probe, i)
+			probe = append(probe, wt)
+			probeStates = append(probeStates, states[i])
 		}
 	}
-	statuses, rerrs := s.reconcileAll(ctx, repo, candidates, states, probe)
-	for _, i := range probe {
-		if rerrs[i] != nil {
-			*errs = append(*errs, fmt.Errorf("reconciling %s: %w", candidates[i].DirectoryPath, rerrs[i]))
+	statuses, rerrs := s.reconcileAll(ctx, probe, probeStates)
+	for i, wt := range probe {
+		st, err := statuses[i], rerrs[i]
+		if err == nil && !st.Missing && !st.NeedsReconciliation {
+			st, err = s.reconcile(ctx, wt, probeStates[i])
+		}
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, err))
 			continue
 		}
-		if s.removeOne(ctx, repo, candidates[i], states[i], statuses[i], progress, errs) {
+		if s.removeOne(ctx, repo, wt, probeStates[i], st, progress, errs) {
 			removed++
 		}
 	}
@@ -760,15 +757,16 @@ func (s *Service) prStates(
 	if len(lookup) == 0 {
 		return states, errs
 	}
-	merged, err := s.gh.MergedPRs(ctx, repoInfo(repo), lookup)
+	results := s.gh.MergedPRs(ctx, repoInfo(repo), lookup)
 	for i, wt := range rows {
 		if errs[i] != nil || wt.GithubPRNumber == nil || states[i] == worktree.PROpen {
 			continue
 		}
+		res := results[*wt.GithubPRNumber]
 		switch {
-		case err != nil:
-			states[i], errs[i] = worktree.PRGone, err
-		case merged[*wt.GithubPRNumber]:
+		case res.Err != nil:
+			states[i], errs[i] = worktree.PRGone, res.Err
+		case res.Merged:
 			states[i] = worktree.PRMerged
 		default:
 			states[i] = worktree.PRGone
@@ -778,25 +776,25 @@ func (s *Service) prStates(
 }
 
 func (s *Service) reconcileAll(
-	ctx context.Context, repo *schema.Repository, rows []schema.Worktree, states []worktree.PRState, indices []int,
+	ctx context.Context, rows []schema.Worktree, states []worktree.PRState,
 ) ([]worktree.Status, []error) {
 	statuses := make([]worktree.Status, len(rows))
 	errs := make([]error, len(rows))
-	if len(indices) == 0 {
-		return statuses, errs
-	}
-	committer := s.git.UserEmail(ctx, repo.LocalPath)
 	var g errgroup.Group
 	g.SetLimit(runtime.NumCPU())
-	for _, i := range indices {
+	for i := range rows {
 		g.Go(func() error {
-			wt := rows[i]
-			statuses[i], errs[i] = worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), committer, states[i])
+			statuses[i], errs[i] = s.reconcile(ctx, rows[i], states[i])
 			return nil
 		})
 	}
 	_ = g.Wait()
 	return statuses, errs
+}
+
+func (s *Service) reconcile(ctx context.Context, wt schema.Worktree, state worktree.PRState) (worktree.Status, error) {
+	committer := s.git.UserEmail(ctx, wt.DirectoryPath)
+	return worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), committer, state)
 }
 
 // registeredDirs indexes the directories git has worktrees registered for. It
@@ -874,7 +872,7 @@ func (s *Service) prStillOpen(wt schema.Worktree, openByNum map[int64]github.PR)
 // that cannot fast-forward (diverged or no upstream) is logged but never fails
 // the sync — it is a convenience, not a reconciliation guarantee.
 func (s *Service) pullDefaultBranch(ctx context.Context, repo *schema.Repository) {
-	dirty, err := s.git.IsDirty(ctx, repo.LocalPath)
+	dirty, _, err := s.git.WorkingState(ctx, repo.LocalPath)
 	if err != nil {
 		log.Printf("sync: %s: checking for local changes before pull: %v", displayName(repo), err)
 		return

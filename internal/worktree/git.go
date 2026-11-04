@@ -348,18 +348,8 @@ func unquoteCStyle(s string) string {
 	return s
 }
 
-// IsDirty reports whether the worktree at dir has uncommitted changes
-// (tracked modifications or untracked files).
-func (g *Git) IsDirty(ctx context.Context, dir string) (bool, error) {
-	out, err := g.run(ctx, dir, "status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-	return out != "", nil
-}
-
 func (g *Git) WorkingState(ctx context.Context, dir string) (dirty bool, branch string, err error) {
-	out, err := g.run(ctx, dir, "status", "--porcelain=v2", "--branch")
+	out, err := g.run(ctx, dir, "status", "--porcelain=v2", "--branch", "--no-ahead-behind")
 	if err != nil {
 		return false, "", err
 	}
