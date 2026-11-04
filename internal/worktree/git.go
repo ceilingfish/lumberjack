@@ -358,25 +358,40 @@ func (g *Git) IsDirty(ctx context.Context, dir string) (bool, error) {
 	return out != "", nil
 }
 
-// CurrentBranch is the branch checked out at dir, empty for a detached HEAD.
-func (g *Git) CurrentBranch(ctx context.Context, dir string) (string, error) {
-	out, err := g.run(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
+func (g *Git) WorkingState(ctx context.Context, dir string) (dirty bool, branch string, err error) {
+	out, err := g.run(ctx, dir, "status", "--porcelain=v2", "--branch")
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
-	if out == "HEAD" {
-		return "", nil
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		if head, ok := strings.CutPrefix(line, "# branch.head "); ok {
+			if head != "(detached)" {
+				branch = head
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "# ") {
+			dirty = true
+		}
 	}
-	return out, nil
+	return dirty, branch, nil
 }
 
-func (g *Git) LocalOnlyCommits(ctx context.Context, dir string) (int64, error) {
+func (g *Git) UserEmail(ctx context.Context, repoPath string) string {
+	email, err := g.run(ctx, repoPath, "config", "--get", "user.email")
+	if err != nil {
+		return ""
+	}
+	return email
+}
+
+func (g *Git) LocalOnlyCommits(ctx context.Context, dir, committer string) (int64, error) {
 	args := []string{"rev-list", "--count"}
-	if email, err := g.run(ctx, dir, "config", "--get", "user.email"); err == nil && email != "" {
-		// --fixed-strings so metacharacters common in addresses ('.', '+') cannot
-		// widen the match, and the angle brackets pin it to the whole address so
-		// it cannot match one that merely ends with it.
-		args = append(args, "--fixed-strings", "--committer=<"+email+">")
+	if committer != "" {
+		args = append(args, "--fixed-strings", "--committer=<"+committer+">")
 	}
 	args = append(args, "HEAD", "--not", "--remotes")
 

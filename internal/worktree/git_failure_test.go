@@ -235,7 +235,7 @@ func TestLocalOnlyCommitsErrors(t *testing.T) {
 		{"unparseable count", `echo "lots"`, `parsing rev-list count "lots"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			n, err := stubGit(t, tc.script).LocalOnlyCommits(context.Background(), t.TempDir())
+			n, err := stubGit(t, tc.script).LocalOnlyCommits(context.Background(), t.TempDir(), "")
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("LocalOnlyCommits error = %v, want one containing %q", err, tc.wantErr)
 			}
@@ -258,28 +258,50 @@ func TestResolveBinaryNotOnPath(t *testing.T) {
 	}
 }
 
-func TestCurrentBranch(t *testing.T) {
+func TestWorkingState(t *testing.T) {
 	for _, tc := range []struct {
-		name, script, want, wantErr string
+		name, script, wantBranch, wantErr string
+		wantDirty                         bool
 	}{
-		{name: "on a branch", script: `echo feature/foo`, want: "feature/foo"},
-		{name: "detached HEAD", script: `echo HEAD`, want: ""},
+		{name: "clean on a branch", script: `printf '# branch.oid abc\n# branch.head feature/foo\n# branch.upstream origin/feature/foo\n'`, wantBranch: "feature/foo"},
+		{name: "dirty on a branch", script: `printf '# branch.head feature/foo\n1 .M N... 100644 100644 100644 a b foo.txt\n'`, wantBranch: "feature/foo", wantDirty: true},
+		{name: "untracked file", script: `printf '# branch.head main\n? new.txt\n'`, wantBranch: "main", wantDirty: true},
+		{name: "detached HEAD", script: `printf '# branch.oid abc\n# branch.head (detached)\n'`},
 		{name: "git fails", script: `echo "fatal: not a git repository" >&2; exit 128`, wantErr: "fatal: not a git repository"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := stubGit(t, tc.script).CurrentBranch(context.Background(), t.TempDir())
+			dirty, branch, err := stubGit(t, tc.script).WorkingState(context.Background(), t.TempDir())
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("CurrentBranch error = %v, want one containing %q", err, tc.wantErr)
+					t.Fatalf("WorkingState error = %v, want one containing %q", err, tc.wantErr)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("CurrentBranch: %v", err)
+				t.Fatalf("WorkingState: %v", err)
 			}
-			if got != tc.want {
-				t.Errorf("CurrentBranch = %q, want %q", got, tc.want)
+			if dirty != tc.wantDirty || branch != tc.wantBranch {
+				t.Errorf("WorkingState = %v, %q; want %v, %q", dirty, branch, tc.wantDirty, tc.wantBranch)
 			}
 		})
+	}
+}
+
+func TestUserEmail(t *testing.T) {
+	if got := stubGit(t, `echo me@example.com`).UserEmail(context.Background(), t.TempDir()); got != "me@example.com" {
+		t.Errorf("UserEmail = %q, want me@example.com", got)
+	}
+	if got := stubGit(t, `exit 1`).UserEmail(context.Background(), t.TempDir()); got != "" {
+		t.Errorf("UserEmail on failure = %q, want empty", got)
+	}
+}
+
+func TestLocalOnlyCommitsCommitterFilter(t *testing.T) {
+	g := stubGit(t, `echo "$@" >&2; case "$*" in *"--committer=<me@example.com>"*) echo 2;; *) echo 5;; esac`)
+	if n, err := g.LocalOnlyCommits(context.Background(), t.TempDir(), "me@example.com"); err != nil || n != 2 {
+		t.Errorf("LocalOnlyCommits with committer = %d, %v; want 2", n, err)
+	}
+	if n, err := g.LocalOnlyCommits(context.Background(), t.TempDir(), ""); err != nil || n != 5 {
+		t.Errorf("LocalOnlyCommits without committer = %d, %v; want 5", n, err)
 	}
 }

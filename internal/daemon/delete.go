@@ -69,7 +69,7 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 			state = worktree.PRMerged
 		}
 	}
-	st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(*wt), state)
+	st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(*wt), s.git.UserEmail(ctx, repo.LocalPath), state)
 	if err != nil {
 		return DeleteResult{}, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, err)
 	}

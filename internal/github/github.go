@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -242,7 +243,7 @@ func (c *Client) ListLogins(ctx context.Context, host string) ([]string, error) 
 }
 
 func (c *Client) Token(ctx context.Context, host, login string) (string, error) {
-	out, err := c.run(ctx, "", "auth", "token", "--hostname", host, "--user", login)
+	out, err := c.run(ctx, "", "auth", "token", flagHostname, host, "--user", login)
 	if err != nil {
 		return "", err
 	}
@@ -256,7 +257,7 @@ func (c *Client) Token(ctx context.Context, host, login string) (string, error) 
 // (`gh auth switch`). Callers pair it with ActiveLogin to restore the prior
 // account after an operation completes.
 func (c *Client) SwitchAccount(ctx context.Context, host, login string) error {
-	_, err := c.run(ctx, "", "auth", "switch", "--hostname", host, "--user", login)
+	_, err := c.run(ctx, "", "auth", "switch", flagHostname, host, "--user", login)
 	return err
 }
 
@@ -348,6 +349,63 @@ func (c *Client) PRMerged(ctx context.Context, repo RepoInfo, number int64) (boo
 	}
 	// gh reports state as OPEN, CLOSED, or MERGED.
 	return v.State == "MERGED", nil
+}
+
+const (
+	mergedBatchSize = 100
+	flagHostname    = "--hostname"
+)
+
+func (c *Client) MergedPRs(ctx context.Context, repo RepoInfo, numbers []int64) (map[int64]bool, error) {
+	nums := slices.Clone(numbers)
+	slices.Sort(nums)
+	nums = slices.Compact(nums)
+	merged := make(map[int64]bool, len(nums))
+	for chunk := range slices.Chunk(nums, mergedBatchSize) {
+		if err := c.mergedChunk(ctx, repo, chunk, merged); err != nil {
+			return nil, err
+		}
+	}
+	return merged, nil
+}
+
+func (c *Client) mergedChunk(ctx context.Context, repo RepoInfo, nums []int64, merged map[int64]bool) error {
+	var q strings.Builder
+	q.WriteString("query($owner:String!,$name:String!){repository(owner:$owner,name:$name){")
+	for _, n := range nums {
+		fmt.Fprintf(&q, "pr%d:pullRequest(number:%d){state} ", n, n)
+	}
+	q.WriteString("}}")
+	host := repo.Host
+	if host == "" {
+		host = "github.com"
+	}
+	out, err := c.run(ctx, "", "api", "graphql",
+		flagHostname, host,
+		"-f", "owner="+repo.Owner,
+		"-f", "name="+repo.Name,
+		"-f", "query="+q.String())
+	if err != nil {
+		return err
+	}
+	var v struct {
+		Data struct {
+			Repository map[string]*struct {
+				State string `json:"state"`
+			} `json:"repository"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return fmt.Errorf("parsing gh api graphql: %w", err)
+	}
+	for _, n := range nums {
+		pr := v.Data.Repository["pr"+strconv.FormatInt(n, 10)]
+		if pr == nil {
+			return fmt.Errorf("gh api graphql: no state returned for PR #%d", n)
+		}
+		merged[n] = pr.State == "MERGED"
+	}
+	return nil
 }
 
 // resolveBinary returns the path from envVar if set (verified to exist),

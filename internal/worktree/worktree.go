@@ -67,9 +67,8 @@ type Status struct {
 // Prober is the subset of *Git that Reconcile needs. Defining it as an
 // interface lets the daemon's sync engine be unit-tested with a fake git.
 type Prober interface {
-	IsDirty(ctx context.Context, dir string) (bool, error)
-	LocalOnlyCommits(ctx context.Context, dir string) (int64, error)
-	CurrentBranch(ctx context.Context, dir string) (string, error)
+	WorkingState(ctx context.Context, dir string) (dirty bool, branch string, err error)
+	LocalOnlyCommits(ctx context.Context, dir, committer string) (int64, error)
 }
 
 // Missing reports whether the worktree at dir is gone from disk, along with a
@@ -108,7 +107,7 @@ func Missing(dir string) (bool, string, error) {
 // branch).
 //
 // p must have fetched the repo first so remote-tracking refs are current.
-func Reconcile(ctx context.Context, p Prober, dir, prBranch string, pr PRState) (Status, error) {
+func Reconcile(ctx context.Context, p Prober, dir, prBranch, committer string, pr PRState) (Status, error) {
 	missing, why, err := Missing(dir)
 	if err != nil {
 		return Status{}, err
@@ -117,18 +116,13 @@ func Reconcile(ctx context.Context, p Prober, dir, prBranch string, pr PRState) 
 		return Status{Missing: true, Note: why}, nil
 	}
 
-	dirty, err := p.IsDirty(ctx, dir)
+	dirty, current, err := p.WorkingState(ctx, dir)
 	if err != nil {
-		return Status{}, fmt.Errorf("checking dirty state: %w", err)
+		return Status{}, fmt.Errorf("checking working tree state: %w", err)
 	}
-	localOnly, err := p.LocalOnlyCommits(ctx, dir)
+	localOnly, err := p.LocalOnlyCommits(ctx, dir, committer)
 	if err != nil {
 		return Status{}, fmt.Errorf("counting local-only commits: %w", err)
-	}
-
-	current, err := p.CurrentBranch(ctx, dir)
-	if err != nil {
-		return Status{}, fmt.Errorf("reading checked-out branch: %w", err)
 	}
 
 	st := Status{

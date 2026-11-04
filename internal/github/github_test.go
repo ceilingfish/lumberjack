@@ -791,3 +791,103 @@ func TestPRMergedBadJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestMergedPRs(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `{"data":{"repository":{"pr7":{"state":"MERGED"},"pr9":{"state":"CLOSED"},"pr12":{"state":"OPEN"}}}}`, nil
+	})
+	repo := RepoInfo{Owner: "o", Name: "n", Host: "ghe.example.com"}
+	got, err := c.MergedPRs(context.Background(), repo, []int64{12, 7, 9, 7})
+	if err != nil {
+		t.Fatalf("MergedPRs: %v", err)
+	}
+	want := map[int64]bool{7: true, 9: false, 12: false}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("MergedPRs = %v, want %v", got, want)
+	}
+	wantQuery := "query=query($owner:String!,$name:String!){repository(owner:$owner,name:$name){" +
+		"pr7:pullRequest(number:7){state} pr9:pullRequest(number:9){state} pr12:pullRequest(number:12){state} }}"
+	wantArgs := []string{"api", "graphql", "--hostname", "ghe.example.com", "-f", "owner=o", "-f", "name=n", "-f", wantQuery}
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Errorf("args = %q, want %q", gotArgs, wantArgs)
+	}
+}
+
+func TestMergedPRsDefaultsHost(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `{"data":{"repository":{"pr1":{"state":"MERGED"}}}}`, nil
+	})
+	if _, err := c.MergedPRs(context.Background(), RepoInfo{Owner: "o", Name: "n"}, []int64{1}); err != nil {
+		t.Fatalf("MergedPRs: %v", err)
+	}
+	if gotArgs[3] != "github.com" {
+		t.Errorf("hostname = %q, want github.com", gotArgs[3])
+	}
+}
+
+func TestMergedPRsEmptyMakesNoCall(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		t.Fatal("gh must not be invoked for an empty batch")
+		return "", nil
+	})
+	got, err := c.MergedPRs(context.Background(), RepoInfo{}, nil)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("MergedPRs(nil) = %v, %v; want empty, nil", got, err)
+	}
+}
+
+func TestMergedPRsChunks(t *testing.T) {
+	calls := 0
+	c := fakeClient(func(args ...string) (string, error) {
+		calls++
+		query := args[len(args)-1]
+		var parts []string
+		for n := 1; n <= 250; n++ {
+			alias := fmt.Sprintf("pr%d:", n)
+			if strings.Contains(query, alias) {
+				parts = append(parts, fmt.Sprintf(`"pr%d":{"state":"MERGED"}`, n))
+			}
+		}
+		return `{"data":{"repository":{` + strings.Join(parts, ",") + `}}}`, nil
+	})
+	nums := make([]int64, 250)
+	for i := range nums {
+		nums[i] = int64(i + 1)
+	}
+	got, err := c.MergedPRs(context.Background(), RepoInfo{Owner: "o", Name: "n"}, nums)
+	if err != nil {
+		t.Fatalf("MergedPRs: %v", err)
+	}
+	if calls != 3 {
+		t.Errorf("gh calls = %d, want 3", calls)
+	}
+	if len(got) != 250 {
+		t.Errorf("got %d results, want 250", len(got))
+	}
+}
+
+func TestMergedPRsErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, out, wantErr string
+		runErr             error
+	}{
+		{name: "gh fails", runErr: errors.New("gh api graphql: HTTP 502"), wantErr: "HTTP 502"},
+		{name: "bad json", out: "<html>", wantErr: "parsing gh api graphql"},
+		{name: "missing pr", out: `{"data":{"repository":{"pr1":null}}}`, wantErr: "no state returned for PR #1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := fakeClient(func(...string) (string, error) { return tc.out, tc.runErr })
+			got, err := c.MergedPRs(context.Background(), RepoInfo{}, []int64{1})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("MergedPRs error = %v, want one containing %q", err, tc.wantErr)
+			}
+			if got != nil {
+				t.Errorf("MergedPRs = %v on error, want nil", got)
+			}
+		})
+	}
+}

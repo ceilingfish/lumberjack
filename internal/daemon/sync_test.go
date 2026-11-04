@@ -2,9 +2,12 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,5 +114,74 @@ func TestPrBranchOfIsEmptyWithoutAPR(t *testing.T) {
 	num := int64(3)
 	if got := prBranchOf(schema.Worktree{BranchName: "feature/a", GithubPRNumber: &num}); got != "feature/a" {
 		t.Errorf("prBranchOf = %q, want feature/a", got)
+	}
+}
+
+func TestSyncBatchesMergedLookupAcrossWorktrees(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	for n := int64(1); n <= 6; n++ {
+		h.gh.prs = append(h.gh.prs, github.PR{Number: n, HeadBranch: fmt.Sprintf("b%d", n)})
+	}
+	h.seedSync(t, repo)
+
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	byPR := map[int64]string{}
+	for _, wt := range wts {
+		byPR[*wt.GithubPRNumber] = wt.DirectoryPath
+	}
+	h.gh.prs = nil
+	h.gh.merged = map[int64]bool{1: true, 2: true, 3: true}
+	h.git.localOnly[byPR[4]] = 2
+	h.git.dirty[byPR[5]] = true
+	h.gh.mergedBatches = nil
+
+	var retained []int64
+	_, removed, err := h.svc.SyncRepository(context.Background(), repo, func(c WorktreeChange) {
+		if c.Action == ActionRetained {
+			retained = append(retained, *c.PRNumber)
+		}
+	})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if removed != 4 {
+		t.Errorf("removed = %d, want 4 (three merged and one clean closed)", removed)
+	}
+	slices.Sort(retained)
+	if !slices.Equal(retained, []int64{4, 5}) {
+		t.Errorf("retained = %v, want [4 5]", retained)
+	}
+	if len(h.gh.mergedBatches) != 1 || len(h.gh.mergedBatches[0]) != 6 {
+		t.Errorf("merged lookups = %v, want a single batch of 6", h.gh.mergedBatches)
+	}
+}
+
+func TestWorktreeViewsBatchesMergedLookup(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a"}, {Number: 2, HeadBranch: "b"}, {Number: 3, HeadBranch: "c"}}
+	h.seedSync(t, repo)
+
+	h.gh.prs = []github.PR{{Number: 3, HeadBranch: "c"}}
+	h.gh.merged = map[int64]bool{1: true}
+	h.gh.mergedBatches = nil
+
+	views, err := h.svc.WorktreeViews(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("WorktreeViews: %v", err)
+	}
+	got := map[int64]bool{}
+	for _, v := range views {
+		got[*v.Worktree.GithubPRNumber] = v.Status.Merged
+		if *v.Worktree.GithubPRNumber == 3 && !v.PROpen {
+			t.Error("PR 3 should be reported open")
+		}
+	}
+	if want := map[int64]bool{1: true, 2: false, 3: false}; !maps.Equal(got, want) {
+		t.Errorf("merged by PR = %v, want %v", got, want)
+	}
+	if len(h.gh.mergedBatches) != 1 || !slices.Equal(slices.Sorted(slices.Values(h.gh.mergedBatches[0])), []int64{1, 2}) {
+		t.Errorf("merged lookups = %v, want one batch of PRs 1 and 2", h.gh.mergedBatches)
 	}
 }
