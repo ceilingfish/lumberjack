@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/ghauth"
@@ -65,7 +66,8 @@ func (g *Git) command(
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	cmd := exec.CommandContext(cctx, g.bin, args...)
 	cmd.Dir = dir
-	cmd.Env = ghauth.Env(ctx, os.Environ())
+	cmd.Env = append(ghauth.Env(ctx, os.Environ()), "GIT_TERMINAL_PROMPT=0", "SSH_ASKPASS_REQUIRE=never")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.WaitDelay = commandWaitDelay
 	return cmd, cctx, cancel
 }

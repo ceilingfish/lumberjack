@@ -8,7 +8,6 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/cli"
 	"github.com/ceilingfish/lumberjack/internal/present"
 	"github.com/ceilingfish/lumberjack/pkg/client"
-	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -50,17 +49,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	return cli.WithClient(cmd, func(ctx context.Context, c *client.Client) error {
-		repo, adopted, err := c.InitRepository(ctx, abs)
+		resp, err := c.InitRepository(ctx, abs)
 		if err != nil {
 			return err
 		}
+		repo, adopted := resp.GetRepository(), resp.GetAdopted()
 		out := cmd.OutOrStdout()
 		if format == present.JSON {
 			// InitRepositoryResponse already carries the repository and the
 			// adopted changes together — the proto type needs no view model.
-			return present.WriteJSONObject(out, &lumberjackv1.InitRepositoryResponse{
-				Repository: repo, Adopted: adopted,
-			})
+			if err := present.WriteJSONObject(out, resp); err != nil {
+				return err
+			}
+			return cli.PromptSSHKeychain(cmd, false, resp.GetSshKeychain())
 		}
 		if _, err := fmt.Fprintf(out,
 			"Tracking %s/%s at %s\nWorktrees will be created under %s\n",
@@ -72,6 +73,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if err := cli.RenderWorktreeChanges(out, adopted, format == present.Color); err != nil {
 			return err
 		}
-		return cli.PromptSetupConsent(ctx, cmd, c, repo.GetDirPrefix(), repo)
+		if err := cli.PromptSetupConsent(ctx, cmd, c, repo.GetDirPrefix(), repo); err != nil {
+			return err
+		}
+		return cli.PromptSSHKeychain(cmd, true, resp.GetSshKeychain())
 	})
 }

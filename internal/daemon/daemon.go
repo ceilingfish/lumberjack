@@ -17,6 +17,7 @@ import (
 
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/github"
+	"github.com/ceilingfish/lumberjack/internal/sshkey"
 	"github.com/ceilingfish/lumberjack/internal/worktree"
 )
 
@@ -46,6 +47,7 @@ var Module = fx.Module("daemon",
 		newDatabase,
 		fx.Annotate(worktree.NewGit, fx.As(new(GitOps))),
 		fx.Annotate(github.NewClient, fx.As(new(GHOps))),
+		fx.Annotate(sshkey.New, fx.As(new(SSHOps))),
 		NewService,
 
 		NewServer,

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
+	"github.com/ceilingfish/lumberjack/internal/sshkey"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -100,6 +101,16 @@ func toProtoSyncSummary(created, removed int, syncErr error) *lumberjackv1.SyncS
 		summary.Error = &msg
 	}
 	return summary
+}
+
+func toProtoSSHKeychain(r sshkey.Report) *lumberjackv1.SshKeychainCheck {
+	if r.Empty() {
+		return nil
+	}
+	return &lumberjackv1.SshKeychainCheck{
+		LockedKeys:          r.LockedKeys,
+		UseKeychainDisabled: r.UseKeychainDisabled,
+	}
 }
 
 // toProtoAction maps a domain WorktreeAction onto the wire enum.
