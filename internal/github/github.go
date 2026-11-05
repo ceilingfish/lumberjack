@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -242,7 +243,7 @@ func (c *Client) ListLogins(ctx context.Context, host string) ([]string, error) 
 }
 
 func (c *Client) Token(ctx context.Context, host, login string) (string, error) {
-	out, err := c.run(ctx, "", "auth", "token", "--hostname", host, "--user", login)
+	out, err := c.run(ctx, "", "auth", "token", flagHostname, host, "--user", login)
 	if err != nil {
 		return "", err
 	}
@@ -256,7 +257,7 @@ func (c *Client) Token(ctx context.Context, host, login string) (string, error) 
 // (`gh auth switch`). Callers pair it with ActiveLogin to restore the prior
 // account after an operation completes.
 func (c *Client) SwitchAccount(ctx context.Context, host, login string) error {
-	_, err := c.run(ctx, "", "auth", "switch", "--hostname", host, "--user", login)
+	_, err := c.run(ctx, "", "auth", "switch", flagHostname, host, "--user", login)
 	return err
 }
 
@@ -328,26 +329,87 @@ func (c *Client) FindPRForBranch(ctx context.Context, repo RepoInfo, branch stri
 	return PR{Number: raw[best].Number, HeadBranch: raw[best].HeadRefName}, true, nil
 }
 
-// PRMerged reports whether pull request number in repo was merged (as opposed
-// to still open, or closed without merging). Reconciliation uses it to tell a
-// merged worktree — whose branch commits are safely on the base branch, even
-// after a squash merge deletes the head ref — from one abandoned with un-pushed
-// local work.
-func (c *Client) PRMerged(ctx context.Context, repo RepoInfo, number int64) (bool, error) {
-	out, err := c.run(ctx, "", "pr", "view", strconv.FormatInt(number, 10),
-		"--repo", fmt.Sprintf("%s/%s/%s", repo.Host, repo.Owner, repo.Name),
-		"--json", "state")
+const (
+	mergedBatchSize = 100
+	flagHostname    = "--hostname"
+)
+
+type MergeResult struct {
+	Merged bool
+	Err    error
+}
+
+func (c *Client) MergedPRs(ctx context.Context, repo RepoInfo, numbers []int64) map[int64]MergeResult {
+	nums := slices.Clone(numbers)
+	slices.Sort(nums)
+	nums = slices.Compact(nums)
+	results := make(map[int64]MergeResult, len(nums))
+	for chunk := range slices.Chunk(nums, mergedBatchSize) {
+		c.mergedChunk(ctx, repo, chunk, results)
+	}
+	return results
+}
+
+func (c *Client) mergedChunk(ctx context.Context, repo RepoInfo, nums []int64, results map[int64]MergeResult) {
+	states, err := c.queryPRStates(ctx, repo, nums)
 	if err != nil {
-		return false, err
+		if len(nums) > 1 && strings.Contains(err.Error(), "GraphQL:") {
+			mid := len(nums) / 2
+			c.mergedChunk(ctx, repo, nums[:mid], results)
+			c.mergedChunk(ctx, repo, nums[mid:], results)
+			return
+		}
+		for _, n := range nums {
+			results[n] = MergeResult{Err: err}
+		}
+		return
+	}
+	for _, n := range nums {
+		state, ok := states[n]
+		if !ok {
+			results[n] = MergeResult{Err: fmt.Errorf("gh api graphql: no state returned for PR #%d", n)}
+			continue
+		}
+		results[n] = MergeResult{Merged: state == "MERGED"}
+	}
+}
+
+func (c *Client) queryPRStates(ctx context.Context, repo RepoInfo, nums []int64) (map[int64]string, error) {
+	var q strings.Builder
+	q.WriteString("query($owner:String!,$name:String!){repository(owner:$owner,name:$name){")
+	for _, n := range nums {
+		fmt.Fprintf(&q, "pr%d:pullRequest(number:%d){state} ", n, n)
+	}
+	q.WriteString("}}")
+	host := repo.Host
+	if host == "" {
+		host = "github.com"
+	}
+	out, err := c.run(ctx, "", "api", "graphql",
+		flagHostname, host,
+		"-f", "owner="+repo.Owner,
+		"-f", "name="+repo.Name,
+		"-f", "query="+q.String())
+	if err != nil {
+		return nil, err
 	}
 	var v struct {
-		State string `json:"state"`
+		Data struct {
+			Repository map[string]*struct {
+				State string `json:"state"`
+			} `json:"repository"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal([]byte(out), &v); err != nil {
-		return false, fmt.Errorf("parsing gh pr view: %w", err)
+		return nil, fmt.Errorf("parsing gh api graphql: %w", err)
 	}
-	// gh reports state as OPEN, CLOSED, or MERGED.
-	return v.State == "MERGED", nil
+	states := make(map[int64]string, len(nums))
+	for _, n := range nums {
+		if pr := v.Data.Repository["pr"+strconv.FormatInt(n, 10)]; pr != nil {
+			states[n] = pr.State
+		}
+	}
+	return states, nil
 }
 
 // resolveBinary returns the path from envVar if set (verified to exist),

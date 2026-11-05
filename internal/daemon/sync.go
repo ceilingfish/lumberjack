@@ -7,9 +7,12 @@ import (
 	"log"
 	"maps"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
@@ -27,6 +30,7 @@ type SSHOps interface {
 // the interface exists so the engine is unit-testable with a fake git.
 type GitOps interface {
 	worktree.Prober
+	UserEmail(ctx context.Context, repoPath string) string
 	DefaultRemote(ctx context.Context, repoPath string) (string, error)
 	RemoteURL(ctx context.Context, repoPath, remote string) (string, error)
 	Fetch(ctx context.Context, repoPath, remote string) error
@@ -75,10 +79,7 @@ type GHOps interface {
 	// ListLogins reports every gh account authenticated for a host — the logins
 	// set-login accepts and the picker offers.
 	ListLogins(ctx context.Context, host string) ([]string, error)
-	// PRMerged reports whether a pull request was merged, so reconciliation can
-	// treat a merged worktree's branch commits as safely on the base branch
-	// rather than as un-pushed work at risk.
-	PRMerged(ctx context.Context, repo github.RepoInfo, number int64) (bool, error)
+	MergedPRs(ctx context.Context, repo github.RepoInfo, numbers []int64) map[int64]github.MergeResult
 	// FindPRForBranch resolves a branch to its pull request across every state,
 	// so a worktree whose PR opened and merged between two syncs — and so was
 	// never in the open set — can still be linked to it after the fact.
@@ -267,19 +268,21 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 		if err != nil {
 			return err
 		}
+		states, serrs := s.prStates(ctx, repo, stored, openByNum)
+		for i, serr := range serrs {
+			if serr != nil {
+				return fmt.Errorf("resolving PR state for %s: %w", stored[i].DirectoryPath, serr)
+			}
+		}
+		statuses, rerrs := s.reconcileAll(ctx, stored, states)
 		views = make([]WorktreeView, 0, len(stored))
-		for i := range stored {
-			wt := stored[i]
-			prState, perr := s.prState(ctx, repo, &wt, openByNum)
-			if perr != nil {
-				return fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, perr)
+		for i, wt := range stored {
+			if rerrs[i] != nil {
+				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerrs[i])
 			}
-			st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), prState)
-			if rerr != nil {
-				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
-			}
+			st := statuses[i]
 			applySetupError(&st, wt.SetupError)
-			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: prState == worktree.PROpen})
+			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: states[i] == worktree.PROpen})
 		}
 		return nil
 	})
@@ -731,30 +734,107 @@ func (s *Service) removeClosed(
 	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
 	stored []schema.Worktree, registered map[string]bool, progress progressFn, errs *[]error,
 ) (removed int) {
-	for i := range stored {
-		wt := stored[i]
-		if s.prStillOpen(wt, openByNum) {
-			continue // PR still open — keep the worktree
+	candidates := make([]schema.Worktree, 0, len(stored))
+	for _, wt := range stored {
+		if !s.prStillOpen(wt, openByNum) {
+			candidates = append(candidates, wt)
 		}
-		state, serr := s.prState(ctx, repo, &wt, openByNum)
-		if serr != nil {
-			*errs = append(*errs, fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, serr))
-			continue
-		}
-		if state == worktree.PRNone {
+	}
+	states, serrs := s.prStates(ctx, repo, candidates, openByNum)
+	var probe []schema.Worktree
+	var probeStates []worktree.PRState
+	for i, wt := range candidates {
+		switch {
+		case serrs[i] != nil:
+			*errs = append(*errs, fmt.Errorf("resolving PR state for %s: %w", wt.DirectoryPath, serrs[i]))
+		case states[i] == worktree.PRNone:
 			if s.pruneGhost(ctx, repo, wt, registered, progress, errs) {
 				removed++
 			}
+		case states[i] != worktree.PROpen:
+			probe = append(probe, wt)
+			probeStates = append(probeStates, states[i])
+		}
+	}
+	statuses, rerrs := s.reconcileAll(ctx, probe, probeStates)
+	for i, wt := range probe {
+		st, err := statuses[i], rerrs[i]
+		if err == nil && !st.Missing && !st.NeedsReconciliation {
+			st, err = s.reconcile(ctx, wt, probeStates[i])
+		}
+		if err != nil {
+			*errs = append(*errs, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, err))
 			continue
 		}
-		if state == worktree.PROpen {
-			continue // the lookup above linked it to a PR that is still open
-		}
-		if s.removeOne(ctx, repo, wt, state, progress, errs) {
+		if s.removeOne(ctx, repo, wt, probeStates[i], st, progress, errs) {
 			removed++
 		}
 	}
 	return removed
+}
+
+func (s *Service) prStates(
+	ctx context.Context, repo *schema.Repository, rows []schema.Worktree, openByNum map[int64]github.PR,
+) ([]worktree.PRState, []error) {
+	states := make([]worktree.PRState, len(rows))
+	errs := make([]error, len(rows))
+	var lookup []int64
+	for i := range rows {
+		wt := &rows[i]
+		if wt.GithubPRNumber == nil {
+			linked, err := s.linkHistoricalPR(ctx, repo, wt)
+			if err != nil || !linked {
+				states[i], errs[i] = worktree.PRNone, err
+				continue
+			}
+		}
+		if _, ok := openByNum[*wt.GithubPRNumber]; ok {
+			states[i] = worktree.PROpen
+			continue
+		}
+		lookup = append(lookup, *wt.GithubPRNumber)
+	}
+	if len(lookup) == 0 {
+		return states, errs
+	}
+	results := s.gh.MergedPRs(ctx, repoInfo(repo), lookup)
+	for i, wt := range rows {
+		if errs[i] != nil || wt.GithubPRNumber == nil || states[i] == worktree.PROpen {
+			continue
+		}
+		res := results[*wt.GithubPRNumber]
+		switch {
+		case res.Err != nil:
+			states[i], errs[i] = worktree.PRGone, res.Err
+		case res.Merged:
+			states[i] = worktree.PRMerged
+		default:
+			states[i] = worktree.PRGone
+		}
+	}
+	return states, errs
+}
+
+func (s *Service) reconcileAll(
+	ctx context.Context, rows []schema.Worktree, states []worktree.PRState,
+) ([]worktree.Status, []error) {
+	statuses := make([]worktree.Status, len(rows))
+	errs := make([]error, len(rows))
+	var g errgroup.Group
+	g.SetLimit(runtime.NumCPU())
+	for i := range rows {
+		g.Go(func() error {
+			statuses[i], errs[i] = s.reconcile(ctx, rows[i], states[i])
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return statuses, errs
+}
+
+func (s *Service) reconcile(ctx context.Context, wt schema.Worktree, state worktree.PRState) (worktree.Status, error) {
+	committer := s.git.UserEmail(ctx, wt.DirectoryPath)
+	return worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), committer, state)
 }
 
 // registeredDirs indexes the directories git has worktrees registered for. It
@@ -826,44 +906,13 @@ func (s *Service) prStillOpen(wt schema.Worktree, openByNum map[int64]github.PR)
 	return ok
 }
 
-// prState resolves the reconciliation state of a worktree's source PR: none if
-// the worktree has no PR recorded, open if the PR is in the freshly-fetched open
-// set, merged if gh reports it merged, and otherwise gone (closed without
-// merge). The merged case is what stops a squash-merged worktree — whose branch
-// commits are on the base branch but on no remote-tracking ref — from being
-// reported as holding local-only commits at risk.
-func (s *Service) prState(
-	ctx context.Context, repo *schema.Repository, wt *schema.Worktree, openByNum map[int64]github.PR,
-) (worktree.PRState, error) {
-	if wt.GithubPRNumber == nil {
-		linked, err := s.linkHistoricalPR(ctx, repo, wt)
-		if err != nil {
-			return worktree.PRNone, err
-		}
-		if !linked {
-			return worktree.PRNone, nil
-		}
-	}
-	if _, ok := openByNum[*wt.GithubPRNumber]; ok {
-		return worktree.PROpen, nil
-	}
-	merged, err := s.gh.PRMerged(ctx, repoInfo(repo), *wt.GithubPRNumber)
-	if err != nil {
-		return worktree.PRGone, err
-	}
-	if merged {
-		return worktree.PRMerged, nil
-	}
-	return worktree.PRGone, nil
-}
-
 // pullDefaultBranch fast-forwards the repository's main checkout to its upstream
 // when the tree is clean, so tracked repos keep pace with the default branch on
 // each sync. A checkout with uncommitted changes is left untouched, and a pull
 // that cannot fast-forward (diverged or no upstream) is logged but never fails
 // the sync — it is a convenience, not a reconciliation guarantee.
 func (s *Service) pullDefaultBranch(ctx context.Context, repo *schema.Repository) {
-	dirty, err := s.git.IsDirty(ctx, repo.LocalPath)
+	dirty, _, err := s.git.WorkingState(ctx, repo.LocalPath)
 	if err != nil {
 		log.Printf("sync: %s: checking for local changes before pull: %v", displayName(repo), err)
 		return
@@ -883,13 +932,8 @@ func (s *Service) pullDefaultBranch(ctx context.Context, repo *schema.Repository
 // returns true when the worktree was removed from tracking.
 func (s *Service) removeOne(
 	ctx context.Context, repo *schema.Repository, wt schema.Worktree, state worktree.PRState,
-	progress progressFn, errs *[]error,
+	st worktree.Status, progress progressFn, errs *[]error,
 ) bool {
-	st, rerr := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(wt), state)
-	if rerr != nil {
-		*errs = append(*errs, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr))
-		return false
-	}
 	if st.NeedsReconciliation {
 		progress.send(WorktreeChange{
 			Branch: wt.BranchName, PRNumber: wt.GithubPRNumber,

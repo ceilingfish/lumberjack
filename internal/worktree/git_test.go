@@ -243,7 +243,7 @@ func TestShowFileMissing(t *testing.T) {
 	}
 }
 
-func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
+func TestWorkingStateAndLocalOnlyCommits(t *testing.T) {
 	g, main := setupRepos(t)
 	ctx := context.Background()
 	if err := g.Fetch(ctx, main, "origin"); err != nil {
@@ -257,26 +257,25 @@ func TestIsDirtyAndLocalOnlyCommits(t *testing.T) {
 	}
 
 	// Clean and fully pushed: no dirt, no local-only commits.
-	dirty, err := g.IsDirty(ctx, dir)
-	if err != nil || dirty {
-		t.Fatalf("IsDirty = %v, %v; want false", dirty, err)
-	}
-	n, err := g.LocalOnlyCommits(ctx, dir)
+	n, err := g.LocalOnlyCommits(ctx, dir, g.UserEmail(ctx, dir))
 	if err != nil || n != 0 {
 		t.Fatalf("LocalOnlyCommits = %d, %v; want 0", n, err)
+	}
+	if dirty, branch, err := g.WorkingState(ctx, dir); err != nil || dirty || branch != "feature/foo" {
+		t.Fatalf("WorkingState = %v, %q, %v; want clean on feature/foo", dirty, branch, err)
 	}
 
 	// Make an uncommitted change: dirty.
 	if err := os.WriteFile(filepath.Join(dir, "foo.txt"), []byte("changed\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if dirty, _ = g.IsDirty(ctx, dir); !dirty {
-		t.Error("expected dirty after edit")
+	if dirty, branch, _ := g.WorkingState(ctx, dir); !dirty || branch != "feature/foo" {
+		t.Errorf("WorkingState = %v, %q; want dirty on feature/foo", dirty, branch)
 	}
 
 	// Commit locally without pushing: one local-only commit.
 	runGit(t, dir, "commit", "-am", "local work")
-	if n, _ = g.LocalOnlyCommits(ctx, dir); n != 1 {
+	if n, _ = g.LocalOnlyCommits(ctx, dir, g.UserEmail(ctx, dir)); n != 1 {
 		t.Errorf("LocalOnlyCommits = %d, want 1", n)
 	}
 }
@@ -329,7 +328,7 @@ func TestLocalOnlyCommitsIgnoresForcePushedHistory(t *testing.T) {
 	if out, err := g.run(ctx, dir, "rev-list", "--count", "HEAD", "--not", "--remotes"); err != nil || out != "1" {
 		t.Fatalf("unfiltered local-only count = %q, %v; want 1 stranded commit", out, err)
 	}
-	if n, err := g.LocalOnlyCommits(ctx, dir); err != nil || n != 0 {
+	if n, err := g.LocalOnlyCommits(ctx, dir, g.UserEmail(ctx, dir)); err != nil || n != 0 {
 		t.Fatalf("LocalOnlyCommits = %d, %v; want 0 (commit is the colleague's)", n, err)
 	}
 
@@ -340,7 +339,7 @@ func TestLocalOnlyCommitsIgnoresForcePushedHistory(t *testing.T) {
 	}
 	runGit(t, dir, "add", ".")
 	runGit(t, dir, "commit", "-m", "my own work")
-	if n, err := g.LocalOnlyCommits(ctx, dir); err != nil || n != 1 {
+	if n, err := g.LocalOnlyCommits(ctx, dir, g.UserEmail(ctx, dir)); err != nil || n != 1 {
 		t.Fatalf("LocalOnlyCommits = %d, %v; want 1 (this user's commit)", n, err)
 	}
 }
@@ -366,7 +365,7 @@ func TestLocalOnlyCommitsWithoutIdentity(t *testing.T) {
 	runGit(t, dir, "commit", "-am", "local work")
 
 	runGit(t, main, "config", "--unset", "user.email")
-	if n, err := g.LocalOnlyCommits(ctx, dir); err != nil || n != 1 {
+	if n, err := g.LocalOnlyCommits(ctx, dir, g.UserEmail(ctx, dir)); err != nil || n != 1 {
 		t.Fatalf("LocalOnlyCommits = %d, %v; want 1 (unfiltered fallback)", n, err)
 	}
 }
@@ -411,7 +410,7 @@ func TestMoveWorktree(t *testing.T) {
 	}
 
 	// The relocated tree is still usable — a git command run inside it works.
-	if _, err := g.IsDirty(ctx, to); err != nil {
+	if _, _, err := g.WorkingState(ctx, to); err != nil {
 		t.Errorf("moved worktree is not a working checkout: %v", err)
 	}
 }
