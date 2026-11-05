@@ -1347,8 +1347,8 @@ func TestSyncSuppressesPRWhoseBranchAWorktreeHolds(t *testing.T) {
 	var changes []WorktreeChange
 	created, _, err := h.svc.SyncRepository(context.Background(), repo,
 		func(c WorktreeChange) { changes = append(changes, c) })
-	if err != nil {
-		t.Fatalf("sync: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "is on branch feature/y but PR #4 is on branch feature/x") {
+		t.Fatalf("sync err = %v, want the worktree/PR branch mismatch", err)
 	}
 	if created != 0 {
 		t.Errorf("created=%d, want 0: the branch is checked out elsewhere", created)

@@ -383,10 +383,50 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		err = errors.Join(append(errs, lerr)...)
 		return created, removed, err
 	}
+	s.alignBranches(ctx, repo, openByNum, stored, refs, progress, &errs)
 	removed += s.removeClosed(ctx, repo, openByNum, stored, registered, progress, &errs)
 
 	err = errors.Join(errs...)
 	return created, removed, err
+}
+
+func (s *Service) alignBranches(
+	ctx context.Context, repo *schema.Repository, openByNum map[int64]github.PR,
+	stored []schema.Worktree, refs []worktree.Ref, progress progressFn, errs *[]error,
+) {
+	branchByDir, _ := indexRefs(refs)
+	for i := range stored {
+		wt := &stored[i]
+		current := branchByDir[wt.DirectoryPath]
+		if current == "" {
+			continue
+		}
+		if wt.GithubPRNumber != nil {
+			pr, open := openByNum[*wt.GithubPRNumber]
+			if !open {
+				continue
+			}
+			if current != pr.HeadBranch {
+				*errs = append(*errs, fmt.Errorf(
+					"worktree %s is on branch %s but PR #%d is on branch %s",
+					wt.DirectoryPath, current, *wt.GithubPRNumber, pr.HeadBranch))
+				continue
+			}
+		}
+		if current == wt.BranchName {
+			continue
+		}
+		if err := s.db.SetWorktreeBranch(ctx, wt.ID, current); err != nil {
+			*errs = append(*errs, fmt.Errorf("recording branch %s for worktree %s: %w", current, wt.DirectoryPath, err))
+			continue
+		}
+		previous := wt.BranchName
+		wt.BranchName = current
+		s.emitChange(repo, progress, WorktreeChange{
+			Branch: current, PRNumber: wt.GithubPRNumber, Action: ActionUpdated,
+			DirectoryPath: wt.DirectoryPath, LastSyncedAt: wt.LastSyncedAt, Detail: "branch changed from " + previous,
+		})
+	}
 }
 
 // reconcileState carries the mutable lookups createMissing threads through each

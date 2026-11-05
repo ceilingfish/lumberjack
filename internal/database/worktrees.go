@@ -87,6 +87,15 @@ func (c *Client) SetWorktreeDirectory(ctx context.Context, id int64, dir string)
 // SetWorktreeSetupError records (or clears, with nil) the setup step that
 // failed when this worktree was cloned, surfaced alongside its live
 // reconciliation status.
+func (c *Client) SetWorktreeBranch(ctx context.Context, id int64, branch string) error {
+	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
+		Set("branch_name = ?", branch).
+		Where("id = ?", id).Exec(ctx); err != nil {
+		return fmt.Errorf("updating worktree branch: %w", err)
+	}
+	return nil
+}
+
 func (c *Client) SetWorktreeSetupError(ctx context.Context, id int64, msg *string) error {
 	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
 		Set("setup_error = ?", msg).
