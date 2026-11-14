@@ -263,8 +263,9 @@ including every PR in a repository without branch protection — is
 `repository.pullRequests` connection cannot supply per node. The fetch is
 therefore two steps: list the open PR numbers (which sync already does), then
 send one GraphQL query that aliases each PR — `pr123: pullRequest(number: 123)`
-— so each alias can pass its own number to `isRequired`. That is still one
-request per repository, not one per PR.
+— so each alias can pass its own number to `isRequired`. The aliases are sent
+25 PRs to a query, to stay well inside GitHub's per-query node limits, so a
+repository costs one request per 25 open PRs rather than one per PR.
 
 `GetRepository`, `ListWorktrees` and `Watch` all carry the worktree view, so
 all three gain it at once. `Authorship` is an enum on the same message. See
@@ -365,6 +366,8 @@ enum ReviewState {
   REVIEW_STATE_COMMENTED = 1;
   REVIEW_STATE_APPROVED = 2;
   REVIEW_STATE_CHANGES_REQUESTED = 3;
+  REVIEW_STATE_DISMISSED = 4;
+  REVIEW_STATE_PENDING = 5;
 }
 
 enum CheckState {
@@ -402,6 +405,7 @@ message PullRequestState {
   int32 deletions = 12;
   bool has_new_activity = 13;
   int64 score = 14;
+  string base_ref_name = 15;
 }
 
 message Worktree {
@@ -501,9 +505,11 @@ on each row with new activity, and a dot on a tab when any of its rows has it.
 - `viewed_at` is the time of the data the user saw, not the time they left.
   The app sends the `Repository.last_synced_at` it was displaying as
   `seen_through`, and the daemon stores that, never moving `viewed_at`
-  backwards. Stamping the wall clock instead would mark as seen any activity
-  that happened after the last sync, which the user never saw because it had
-  not been fetched yet.
+  backwards and never later than its own clock. A request without
+  `seen_through` falls back to the repository's `last_synced_at`, and is a
+  no-op for a repository never synced. Stamping the wall clock instead would
+  mark as seen any activity that happened after the last sync, which the user
+  never saw because it had not been fetched yet.
 - A repository that has never been viewed has no row in `list_views`. Then
   nothing is new, which stops a first launch from lighting up every PR.
 
