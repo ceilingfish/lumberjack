@@ -16,54 +16,24 @@ want to do next, because the two kinds of change have opposite goals:
 
 - An **owned** change is work in progress. The goal is to drive it to the point
   where it can merge — all review feedback addressed, all static analysis green.
-  The user wants Lumberjack to *push it forward*.
+  The user wants Lumberjack to _push it forward_.
 - An **incoming** change is someone else's work awaiting the user's attention.
   The goal is to tell the user which one to look at first, and to notice when it
-  changes under them. The user wants Lumberjack to *triage it*.
+  changes under them. The user wants Lumberjack to _triage it_.
 
-Automation aimed at one is actively harmful applied to the other. Rewriting a
-colleague's branch to fix their lint errors is not a feature. So ownership is
-not a display nicety; it is the safety boundary that lets any of the rest exist.
+## Determining authorship
 
-### A note on `gh api` and doctrine
-
-Condition 3 reads commit authorship from the GitHub API rather than from local
-git. This is not a departure from the "shell out to `git` and `gh`" rule in
-AGENTS.md: `gh api` *is* `gh`, so Lumberjack still inherits `gh auth login`
-credentials, stores no tokens, and adds no HTTP client or API dependency.
-
-Git remains the source for everything only git knows — worktree registration,
-dirtiness, local tips, merge bases — and `gh` answers the questions that are
-GitHub's to answer. Email-to-account resolution is one of those: it depends on
-verified-address state held server-side that no client can see.
-
-## Determining ownership
-
-Three independent facts can establish that a worktree is owned. They differ in
-where they live and how long they are valid, which is what decides whether each
-is stored or derived.
+We are going to extend the worktree table with an `authorship` column. This can either be `mine` or `theirs`. `mine` indicates it was created by the owning user, `thiers` indicates it was synchronised in
 
 ### 1. The user created it locally
 
-`lumberjack worktree add` is an unambiguous statement of intent: the user asked
-for this branch, on this machine. Nothing in git or `gh` records that fact — a
-locally created worktree is indistinguishable from an adopted one after the
-fact — so per the "only state that can't be recovered" rule in
-`docs/schema.md`, **this must be persisted**.
-
-Add `origin` to `worktrees`:
-
-| value    | meaning                                                        |
-| -------- | -------------------------------------------------------------- |
-| `local`  | created by `lumberjack worktree add`                            |
-| `synced` | created by sync from an open PR                                 |
-| `adopted`| found on disk and adopted; provenance unknown                   |
-
-Existing rows migrate to `adopted`, which is the honest answer: we do not know
-how they got there, and guessing `local` would silently arm automation against
-branches we never created.
+`lumberjack worktree add` is an unambiguous statement of intent: the user asked for this branch, on this machine. When the user does this we should automatically set authorship to `mine`.
 
 ### 2. The PR is authored by the logged-in account
+
+If the PR was created by the same user that created the user that is currently associated with the repo gh login. i.e. the login from the associated repository.
+
+If we synchronise in a repository then we should take the PR owner as the owner, and set the ownership to `mine` if it matches the repository's gh user, or `theirs` if it is a different user.
 
 Once a PR exists, its author is the authoritative statement of whose change it
 is, and it is immutable for the life of the PR — the same property that makes
@@ -106,9 +76,8 @@ Three properties of this data decide the design:
   UI. Committer identifies whoever applied the commit; author identifies who
   wrote it, which is the question ownership asks.
 - **`author` may be null.** An address belonging to no GitHub account resolves
-  to nothing. Null means *unknown*, and must fall to the `unknown` ownership
-  state — never to `incoming`, and never to a local email comparison as a
-  fallback.
+  to nothing. Null means _unknown_, and must fall to the `unknown` ownership
+  state — never to `incoming`.
 - **`compare/BASE...HEAD` is the right endpoint.** It returns exactly the
   commits between the merge base and the head in a single call, already
   resolved. `commits?sha=<branch>` walks the entire history and forces the
@@ -116,11 +85,11 @@ Three properties of this data decide the design:
 
 So condition 3 resolves in layers, and needs no local identity matching at all:
 
-| branch state          | source                                              |
-| --------------------- | --------------------------------------------------- |
-| PR exists             | `gh pr view --json commits` → `authors[].login`, already fetched; no extra call |
-| pushed, no PR         | `gh api repos/O/N/compare/<default>...<branch>`      |
-| never pushed          | GitHub knows nothing — and a branch that exists only locally is the user's by construction. Owned, no lookup |
+| branch state  | source                                                                                                       |
+| ------------- | ------------------------------------------------------------------------------------------------------------ |
+| PR exists     | `gh pr view --json commits` → `authors[].login`, already fetched; no extra call                              |
+| pushed, no PR | `gh api repos/O/N/compare/<default>...<branch>`                                                              |
+| never pushed  | GitHub knows nothing — and a branch that exists only locally is the user's by construction. Owned, no lookup |
 
 An empty commit range (branch tip equals the merge base) is **not** owned — a
 freshly adopted branch with no commits of its own tells us nothing, and
@@ -186,17 +155,17 @@ the worktree view alongside the existing reconciliation status.
 
 From `gh pr view --json mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,isDraft`:
 
-| field                 | use                                                              |
-| --------------------- | ---------------------------------------------------------------- |
-| `mergeable`           | `MERGEABLE` / `CONFLICTING` / `UNKNOWN` — conflicts with base     |
-| `mergeStateStatus`    | `CLEAN`, `BLOCKED`, `BEHIND`, `DIRTY`, ... — why it can't merge   |
-| `reviewDecision`      | `APPROVED` / `CHANGES_REQUESTED` / `REVIEW_REQUIRED`              |
-| `statusCheckRollup`   | per-check conclusions — the static analysis signal               |
-| `isDraft`             | drafts are never automation candidates                            |
+| field               | use                                                             |
+| ------------------- | --------------------------------------------------------------- |
+| `mergeable`         | `MERGEABLE` / `CONFLICTING` / `UNKNOWN` — conflicts with base   |
+| `mergeStateStatus`  | `CLEAN`, `BLOCKED`, `BEHIND`, `DIRTY`, ... — why it can't merge |
+| `reviewDecision`    | `APPROVED` / `CHANGES_REQUESTED` / `REVIEW_REQUIRED`            |
+| `statusCheckRollup` | per-check conclusions — the static analysis signal              |
+| `isDraft`           | drafts are never automation candidates                          |
 
 This is the same surface issue #100 proposes as `MergeState`, and it should be
 one message rather than two overlapping ones. #100's `base_commit_sha` and
-`conflict_count` describe a *local* merge attempt; the fields above describe
+`conflict_count` describe a _local_ merge attempt; the fields above describe
 GitHub's view. Both belong on the worktree view, and the naming should make
 clear which is which — suggest `MergeState` for the local attempt (as #100 has
 it) and `PullRequestState` for the GitHub-side rollup.
@@ -205,14 +174,12 @@ it) and `PullRequestState` for the GitHub-side rollup.
 all three gain it at once. `Ownership` is an enum on the same message.
 
 Cost is the open problem: this is one `gh pr view` per PR per tick, and issue
-#101 already reports sync scaling badly with worktree count. The rollup should
-come from a single batched GraphQL query over the repository's open PRs
-(`gh api graphql`), not N per-PR calls, and it should be fetched only when a
-consumer asks for the view rather than on every sync tick.
+#101 already reports sync scaling badly with worktree count. The rollup should come from a single batched GraphQL query over the repository's open PRs
+(`gh api graphql`), not N per-PR calls. It should, however, be fetched hourly or whenever `lumberjack sync` is invoked.
 
 ## Lifecycle A: owned PRs
 
-The path is worktree → commits → PR → *feedback loop* → merge. The first three
+The path is worktree → commits → PR → _feedback loop_ → merge. The first three
 steps already work. The feedback loop is what this adds.
 
 The trigger is a change to the PR's head: a new push, a new review, or a check
@@ -259,8 +226,8 @@ Non-negotiable constraints on this loop:
 
 ## Lifecycle B: incoming PRs
 
-Incoming PRs need reviewing, and the question the user actually has is *which
-one first*. So each incoming PR gets a rank.
+Incoming PRs need reviewing, and the question the user actually has is _which
+one first_. So each incoming PR gets a rank.
 
 Ranking runs when an incoming PR's head changes — the same watch that drives
 lifecycle A — and produces a score plus a one-line rationale. Inputs are the
@@ -309,7 +276,7 @@ type Provider interface {
 
 `Request` carries the prompt, the input facts, and an optional JSON schema the
 response must satisfy. `Response` carries the text or the decoded structured
-result. This is deliberately the *narrow* surface — a single structured
+result. This is deliberately the _narrow_ surface — a single structured
 completion — because that is all ranking needs, and a narrow interface is one a
 second provider can actually implement.
 
@@ -366,6 +333,7 @@ Each of these is a mergeable PR on its own.
    Worth splitting: conditions 1 and 2 plus the identity set are one PR and
    deliver most of the value; condition 3, which needs the `compare` fetch and
    its SHA cache, is a second.
+
 2. **Mergeability rollup.** The batched GraphQL fetch and `PullRequestState` on
    the worktree view. Coordinate with issue #100 so there is one merge-state
    story, not two.
