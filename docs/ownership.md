@@ -186,8 +186,7 @@ Cost is the open problem: this is one `gh pr view` per PR per tick, and issue
 The macOS app shows one repository at a time, chosen from a dropdown. It splits
 that repository's PRs into two tabs, `mine` and `theirs`, the latter labelled
 "Incoming", and orders each tab by how much it needs the user. Worktrees the
-daemon cannot classify are summarised in a footer under `mine`, with a "Why?"
-link. The wire changes are additive fields on `Worktree` and one new RPC.
+daemon cannot classify appear in neither tab. The wire changes are additive fields on `Worktree` and one new RPC.
 Because every field and RPC is new, `buf breaking` passes and an
 already-released app ignores them.
 
@@ -196,7 +195,6 @@ already-released app ignores them.
 | need                         | source                                                                  | `mine` | `theirs` |
 | ---------------------------- | ----------------------------------------------------------------------- | ------ | -------- |
 | which tab a PR belongs in    | `authorship` column                                                     | ✓      | ✓        |
-| why a worktree is unclassified | the resolver's reasoning                                              | ✓      |          |
 | unresolved comments          | GraphQL `reviewThreads { isResolved }`                                  | ✓      | ✓        |
 | blocking reviews, approvals  | `reviewDecision`, `latestReviews { author, state }`                     | ✓      | ✓        |
 | review requested from me     | `reviewRequests`, matched against the identity set                      |        | ✓        |
@@ -272,34 +270,29 @@ message ChecksSummary {
   int32 passing = 2;
   int32 failing = 3;
   int32 pending = 4;
-  repeated string failing_names = 5;
 }
 
 message PullRequestState {
-  google.protobuf.Timestamp fetched_at = 1;
-  string url = 2;
-  string author_login = 3;
-  bool is_draft = 4;
-  string head_oid = 5;
-  google.protobuf.Timestamp updated_at = 6;
-  Mergeable mergeable = 7;
-  ReviewDecision review_decision = 8;
-  repeated Review latest_reviews = 9;
-  repeated string requested_reviewers = 10;
-  bool review_requested_from_me = 11;
-  int32 unresolved_thread_count = 12;
-  ChecksSummary checks = 13;
-  int32 additions = 14;
-  int32 deletions = 15;
-  bool has_new_activity = 16;
-  bool is_new = 17;
-  int64 score = 18;
+  string url = 1;
+  string author_login = 2;
+  bool is_draft = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  Mergeable mergeable = 5;
+  ReviewDecision review_decision = 6;
+  repeated Review latest_reviews = 7;
+  bool review_requested_from_me = 8;
+  int32 unresolved_thread_count = 9;
+  ChecksSummary checks = 10;
+  int32 additions = 11;
+  int32 deletions = 12;
+  bool has_new_activity = 13;
+  bool is_new = 14;
+  int64 score = 15;
 }
 
 message Worktree {
   Authorship authorship = 13;
-  string authorship_note = 14;
-  optional PullRequestState pull_request = 15;
+  optional PullRequestState pull_request = 14;
 }
 
 service LumberjackService {
@@ -316,13 +309,8 @@ message MarkViewedResponse {}
 
 Notes on the shape:
 
-- `AUTHORSHIP_UNSPECIFIED` doubles as `unknown`. Clients count it in the
-  "unclassified" footer and never show it as `mine`. That is the same rule
-  automation follows.
-- `authorship_note` is the human-readable reason behind the classification,
-  shown by the footer's "Why?" link. It follows the existing
-  `reconciliation_note` convention, and is empty when there is nothing to
-  explain.
+- `AUTHORSHIP_UNSPECIFIED` doubles as `unknown`. Clients leave it out of both
+  tabs and never show it as `mine`. That is the same rule automation follows.
 - `pull_request` is absent when the worktree has no PR, and also before the
   first fetch after daemon start. Absent means "not known yet". It never means
   "clean".
@@ -332,8 +320,9 @@ Notes on the shape:
   `PENDING`.
 - `latest_reviews` holds each reviewer's most recent review. It drives
   "Approved by dmitri" on `mine` and "You approved this" on `theirs` (`is_me`).
-- `fetched_at` is how the UI shows staleness. With an hourly fetch, data up to
-  an hour old is normal, and the user should be able to see that.
+- Staleness is shown from the existing `Repository.last_synced_at` ("synced
+  3 m ago" in the header). The rollup is fetched during sync, so the two always
+  agree. With an hourly fetch, data up to an hour old is normal.
 
 ### Seen state
 
@@ -407,6 +396,100 @@ the tab the next time it is opened.
   on `SNAPSHOT`), so a subscriber re-renders after each fetch without a
   follow-up call. No new event type is needed.
 
+## Database changes
+
+Per `docs/schema.md`, only state that git and `gh` cannot reconstruct is
+stored. Four new facts qualify: the user created a worktree locally; a PR's
+author; extra logins the user has claimed; and when the user last looked at
+each tab. The authorship verdict itself is not stored. It is derived from those
+facts every time the view is built.
+
+### Why the verdict is not a column
+
+Storing `worktrees.authorship` directly would be a cache of three inputs, and
+each input can change while the cached verdict stays put:
+
+- The user logs in to another `gh` account, so the identity set grows. Every
+  `theirs` row authored by that account is now wrong.
+- Somebody opens a PR on a branch the user created locally. Condition 2
+  overrides condition 1, so the row should flip from `mine` to `theirs`.
+- A worktree with no PR gets pushed. Condition 3 can now answer, but nothing
+  rewrites the row.
+
+Storing the inputs makes all three cases correct by construction. The one input
+that would be lost without storage, that the worktree was created locally, is
+`origin`.
+
+### Migration `00006`: authorship inputs (staging step 1)
+
+```sql
+-- +goose Up
+ALTER TABLE worktrees ADD COLUMN origin TEXT NOT NULL DEFAULT 'adopted';
+
+ALTER TABLE pull_requests ADD COLUMN author_login TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE repository_identities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repository_id INTEGER NOT NULL REFERENCES repositories (id) ON DELETE CASCADE,
+    login TEXT NOT NULL COLLATE NOCASE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (repository_id, login)
+);
+
+CREATE INDEX idx_repository_identities_repository_id ON repository_identities (
+    repository_id
+);
+
+-- +goose Down
+DROP TABLE repository_identities;
+ALTER TABLE pull_requests DROP COLUMN author_login;
+ALTER TABLE worktrees DROP COLUMN origin;
+```
+
+| change                         | values / notes                                                                                                                         |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `worktrees.origin`             | `local` (`lumberjack worktree add`), `synced` (created by sync for an open PR), `adopted` (found on disk). Existing rows become `adopted`. Guessing `local` would mark branches `mine` that the user may never have created |
+| `pull_requests.author_login`   | Immutable for the life of the PR, so it is safe to persist, like `github_pr_number`. Existing rows start empty and are filled by the first sync, which runs at daemon start. Empty means unclassified |
+| `repository_identities`        | Identity set 3: logins the user has claimed that `gh` does not hold. Sets 1 and 2 are `repositories.login` and `gh auth status`, which are already available. `COLLATE NOCASE` because GitHub logins are case-insensitive |
+
+### Migration `00007`: seen state (staging step 2)
+
+```sql
+-- +goose Up
+ALTER TABLE pull_requests ADD COLUMN first_seen_at TIMESTAMP;
+
+UPDATE pull_requests SET first_seen_at = COALESCE(last_synced_at, CURRENT_TIMESTAMP);
+
+CREATE TABLE list_views (
+    repository_id INTEGER NOT NULL REFERENCES repositories (id) ON DELETE CASCADE,
+    authorship TEXT NOT NULL,
+    viewed_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (repository_id, authorship)
+);
+
+-- +goose Down
+DROP TABLE list_views;
+ALTER TABLE pull_requests DROP COLUMN first_seen_at;
+```
+
+| change                        | values / notes                                                                                                                         |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `pull_requests.first_seen_at` | Set on insert, never updated. Drives `is_new`. SQLite will not add a column with a `CURRENT_TIMESTAMP` default, so it is nullable and backfilled. Inserts always set it |
+| `list_views`                  | One row per repository and tab (`mine` / `theirs`), upserted by `MarkViewed`. There is no row until the tab has been viewed once, so nothing is new on first launch |
+
+`first_seen_at` is when the daemon first saw the PR, not GitHub's `createdAt`.
+A PR that has been open for a week, in a repository the user only just added,
+should not count as new.
+
+### Not stored
+
+| state                                          | where it lives                                                                 |
+| ---------------------------------------------- | ------------------------------------------------------------------------------ |
+| authorship verdict                             | derived per request from `origin`, `author_login` and the identity set        |
+| condition 3's commit authors                   | in memory, keyed on head SHA, alongside the existing `noPRBranches` cache. A restart costs one `compare` call per unlinked pushed branch |
+| the PR rollup (reviews, checks, size, activity) | in memory, refreshed each sync                                                |
+| `has_new_activity`, `is_new`, `score`          | derived per request from the rollup and `list_views`                           |
+
 ## Proposed staging
 
 Each of these is a mergeable PR on its own.
@@ -422,7 +505,7 @@ Each of these is a mergeable PR on its own.
    its SHA cache, is a second.
 
 2. **Mergeability rollup.** The batched GraphQL fetch, `PullRequestState` on
-   the worktree view, the `list_views` table and `MarkViewed`, and server-side
+   the worktree view, migration `00007` and `MarkViewed`, and server-side
    ordering. Coordinate with issue #100 so there is one merge-state story, not
    two.
 
