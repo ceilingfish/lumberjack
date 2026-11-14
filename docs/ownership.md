@@ -147,7 +147,13 @@ against an **identity set**:
    which is already available via `github.Client.ListLogins`.
 
 Comparison is case-insensitive; GitHub logins are not case-sensitive. Source 2
-means the common multi-account case needs no configuration at all. There is no
+means the common multi-account case needs no configuration at all.
+
+The identity set is held in memory per repository and refreshed at the same
+three points as the rollup (see "Refreshing the rollup"), and also by
+`SetLogin`. Read RPCs use the held set and never run `gh auth status`, which
+the app's 2-second polling would otherwise call constantly. A newly added `gh`
+account therefore takes effect at the next sync. There is no
 list of extra identities to maintain: a PR by an account `gh` does not hold — a
 shared bot, or a second machine's account — is `theirs`, and the user corrects
 the worktrees that matter with `set-authorship`.
