@@ -171,11 +171,167 @@ clear which is which — suggest `MergeState` for the local attempt (as #100 has
 it) and `PullRequestState` for the GitHub-side rollup.
 
 `GetRepository`, `ListWorktrees` and `Watch` all carry the worktree view, so
-all three gain it at once. `Ownership` is an enum on the same message.
+all three gain it at once. `Authorship` is an enum on the same message. See
+"gRPC surface" below for the wire shape.
 
 Cost is the open problem: this is one `gh pr view` per PR per tick, and issue
 #101 already reports sync scaling badly with worktree count. The rollup should come from a single batched GraphQL query over the repository's open PRs
 (`gh api graphql`), not N per-PR calls. It should, however, be fetched hourly or whenever `lumberjack sync` is invoked.
+
+## gRPC surface
+
+The macOS app splits its PR list into `mine` and `theirs`, and orders each list
+by how much it needs the user. Everything it needs comes from the worktree view,
+so the change is additive fields on `Worktree` and nothing else. Each new field
+is new, so `buf breaking` passes and an already-released app ignores them.
+
+### What the views need
+
+| need                            | source                                                                   | `mine` | `theirs` |
+| ------------------------------- | ------------------------------------------------------------------------ | ------ | -------- |
+| which list a PR belongs in      | `authorship` column                                                      | ✓      | ✓        |
+| unresolved comments             | GraphQL `reviewThreads { isResolved }`                                   | ✓      | ✓        |
+| blocking reviews                | `reviewDecision`, plus `latestReviews` in state `CHANGES_REQUESTED`      | ✓      | ✓        |
+| failing CI                      | `statusCheckRollup`                                                      | ✓      | ✓        |
+| merge conflicts                 | `mergeable`                                                              | ✓      | ✓        |
+| new activity from other people  | newest comment, review or thread reply not authored by the identity set  | ✓      | ✓        |
+| size                            | `additions`, `deletions`, `changedFiles`                                 |        | ✓        |
+| row label and link              | `title`, `url`                                                           | ✓      | ✓        |
+
+`gh pr view --json` does not expose review-thread resolution, so unresolved
+comments need the GraphQL query anyway. That is one more reason the batched
+GraphQL query is the only fetch path, not a later optimisation. Top-level
+conversation comments cannot be resolved. They count as activity, not as
+unresolved comments.
+
+Bot accounts such as CodeRabbit count as "other people". Their review threads
+are exactly the feedback the user has to deal with.
+
+### Messages
+
+```proto
+enum Authorship {
+  AUTHORSHIP_UNSPECIFIED = 0;
+  AUTHORSHIP_MINE = 1;
+  AUTHORSHIP_THEIRS = 2;
+}
+
+enum Mergeable {
+  MERGEABLE_UNSPECIFIED = 0;
+  MERGEABLE_MERGEABLE = 1;
+  MERGEABLE_CONFLICTING = 2;
+}
+
+enum ReviewDecision {
+  REVIEW_DECISION_UNSPECIFIED = 0;
+  REVIEW_DECISION_REVIEW_REQUIRED = 1;
+  REVIEW_DECISION_APPROVED = 2;
+  REVIEW_DECISION_CHANGES_REQUESTED = 3;
+}
+
+enum CheckState {
+  CHECK_STATE_UNSPECIFIED = 0;
+  CHECK_STATE_PENDING = 1;
+  CHECK_STATE_PASSING = 2;
+  CHECK_STATE_FAILING = 3;
+}
+
+message ChecksSummary {
+  CheckState state = 1;
+  int32 passing = 2;
+  int32 failing = 3;
+  int32 pending = 4;
+  repeated string failing_names = 5;
+}
+
+message PullRequestSize {
+  int32 additions = 1;
+  int32 deletions = 2;
+  int32 changed_files = 3;
+}
+
+message PullRequestState {
+  google.protobuf.Timestamp fetched_at = 1;
+  string title = 2;
+  string url = 3;
+  string author_login = 4;
+  bool is_draft = 5;
+  string head_oid = 6;
+  Mergeable mergeable = 7;
+  ReviewDecision review_decision = 8;
+  repeated string changes_requested_by = 9;
+  int32 unresolved_thread_count = 10;
+  ChecksSummary checks = 11;
+  PullRequestSize size = 12;
+  optional google.protobuf.Timestamp last_activity_by_others_at = 13;
+  int64 priority = 14;
+}
+
+message Worktree {
+  Authorship authorship = 13;
+  optional PullRequestState pull_request = 14;
+}
+```
+
+Notes on the shape:
+
+- `AUTHORSHIP_UNSPECIFIED` doubles as `unknown`. Clients render it in neither
+  list, or in a third "unclassified" group, and never as `mine`. That is the same
+  rule automation follows.
+- `pull_request` is absent when the worktree has no PR, and also before the
+  first fetch after daemon start. Absent means "not known yet". It never means
+  "clean".
+- `MERGEABLE_UNSPECIFIED` also covers GitHub's `UNKNOWN`. GitHub computes
+  mergeability lazily, so a freshly pushed PR reports `UNKNOWN` for a while.
+- `CHECK_STATE_UNSPECIFIED` means the PR has no checks. That is different from
+  `PENDING`.
+- `fetched_at` is how the UI shows staleness. With an hourly fetch, data up to
+  an hour old is normal, and the user should be able to see that.
+
+### Ordering
+
+`priority` is an opaque sort key computed by the daemon: higher sorts first. It
+only compares within one authorship. A combined view groups by `authorship`
+first, then sorts by `priority` within each group.
+
+The daemon computes it, rather than each client sorting, for three reasons:
+
+- `ListWorktrees` is per repository, and the app merges lists across
+  repositories. A scalar key lets it do that without knowing the rules.
+- The CLI (Go) and the app (Swift) would otherwise implement the same ordering
+  twice and drift apart.
+- The weighting will need tuning. Because the key is opaque, tuning it needs no
+  proto change.
+
+The rules the key encodes:
+
+**`mine`, most actionable first.** A PR needs the user if it has any of the
+following: changes requested, unresolved threads, a merge conflict, or failing
+checks. PRs that need the user sort above those that don't. Within each group,
+the newest `last_activity_by_others_at` sorts first. Drafts sort with everything
+else, since they are the user's own work in progress.
+
+**`theirs`, highest value first.** The base is lines changed
+(`additions + deletions`), with the smallest first. Each of the following
+doubles the effective size: failing checks, a merge conflict, and unresolved
+threads. A PR under 1000 effective lines always sorts above one over 1000.
+Drafts sort last.
+
+Once ranking (lifecycle B) lands, its score replaces the size heuristic for
+`theirs` inside the daemon. Clients see the same `priority` field and need no
+change.
+
+### Delivery
+
+- The rollup is fetched during sync, hourly or on `lumberjack sync`, and held
+  in memory by the daemon. It is not written to the database. Sync runs straight
+  away on daemon start, so a restart leaves only a short window where it is
+  missing.
+- `ListWorktrees` and `GetRepository` serve the cached rollup. The app polls
+  every 2 seconds, so these calls must never trigger a GitHub fetch.
+- `Watch`: `SYNC_FINISHED` also populates `worktrees` (field 3, today only set
+  on `SNAPSHOT`), so a subscriber re-renders after each fetch without a
+  follow-up call. No new event type is needed.
 
 ## Lifecycle A: owned PRs
 
@@ -351,6 +507,13 @@ Each of these is a mergeable PR on its own.
    only part that writes to the user's code.
 
 ## Open questions
+
+- **"New" activity.** `last_activity_by_others_at` orders `mine` by how recent
+  the activity is. It cannot say whether the user has already seen that
+  activity. Highlighting unseen activity needs a persisted "seen at" marker per
+  PR, plus an RPC to set it. That marker is user state GitHub cannot
+  reconstruct, so it would be stored. Add it only if recency alone proves not
+  to be enough.
 
 - **Interaction with issue #84 (sync scope).** Ownership is arguably a scope
   dimension too: "sync my PRs only" is a thing people will want. Whether that is
