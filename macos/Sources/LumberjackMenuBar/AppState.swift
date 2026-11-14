@@ -41,9 +41,31 @@ final class AppState: ObservableObject {
     @Published var selectedRepository: String? {
         didSet {
             guard selectedRepository != oldValue else { return }
+            markViewed(repository: oldValue, tab: selectedTab)
             worktrees = []
             worktreesLoaded = false
         }
+    }
+    @Published var selectedTab: Authorship = .mine {
+        didSet {
+            guard selectedTab != oldValue else { return }
+            markViewed(repository: selectedRepository, tab: oldValue)
+        }
+    }
+
+    var tabWorktrees: [Lumberjack_V1_Worktree] {
+        PullRequestPresentation.worktrees(in: selectedTab, of: worktrees)
+    }
+
+    func panelClosed() {
+        markViewed(repository: selectedRepository, tab: selectedTab)
+    }
+
+    private func markViewed(repository: String?, tab: Authorship) {
+        guard let repository, let client, PullRequestPresentation.isSplit(worktrees) else { return }
+        let repo = repositories.first { $0.localPath == repository }
+        let seenThrough = repo.flatMap { $0.hasLastSyncedAt ? $0.lastSyncedAt : nil }
+        Task { try? await client.markViewed(repository: repository, authorship: tab, seenThrough: seenThrough) }
     }
 
     /// The currently selected repository object, for details the worktree list
@@ -145,7 +167,7 @@ final class AppState: ObservableObject {
                 counts[repo.localPath] = current.count
                 diffAndNotify(repository: repo.githubName, worktrees: current, key: repo.localPath)
                 if repo.localPath == selectedRepository {
-                    worktrees = current.sorted { $0.branchName < $1.branchName }
+                    worktrees = current
                     worktreesLoaded = true
                 }
             }

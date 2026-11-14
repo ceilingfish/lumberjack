@@ -2,12 +2,14 @@ import Foundation
 import GRPC
 import NIOCore
 import NIOPosix
+import SwiftProtobuf
 
 protocol DaemonConnection: Sendable {
     func health() async throws -> Lumberjack_V1_HealthResponse
     func listRepositories() async throws -> [Lumberjack_V1_Repository]
     func listWorktrees(repository: String) async throws -> [Lumberjack_V1_Worktree]
     func sync(repository: String) async throws
+    func markViewed(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?) async throws
     func close() async
 }
 
@@ -70,5 +72,13 @@ final class DaemonClient: DaemonConnection, @unchecked Sendable {
         var request = Lumberjack_V1_SyncRequest()
         request.repository = repository
         for try await _ in service.sync(request) {}
+    }
+
+    func markViewed(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?) async throws {
+        var request = Lumberjack_V1_MarkViewedRequest()
+        request.repository = repository
+        request.authorship = authorship
+        if let seenThrough { request.seenThrough = seenThrough }
+        _ = try await service.markViewed(request)
     }
 }

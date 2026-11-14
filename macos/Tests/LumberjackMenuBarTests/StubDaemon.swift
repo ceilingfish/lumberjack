@@ -1,3 +1,5 @@
+import SwiftProtobuf
+
 @testable import LumberjackMenuBar
 
 struct StubDaemonError: Error {}
@@ -10,6 +12,7 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
     var listWorktreesError: (any Error)?
     var syncedRepositories: [String] = []
     var closeCount = 0
+    var viewed: [(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?)] = []
 
     func health() async throws -> Lumberjack_V1_HealthResponse {
         if let healthError { throw healthError }
@@ -28,6 +31,10 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
 
     func sync(repository: String) async throws {
         syncedRepositories.append(repository)
+    }
+
+    func markViewed(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?) async throws {
+        viewed.append((repository, authorship, seenThrough))
     }
 
     func close() async {
@@ -51,7 +58,9 @@ func stubWorktree(
     reconciliationNote: String = "",
     orphaned: Bool = false,
     branchDisparity: Bool = false,
-    checkedOutBranch: String = ""
+    checkedOutBranch: String = "",
+    authorship: Authorship = .unspecified,
+    pullRequest: Lumberjack_V1_PullRequestState? = nil
 ) -> Lumberjack_V1_Worktree {
     var worktree = Lumberjack_V1_Worktree()
     worktree.branchName = branch
@@ -61,5 +70,7 @@ func stubWorktree(
     worktree.orphaned = orphaned
     worktree.branchDisparity = branchDisparity
     worktree.checkedOutBranch = checkedOutBranch
+    worktree.authorship = authorship
+    if let pullRequest { worktree.pullRequest = pullRequest }
     return worktree
 }

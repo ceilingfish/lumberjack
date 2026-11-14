@@ -43,7 +43,7 @@ struct MenuBarView: View {
     /// The worktrees actually listed: everything when search is closed or the
     /// query is empty, otherwise the matches.
     private var visibleWorktrees: [Lumberjack_V1_Worktree] {
-        WorktreeSearch.filter(state.worktrees, query: searchOpen ? searchQuery : "")
+        WorktreeSearch.filter(state.tabWorktrees, query: searchOpen ? searchQuery : "")
     }
 
     private func openSearch() {
@@ -82,6 +82,9 @@ struct MenuBarView: View {
             case .connected where !state.repositories.isEmpty:
                 repositorySection
                 hairline
+                if PullRequestPresentation.isSplit(state.worktrees) {
+                    tabBar
+                }
                 worktreesHeader
                 // On the list itself, not inside it: dropping to zero matches
                 // swaps the ScrollView out for the no-match message, so an
@@ -111,6 +114,7 @@ struct MenuBarView: View {
         // had forgotten they were filtering.
         .onReceive(NotificationCenter.default.publisher(for: NSPopover.didCloseNotification)) { _ in
             closeSearch(animated: false)
+            state.panelClosed()
         }
         // A branch or PR query from one repository rarely means anything in
         // another, and a stale filter could hide every worktree in the one just
@@ -264,6 +268,58 @@ struct MenuBarView: View {
         .shadow(color: Color.black.opacity(0.10), radius: 10, y: 8)
     }
 
+    // MARK: Tabs
+
+    private var tabBar: some View {
+        HStack(spacing: 2) {
+            tabButton(.mine, title: "Mine") {
+                let n = PullRequestPresentation.mineBadge(state.worktrees)
+                if n > 0 {
+                    Text("\(n)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 5)
+                        .background(Capsule().fill(Palette.destructive))
+                }
+            }
+            tabButton(.theirs, title: "Incoming") {
+                if PullRequestPresentation.incomingUnread(state.worktrees) {
+                    Circle().fill(Palette.dotBlue).frame(width: 6, height: 6)
+                }
+            }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Palette.pillGreyBg))
+        .padding(.horizontal, 14)
+        .padding(.top, 8)
+    }
+
+    private func tabButton<Accessory: View>(
+        _ tab: Authorship, title: String, @ViewBuilder accessory: () -> Accessory
+    ) -> some View {
+        let selected = state.selectedTab == tab
+        return Button {
+            closeSearch()
+            state.selectedTab = tab
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 12, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? Palette.titleText : Palette.subtleText)
+                accessory()
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selected ? Palette.card : .clear)
+                    .shadow(color: selected ? .black.opacity(0.12) : .clear, radius: 1, y: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: Worktrees
 
     private var worktreesHeader: some View {
@@ -355,12 +411,15 @@ struct MenuBarView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-        } else if state.worktrees.isEmpty {
-            Text("No worktrees")
-                .font(.system(size: 12))
-                .foregroundStyle(Palette.subtleText)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 16)
+        } else if state.tabWorktrees.isEmpty {
+            Text(
+                state.selectedTab == .theirs && PullRequestPresentation.isSplit(state.worktrees)
+                    ? "Nothing incoming" : "No worktrees"
+            )
+            .font(.system(size: 12))
+            .foregroundStyle(Palette.subtleText)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
         } else if visibleWorktrees.isEmpty {
             // Distinct from "No worktrees" above: the repository does have
             // worktrees, the query just excluded all of them. Naming the query
@@ -373,7 +432,16 @@ struct MenuBarView: View {
         } else {
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    ForEach(visibleWorktrees, id: \.directoryPath) { worktree in
+                    let rows = visibleWorktrees
+                    let divider = state.selectedTab == .theirs ? PullRequestPresentation.largeDividerIndex(rows) : nil
+                    ForEach(Array(rows.enumerated()), id: \.element.directoryPath) { index, worktree in
+                        if index == divider {
+                            sectionLabel(PullRequestPresentation.largeDividerLabel)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.top, 8)
+                                .padding(.bottom, 2)
+                        }
                         WorktreeRow(
                             worktree: worktree,
                             prURL: MenuBarPresentation.prURL(
@@ -388,7 +456,7 @@ struct MenuBarView: View {
             // beyond ~8 rows the list scrolls (matching the design's 372px cap).
             // Sized to the *matching* rows so a narrowed list doesn't leave a
             // panel of dead space below it.
-            .frame(height: min(CGFloat(visibleWorktrees.count) * 46, 372))
+            .frame(height: min(CGFloat(visibleWorktrees.count) * 52 + 24, 420))
             .padding(.bottom, 6)
         }
     }
@@ -560,7 +628,7 @@ private struct WorktreeRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(style.dot)
+                .fill(dotColor)
                 .frame(width: 5, height: 5)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -576,8 +644,8 @@ private struct WorktreeRow: View {
                 }
                 if let sub = subtitle {
                     Text(sub)
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(style.subColor)
+                        .font(.system(size: 10.5, weight: isNew ? .medium : .regular))
+                        .foregroundStyle(isNew ? Palette.titleText : style.subColor)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -586,12 +654,14 @@ private struct WorktreeRow: View {
 
             if hovered {
                 actions
+            } else if showsPullRequest {
+                pullRequestChips
             } else {
                 statusPill
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 46)
+        .frame(height: 52)
         .background(RoundedRectangle(cornerRadius: 7).fill(hovered ? Palette.rowHover : .clear))
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
@@ -640,11 +710,75 @@ private struct WorktreeRow: View {
     }
 
     private var subtitle: String? {
-        MenuBarPresentation.rowSubtitle(worktree)
+        PullRequestPresentation.subtitle(worktree)
+    }
+
+    private var status: WorktreeStatus {
+        MenuBarPresentation.status(of: worktree, isSyncing: isSyncing)
+    }
+
+    private var showsPullRequest: Bool {
+        worktree.hasPullRequest && status == .inSync
+    }
+
+    private var isNew: Bool {
+        worktree.hasPullRequest && worktree.pullRequest.hasNewActivity_p
+    }
+
+    private var dotColor: Color {
+        guard showsPullRequest else { return style.dot }
+        switch PullRequestPresentation.dot(worktree) {
+        case .ok: return Palette.dotGreen
+        case .new: return Palette.dotBlue
+        case .draft: return Palette.dotGrey
+        case .blocked: return Palette.destructive
+        case .attention: return Palette.dotAmber
+        }
+    }
+
+    private var pullRequestChips: some View {
+        let pr = worktree.pullRequest
+        return HStack(spacing: 4) {
+            if worktree.authorship == .theirs {
+                let lines = PullRequestPresentation.lines(pr)
+                chip(PullRequestPresentation.sizeLabel(lines: lines), fg: Palette.subtleText, bg: Palette.pillGreyBg)
+                    .help("\(PullRequestPresentation.linesText(pr)) · \(PullRequestPresentation.sizeTitle(pr))")
+            }
+            switch PullRequestPresentation.badge(worktree) {
+            case .none:
+                EmptyView()
+            case .problem(let text):
+                chip(text, fg: Palette.destructiveDeep, bg: Palette.destructiveTint)
+            case .blocked(let count, let summary):
+                chip("Blocked · \(count)", fg: Palette.destructiveDeep, bg: Palette.destructiveTint)
+                    .help(summary)
+            case .approved(let tip):
+                chip("Approved", fg: Palette.treeGreen, bg: Palette.pillGreenBg)
+                    .help(tip)
+            case .review:
+                chip("Review", fg: Palette.primary, bg: Palette.pillBlueBg)
+            }
+            if let updated = PullRequestPresentation.updated(worktree) {
+                Text(updated)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Palette.faintText)
+            }
+        }
+        .fixedSize()
+    }
+
+    private func chip(_ text: String, fg: Color, bg: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(fg)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(bg))
     }
 
     private var style: StatusStyle {
-        switch MenuBarPresentation.status(of: worktree, isSyncing: isSyncing) {
+        switch status {
         case .inSync: return .inSync
         case .attention: return .attention
         case .disparity: return .disparity

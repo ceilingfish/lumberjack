@@ -41,7 +41,9 @@ struct AppStateRefreshTests {
         #expect(state.repositories.map(\.githubName) == ["repo"])
     }
 
-    @Test("a refresh sorts repositories by name, selects the daemon's first, and counts worktrees")
+    @Test(
+        "a refresh sorts repositories by name, selects the daemon's first, keeps the daemon's worktree order, and counts worktrees"
+    )
     func refreshPopulatesRepositoriesAndWorktrees() async {
         let daemon = StubDaemon()
         daemon.repositories = [
@@ -62,7 +64,7 @@ struct AppStateRefreshTests {
         #expect(state.repositories.map(\.githubName) == ["apple", "zebra"])
         #expect(state.selectedRepository == "/tmp/zebra")
         #expect(state.selectedRepositoryObject?.githubName == "zebra")
-        #expect(state.worktrees.map(\.branchName) == ["alpha", "main"])
+        #expect(state.worktrees.map(\.branchName) == ["main", "alpha"])
         #expect(state.worktreesLoaded)
         #expect(state.worktreeCountsByRepo == ["/tmp/zebra": 2, "/tmp/apple": 1])
         #expect(state.knownWorktreeKeys == ["/tmp/zebra", "/tmp/apple"])
