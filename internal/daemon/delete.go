@@ -61,15 +61,15 @@ func (s *Service) deleteWorktreeLocked(ctx context.Context, repo *schema.Reposit
 		}
 	}
 	if wt.GithubPRNumber != nil {
-		merged, merr := s.gh.PRMerged(ctx, repoInfo(repo), *wt.GithubPRNumber)
-		if merr != nil {
-			return DeleteResult{}, fmt.Errorf("checking PR #%d state: %w", *wt.GithubPRNumber, merr)
+		res := s.gh.MergedPRs(ctx, repoInfo(repo), []int64{*wt.GithubPRNumber})[*wt.GithubPRNumber]
+		if res.Err != nil {
+			return DeleteResult{}, fmt.Errorf("checking PR #%d state: %w", *wt.GithubPRNumber, res.Err)
 		}
-		if merged {
+		if res.Merged {
 			state = worktree.PRMerged
 		}
 	}
-	st, err := worktree.Reconcile(ctx, s.git, wt.DirectoryPath, prBranchOf(*wt), state)
+	st, err := s.reconcile(ctx, *wt, state)
 	if err != nil {
 		return DeleteResult{}, fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, err)
 	}

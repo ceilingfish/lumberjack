@@ -420,6 +420,31 @@ func TestSetWorktreeDirectory(t *testing.T) {
 	}
 }
 
+func TestSetWorktreeBranch(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	wt := &schema.Worktree{
+		RepositoryID: repo.ID, BranchName: "feature/x", DirectoryPath: "/parent/a-x",
+	}
+	if err := c.CreateWorktree(ctx, wt); err != nil {
+		t.Fatalf("CreateWorktree: %v", err)
+	}
+
+	if err := c.SetWorktreeBranch(ctx, wt.ID, "feature/y"); err != nil {
+		t.Fatalf("SetWorktreeBranch: %v", err)
+	}
+
+	got, err := c.FindWorktree(ctx, repo.ID, "/parent/a-x")
+	if err != nil {
+		t.Fatalf("FindWorktree: %v", err)
+	}
+	if got.BranchName != "feature/y" {
+		t.Errorf("BranchName = %q, want feature/y", got.BranchName)
+	}
+}
+
 func TestSetWorktreeSetupError(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()

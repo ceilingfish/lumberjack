@@ -19,7 +19,7 @@ func TestReconcileClean(t *testing.T) {
 		t.Fatalf("AddWorktree: %v", err)
 	}
 
-	st, err := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	st, err := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestReconcileDirtyOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PROpen)
 	if !st.Dirty || !st.NeedsReconciliation {
 		t.Errorf("expected dirty+needs reconciliation: %+v", st)
 	}
@@ -61,7 +61,7 @@ func TestReconcileOrphaned(t *testing.T) {
 	}
 	runGit(t, dir, "commit", "-am", "local")
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRGone)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PRGone)
 	if !st.Orphaned || st.LocalOnlyCommits != 1 {
 		t.Errorf("expected orphaned with 1 local commit: %+v", st)
 	}
@@ -88,7 +88,7 @@ func TestReconcileMerged(t *testing.T) {
 	}
 	runGit(t, dir, "commit", "-am", "merged work")
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRMerged)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PRMerged)
 	if st.NeedsReconciliation || st.Orphaned || st.LocalOnlyCommits != 0 {
 		t.Errorf("merged worktree should be a safe-remove candidate: %+v", st)
 	}
@@ -110,7 +110,7 @@ func TestReconcileMergedButDirty(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRMerged)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PRMerged)
 	if !st.Dirty || !st.NeedsReconciliation || !st.Merged {
 		t.Errorf("merged+dirty should still need reconciliation: %+v", st)
 	}
@@ -127,7 +127,7 @@ func TestReconcileClosedButClean(t *testing.T) {
 	dir := filepath.Join(filepath.Dir(main), "wt")
 	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRGone)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PRGone)
 	if st.NeedsReconciliation || st.Orphaned {
 		t.Errorf("clean closed worktree is a safe-remove candidate: %+v", st)
 	}
@@ -147,7 +147,7 @@ func TestReconcileHuskDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := Reconcile(context.Background(), g, dir, "feature/foo", PROpen)
+	st, err := Reconcile(context.Background(), g, dir, "feature/foo", "test@example.com", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestReconcileBranchDisparity(t *testing.T) {
 	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
 	runGit(t, dir, "checkout", "-b", "feature/elsewhere")
 
-	st, err := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	st, err := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestReconcileMergedWithBranchDisparity(t *testing.T) {
 	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
 	runGit(t, dir, "checkout", "-b", "feature/elsewhere")
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PRMerged)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PRMerged)
 	if !st.NeedsReconciliation {
 		t.Errorf("merged worktree with a disparity must be retained: %+v", st)
 	}
@@ -211,7 +211,7 @@ func TestReconcileDirtyAndBranchDisparity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PROpen)
 	want := "needs reconciliation: uncommitted changes and " +
 		"disparity between local branch feature/elsewhere and PR branch feature/foo"
 	if st.Note != want {
@@ -228,7 +228,7 @@ func TestReconcileNoPRBranchNoDisparity(t *testing.T) {
 	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
 	runGit(t, dir, "checkout", "-b", "feature/elsewhere")
 
-	st, _ := Reconcile(ctx, g, dir, "", PRNone)
+	st, _ := Reconcile(ctx, g, dir, "", "test@example.com", PRNone)
 	if st.BranchDisparity || st.NeedsReconciliation {
 		t.Errorf("no PR branch means nothing to differ from: %+v", st)
 	}
@@ -243,7 +243,7 @@ func TestReconcileDetachedHeadNoDisparity(t *testing.T) {
 	_ = g.AddWorktree(ctx, main, dir, "origin", "feature/foo")
 	runGit(t, dir, "checkout", "--detach")
 
-	st, _ := Reconcile(ctx, g, dir, "feature/foo", PROpen)
+	st, _ := Reconcile(ctx, g, dir, "feature/foo", "test@example.com", PROpen)
 	if st.BranchDisparity || st.CheckedOutBranch != "" {
 		t.Errorf("detached HEAD is not a disparity: %+v", st)
 	}
@@ -251,7 +251,7 @@ func TestReconcileDetachedHeadNoDisparity(t *testing.T) {
 
 func TestReconcileMissingDir(t *testing.T) {
 	g, main := setupRepos(t)
-	st, err := Reconcile(context.Background(), g, filepath.Join(filepath.Dir(main), "gone"), "feature/foo", PROpen)
+	st, err := Reconcile(context.Background(), g, filepath.Join(filepath.Dir(main), "gone"), "feature/foo", "test@example.com", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -269,16 +269,15 @@ type fakeProber struct {
 	branchErr error
 }
 
-func (f fakeProber) IsDirty(context.Context, string) (bool, error) {
-	return f.dirty, f.dirtyErr
+func (f fakeProber) WorkingState(context.Context, string) (bool, string, error) {
+	if f.dirtyErr != nil {
+		return false, "", f.dirtyErr
+	}
+	return f.dirty, f.branch, f.branchErr
 }
 
-func (f fakeProber) LocalOnlyCommits(context.Context, string) (int64, error) {
+func (f fakeProber) LocalOnlyCommits(context.Context, string, string) (int64, error) {
 	return f.localOnly, f.countErr
-}
-
-func (f fakeProber) CurrentBranch(context.Context, string) (string, error) {
-	return f.branch, f.branchErr
 }
 
 func fakeWorktreeDir(t *testing.T) string {
@@ -357,7 +356,7 @@ func TestReconcileDecisions(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), tc.prBranch, tc.pr)
+			got, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), tc.prBranch, "", tc.pr)
 			if err != nil {
 				t.Fatalf("Reconcile: %v", err)
 			}
@@ -376,12 +375,12 @@ func TestReconcileProbeErrors(t *testing.T) {
 		probe   fakeProber
 		wantErr string
 	}{
-		{"dirty check fails", fakeProber{dirtyErr: errProbe}, "checking dirty state"},
+		{"working state fails", fakeProber{dirtyErr: errProbe}, "checking working tree state"},
 		{"commit count fails", fakeProber{countErr: errProbe}, "counting local-only commits"},
-		{"branch read fails", fakeProber{branchErr: errProbe}, "reading checked-out branch"},
+		{"branch read fails", fakeProber{branchErr: errProbe}, "checking working tree state"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			st, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), "", PROpen)
+			st, err := Reconcile(context.Background(), tc.probe, fakeWorktreeDir(t), "", "", PROpen)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("Reconcile error = %v, want one containing %q", err, tc.wantErr)
 			}
@@ -401,7 +400,7 @@ func TestReconcileNotADirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := Reconcile(context.Background(), fakeProber{}, path, "", PROpen)
+	st, err := Reconcile(context.Background(), fakeProber{}, path, "", "", PROpen)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -416,7 +415,7 @@ func TestReconcileStatError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, err := Reconcile(context.Background(), fakeProber{}, filepath.Join(notADir, "under-a-file"), "", PROpen)
+	st, err := Reconcile(context.Background(), fakeProber{}, filepath.Join(notADir, "under-a-file"), "", "", PROpen)
 	if err == nil {
 		t.Fatal("Reconcile: expected an error")
 	}
