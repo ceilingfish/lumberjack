@@ -55,7 +55,24 @@ type PullRequest struct {
 	GithubPRNumber int64      `bun:"github_pr_number,notnull"`
 	BranchName     string     `bun:"branch_name,notnull"`
 	LastSyncedAt   *time.Time `bun:"last_synced_at"`
+	AuthorLogin    string     `bun:"author_login,notnull"`
+	DeletedAt      *time.Time `bun:"deleted_at"`
 }
+
+type Origin string
+
+const (
+	OriginLocal   Origin = "local"
+	OriginSynced  Origin = "synced"
+	OriginAdopted Origin = "adopted"
+)
+
+type Authorship string
+
+const (
+	AuthorshipMine   Authorship = "mine"
+	AuthorshipTheirs Authorship = "theirs"
+)
 
 // Worktree is the local branch ↔ directory mapping. Stored, never recomputed,
 // so slug-rule changes can't orphan an existing worktree.
@@ -72,7 +89,9 @@ type Worktree struct {
 	// SetupError names the setup step that failed when this worktree was
 	// cloned (empty/nil when setup succeeded or the repository has no setup
 	// steps configured). Surfaced alongside the live reconciliation status.
-	SetupError *string `bun:"setup_error"`
+	SetupError         *string     `bun:"setup_error"`
+	Origin             Origin      `bun:"origin,notnull"`
+	AuthorshipOverride *Authorship `bun:"authorship_override"`
 }
 
 // Matches reports whether ref identifies this worktree. It is the one place

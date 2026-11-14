@@ -386,15 +386,21 @@ func TestListOpenPRs(t *testing.T) {
 	var gotArgs []string
 	c := fakeClient(func(args ...string) (string, error) {
 		gotArgs = args
-		return `[{"number":42,"headRefName":"feature/x"},{"number":7,"headRefName":"fix/y"}]`, nil
+		return `[{"number":42,"headRefName":"feature/x","author":{"login":"alice"}},{"number":7,"headRefName":"fix/y"}]`, nil
 	})
 	repo := RepoInfo{Owner: "o", Name: "n", Host: "github.com"}
 	prs, err := c.ListOpenPRs(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("ListOpenPRs: %v", err)
 	}
-	if len(prs) != 2 || prs[0].Number != 42 || prs[0].HeadBranch != "feature/x" {
+	if len(prs) != 2 || prs[0].Number != 42 || prs[0].HeadBranch != "feature/x" || prs[0].AuthorLogin != "alice" {
 		t.Errorf("prs = %+v", prs)
+	}
+	if prs[1].AuthorLogin != "" {
+		t.Errorf("PR without an author = %q, want empty", prs[1].AuthorLogin)
+	}
+	if !slices.Contains(gotArgs, "number,headRefName,author") {
+		t.Errorf("expected author in --json selection, got %v", gotArgs)
 	}
 	// The repo selector must be host/owner/name.
 	joined := ""
@@ -420,13 +426,13 @@ func TestFindPRForBranch(t *testing.T) {
 	c := fakeClient(func(args ...string) (string, error) {
 		gotArgs = args
 		return `[{"number":7,"headRefName":"feature/x","state":"CLOSED","updatedAt":"2026-01-01T00:00:00Z"},
-			{"number":9,"headRefName":"feature/x","state":"MERGED","updatedAt":"2026-02-01T00:00:00Z"}]`, nil
+			{"number":9,"headRefName":"feature/x","state":"MERGED","updatedAt":"2026-02-01T00:00:00Z","author":{"login":"bob"}}]`, nil
 	})
 	pr, found, err := c.FindPRForBranch(context.Background(), RepoInfo{Owner: "o", Name: "n", Host: "github.com"}, "feature/x")
 	if err != nil || !found {
 		t.Fatalf("FindPRForBranch: found=%v err=%v", found, err)
 	}
-	if pr.Number != 9 {
+	if pr.Number != 9 || pr.AuthorLogin != "bob" {
 		t.Errorf("pr = %+v, want the most recently updated", pr)
 	}
 	if !slices.Contains(gotArgs, "all") || !slices.Contains(gotArgs, "feature/x") {

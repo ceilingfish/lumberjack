@@ -945,6 +945,29 @@ func TestSyncCreatesWorktrees(t *testing.T) {
 	if len(changes) == 0 {
 		t.Error("expected progress changes")
 	}
+	for _, wt := range wts {
+		if wt.Origin != schema.OriginSynced {
+			t.Errorf("%s origin = %q, want synced", wt.BranchName, wt.Origin)
+		}
+	}
+}
+
+func TestSyncRecordsPRAuthors(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a", AuthorLogin: "alice"}}
+	h.seedSync(t, repo)
+
+	h.gh.prs = nil
+	h.seedSync(t, repo)
+
+	authors, err := h.db.PRAuthors(context.Background(), repo.ID)
+	if err != nil {
+		t.Fatalf("PRAuthors: %v", err)
+	}
+	if authors[1] != "alice" {
+		t.Errorf("authors = %v, want the closed PR's author kept", authors)
+	}
 }
 
 func TestSyncStampsWorktreeLastSyncedAt(t *testing.T) {
@@ -2334,6 +2357,38 @@ func TestSyncLinksPRMergedBetweenTicks(t *testing.T) {
 	}
 	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 0 {
 		t.Errorf("expected the worktree removed, got %d", len(got))
+	}
+}
+
+func TestSyncRecordsAuthorOfPRLinkedAfterTheFact(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x", AuthorLogin: "bob"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	authors, _ := h.db.PRAuthors(context.Background(), repo.ID)
+	if authors[7] != "bob" {
+		t.Errorf("authors = %v, want PR #7 recorded with its author", authors)
+	}
+}
+
+func TestSyncReportsFailureToRecordPRLinkedAfterTheFact(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x"}}
+	if _, err := h.db.ExecContext(context.Background(),
+		"CREATE TRIGGER fail_pr_insert BEFORE INSERT ON pull_requests BEGIN SELECT RAISE(ABORT, 'boom'); END"); err != nil {
+		t.Fatalf("creating trigger: %v", err)
+	}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v, want the PR recording failure", err)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if wts[0].GithubPRNumber != nil {
+		t.Error("the worktree must not be linked when its PR could not be recorded")
 	}
 }
 

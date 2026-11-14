@@ -54,6 +54,8 @@ The PRs the daemon is tracking for a repo. Deliberately minimal — just enough 
 | `repository_id`  | integer   | FK → `repositories.id`                                            |
 | `branch_name`    | text      | The PR's head branch, exact/unslugged (e.g. `feature/my-feature`) |
 | `last_synced_at` | timestamp | When this sync last observed the PR                               |
+| `author_login`   | text      | The PR's author; immutable for the life of the PR. Drives authorship (`docs/ownership.md`) |
+| `deleted_at`     | timestamp | Nullable; set when the PR leaves the open set, cleared if it reopens. Rows are soft-deleted, never removed |
 
 Unique constraint on (`repository_id`, `github_pr_number`). Everything else about a PR (title, state, head SHA, merge commit, fork status) is fetched live from `gh` when needed.
 
@@ -71,6 +73,8 @@ The local side, and the crucial branch ↔ directory mapping. Holds only what gi
 | `last_synced_at`   | timestamp | When Lumberjack last reconciled this worktree                                                                          |
 | `created_at`       | timestamp |                                                                                                                        |
 | `setup_error`      | text      | Nullable; names the `.lumberjack.yml` setup step that failed when this worktree was cloned (fail-fast — later steps are skipped, the worktree is kept). Folded into the live reconciliation note/status |
+| `origin`           | text      | `local` (`worktree add`), `synced` (created for an open PR) or `adopted` (found on disk) |
+| `authorship_override` | text   | Nullable; `mine` or `theirs`, set by `lumberjack set-authorship`. Null means authorship is derived (`docs/ownership.md`) |
 
 Unique constraint on (`repository_id`, `directory_path`).
 

@@ -71,7 +71,7 @@ func (s *Service) addWorktreeLocked(ctx context.Context, repo *schema.Repository
 		return AddResult{}, err
 	}
 
-	row := &schema.Worktree{RepositoryID: repo.ID, BranchName: branch, DirectoryPath: dir}
+	row := &schema.Worktree{RepositoryID: repo.ID, BranchName: branch, DirectoryPath: dir, Origin: schema.OriginLocal}
 	if err := s.db.CreateWorktree(ctx, row); err != nil {
 		// Roll back the on-disk worktree so a retry can recreate it cleanly.
 		_ = s.git.RemoveWorktree(ctx, repo.LocalPath, dir, true)

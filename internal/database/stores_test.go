@@ -513,6 +513,16 @@ func TestDeleteRepositoryMissing(t *testing.T) {
 	}
 }
 
+func openPRs(prs []schema.PullRequest) map[int64]schema.PullRequest {
+	out := map[int64]schema.PullRequest{}
+	for _, pr := range prs {
+		if pr.DeletedAt == nil {
+			out[pr.GithubPRNumber] = pr
+		}
+	}
+	return out
+}
+
 func TestReplaceOpenPRs(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
@@ -520,44 +530,42 @@ func TestReplaceOpenPRs(t *testing.T) {
 	_ = c.CreateRepository(ctx, repo)
 	now := time.Now()
 
-	// First sync: two open PRs.
 	err := c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{
-		{Number: 1, Branch: "feature/one"},
-		{Number: 2, Branch: "feature/two"},
+		{Number: 1, Branch: "feature/one", Author: "alice"},
+		{Number: 2, Branch: "feature/two", Author: "bob"},
 	}, now)
 	if err != nil {
 		t.Fatalf("ReplaceOpenPRs: %v", err)
 	}
 	prs, _ := c.listPRs(ctx, repo.ID)
-	if len(prs) != 2 {
-		t.Fatalf("expected 2 PRs, got %d", len(prs))
+	if len(openPRs(prs)) != 2 {
+		t.Fatalf("expected 2 open PRs, got %+v", prs)
 	}
 
-	// Second sync: #1 closed, #2 rebranched, #3 new. Expect exactly {2,3}.
 	err = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{
-		{Number: 2, Branch: "feature/two-renamed"},
-		{Number: 3, Branch: "feature/three"},
+		{Number: 2, Branch: "feature/two-renamed", Author: "bob"},
+		{Number: 3, Branch: "feature/three", Author: "carol"},
 	}, now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ReplaceOpenPRs: %v", err)
 	}
 	prs, _ = c.listPRs(ctx, repo.ID)
-	if len(prs) != 2 {
-		t.Fatalf("expected 2 PRs after prune, got %d", len(prs))
+	open := openPRs(prs)
+	if len(open) != 2 || open[2].BranchName != "feature/two-renamed" || open[3].AuthorLogin != "carol" {
+		t.Errorf("unexpected open PRs: %+v", open)
 	}
-	byNum := map[int64]string{}
-	for _, pr := range prs {
-		byNum[pr.GithubPRNumber] = pr.BranchName
+	if len(prs) != 3 {
+		t.Fatalf("closed PR #1 should be kept as a soft-deleted row, got %+v", prs)
 	}
-	if byNum[2] != "feature/two-renamed" || byNum[3] != "feature/three" {
-		t.Errorf("unexpected PRs: %+v", byNum)
+	if prs[0].GithubPRNumber != 1 || prs[0].DeletedAt == nil || !prs[0].DeletedAt.Equal(now.Add(time.Hour)) {
+		t.Errorf("PR #1 = %+v, want soft-deleted at the second sync", prs[0])
 	}
-	if _, closed := byNum[1]; closed {
-		t.Error("PR #1 should have been pruned")
+	if prs[0].AuthorLogin != "alice" {
+		t.Errorf("soft-deleted PR lost its author: %+v", prs[0])
 	}
 }
 
-func TestReplaceOpenPRsEmptyPrunesAll(t *testing.T) {
+func TestReplaceOpenPRsEmptySoftDeletesAll(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
@@ -569,8 +577,109 @@ func TestReplaceOpenPRsEmptyPrunesAll(t *testing.T) {
 		t.Fatalf("ReplaceOpenPRs(nil): %v", err)
 	}
 	prs, _ := c.listPRs(ctx, repo.ID)
-	if len(prs) != 0 {
-		t.Errorf("expected all PRs pruned, got %d", len(prs))
+	if len(prs) != 1 || len(openPRs(prs)) != 0 {
+		t.Errorf("expected the PR kept but soft-deleted, got %+v", prs)
+	}
+}
+
+func TestReplaceOpenPRsKeepsEarlierDeletionTime(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	now := time.Now()
+
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, now)
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, nil, now.Add(time.Hour))
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, nil, now.Add(2*time.Hour))
+	prs, _ := c.listPRs(ctx, repo.ID)
+	if prs[0].DeletedAt == nil || !prs[0].DeletedAt.Equal(now.Add(time.Hour)) {
+		t.Errorf("deleted_at = %v, want the first sync that saw it closed", prs[0].DeletedAt)
+	}
+}
+
+func TestReplaceOpenPRsRevivesReopenedPR(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	now := time.Now()
+
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b", Author: "alice"}}, now)
+	first, _ := c.listPRs(ctx, repo.ID)
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, nil, now.Add(time.Hour))
+	if err := c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b", Author: "alice"}}, now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("ReplaceOpenPRs: %v", err)
+	}
+	prs, _ := c.listPRs(ctx, repo.ID)
+	if len(prs) != 1 || prs[0].ID != first[0].ID {
+		t.Fatalf("reopened PR should reuse its row, got %+v (first %+v)", prs, first)
+	}
+	if prs[0].DeletedAt != nil {
+		t.Errorf("reopened PR still soft-deleted: %+v", prs[0])
+	}
+}
+
+func TestPRAuthorsIncludesClosedPRs(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	other := newRepo("/b", "b", "B")
+	_ = c.CreateRepository(ctx, repo)
+	_ = c.CreateRepository(ctx, other)
+	now := time.Now()
+
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b", Author: "alice"}}, now)
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 2, Branch: "c", Author: "bob"}}, now)
+	_ = c.ReplaceOpenPRs(ctx, other.ID, []TrackedPR{{Number: 3, Branch: "d", Author: "carol"}}, now)
+
+	got, err := c.PRAuthors(ctx, repo.ID)
+	if err != nil {
+		t.Fatalf("PRAuthors: %v", err)
+	}
+	if len(got) != 2 || got[1] != "alice" || got[2] != "bob" {
+		t.Errorf("PRAuthors = %v, want {1: alice, 2: bob}", got)
+	}
+}
+
+func TestPRAuthorsError(t *testing.T) {
+	c := openTemp(t)
+	_ = c.Close()
+	if _, err := c.PRAuthors(context.Background(), 1); err == nil {
+		t.Error("expected an error from a closed database")
+	}
+}
+
+func TestRecordClosedPR(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	now := time.Now()
+
+	if err := c.RecordClosedPR(ctx, repo.ID, TrackedPR{Number: 5, Branch: "b", Author: "alice"}, now); err != nil {
+		t.Fatalf("RecordClosedPR: %v", err)
+	}
+	prs, _ := c.listPRs(ctx, repo.ID)
+	if len(prs) != 1 || prs[0].DeletedAt == nil || prs[0].AuthorLogin != "alice" {
+		t.Fatalf("expected a soft-deleted row authored by alice, got %+v", prs)
+	}
+
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 6, Branch: "c"}}, now)
+	if err := c.RecordClosedPR(ctx, repo.ID, TrackedPR{Number: 6, Branch: "c", Author: "bob"}, now); err != nil {
+		t.Fatalf("RecordClosedPR on an existing row: %v", err)
+	}
+	prs, _ = c.listPRs(ctx, repo.ID)
+	if prs[1].DeletedAt != nil || prs[1].AuthorLogin != "bob" {
+		t.Errorf("an open row should keep its state and gain the author, got %+v", prs[1])
+	}
+}
+
+func TestRecordClosedPRError(t *testing.T) {
+	c := openTemp(t)
+	_ = c.Close()
+	if err := c.RecordClosedPR(context.Background(), 1, TrackedPR{Number: 1}, time.Now()); err == nil {
+		t.Error("expected an error from a closed database")
 	}
 }
 
@@ -617,5 +726,67 @@ func TestFinishSyncRunError(t *testing.T) {
 	latest, _ := c.LatestSyncRun(ctx, repo.ID)
 	if latest.Status != schema.SyncStatusError || latest.Error == nil || *latest.Error != "kaboom" {
 		t.Errorf("latest = %+v", latest)
+	}
+}
+
+func TestCreateWorktreeOrigin(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+
+	adopted := &schema.Worktree{RepositoryID: repo.ID, BranchName: "x", DirectoryPath: "/a-x"}
+	local := &schema.Worktree{RepositoryID: repo.ID, BranchName: "y", DirectoryPath: "/a-y", Origin: schema.OriginLocal}
+	for _, wt := range []*schema.Worktree{adopted, local} {
+		if err := c.CreateWorktree(ctx, wt); err != nil {
+			t.Fatalf("CreateWorktree: %v", err)
+		}
+	}
+	wts, _ := c.ListWorktrees(ctx, repo.ID)
+	if wts[0].Origin != schema.OriginAdopted || wts[1].Origin != schema.OriginLocal {
+		t.Errorf("origins = %q, %q; want adopted, local", wts[0].Origin, wts[1].Origin)
+	}
+}
+
+func TestCreateWorktreeRejectsUnknownOrigin(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+
+	wt := &schema.Worktree{RepositoryID: repo.ID, BranchName: "x", DirectoryPath: "/a-x", Origin: "elsewhere"}
+	if err := c.CreateWorktree(ctx, wt); err == nil {
+		t.Error("expected the origin CHECK constraint to reject an unknown value")
+	}
+}
+
+func TestSetWorktreeAuthorshipOverride(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	wt := &schema.Worktree{RepositoryID: repo.ID, BranchName: "x", DirectoryPath: "/a-x"}
+	_ = c.CreateWorktree(ctx, wt)
+
+	mine := schema.AuthorshipMine
+	if err := c.SetWorktreeAuthorshipOverride(ctx, wt.ID, &mine); err != nil {
+		t.Fatalf("SetWorktreeAuthorshipOverride: %v", err)
+	}
+	wts, _ := c.ListWorktrees(ctx, repo.ID)
+	if wts[0].AuthorshipOverride == nil || *wts[0].AuthorshipOverride != schema.AuthorshipMine {
+		t.Fatalf("override = %v, want mine", wts[0].AuthorshipOverride)
+	}
+
+	if err := c.SetWorktreeAuthorshipOverride(ctx, wt.ID, nil); err != nil {
+		t.Fatalf("clearing override: %v", err)
+	}
+	wts, _ = c.ListWorktrees(ctx, repo.ID)
+	if wts[0].AuthorshipOverride != nil {
+		t.Errorf("override = %v, want cleared", *wts[0].AuthorshipOverride)
+	}
+
+	bogus := schema.Authorship("ours")
+	if err := c.SetWorktreeAuthorshipOverride(ctx, wt.ID, &bogus); err == nil {
+		t.Error("expected the authorship CHECK constraint to reject an unknown value")
 	}
 }

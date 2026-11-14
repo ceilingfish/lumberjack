@@ -137,7 +137,7 @@ func (c *Client) DeleteRepository(ctx context.Context, repoID int64) (worktreesR
 		}
 
 		res, derr = tx.NewDelete().Model((*schema.Repository)(nil)).
-			Where("id = ?", repoID).Exec(ctx)
+			Where(whereID, repoID).Exec(ctx)
 		if derr != nil {
 			return fmt.Errorf("deleting repository: %w", derr)
 		}
@@ -170,7 +170,7 @@ func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Tim
 		Set("last_synced_at = ?", at).
 		Set("last_sync_status = ?", status).
 		Set("last_sync_error = ?", errMsg).
-		Where("id = ?", repoID).Exec(ctx); err != nil {
+		Where(whereID, repoID).Exec(ctx); err != nil {
 		return fmt.Errorf("updating sync result: %w", err)
 	}
 	return nil
@@ -181,7 +181,7 @@ func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Tim
 func (c *Client) UpdateLogin(ctx context.Context, repoID int64, login string) error {
 	if _, err := c.NewUpdate().Model((*schema.Repository)(nil)).
 		Set("login = ?", login).
-		Where("id = ?", repoID).Exec(ctx); err != nil {
+		Where(whereID, repoID).Exec(ctx); err != nil {
 		return fmt.Errorf("updating repository login: %w", err)
 	}
 	return nil

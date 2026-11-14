@@ -348,7 +348,7 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 
 	tracked := make([]database.TrackedPR, 0, len(openByNum))
 	for _, pr := range openByNum {
-		tracked = append(tracked, database.TrackedPR{Number: pr.Number, Branch: pr.HeadBranch})
+		tracked = append(tracked, database.TrackedPR{Number: pr.Number, Branch: pr.HeadBranch, Author: pr.AuthorLogin})
 	}
 	if perr := s.db.ReplaceOpenPRs(ctx, repo.ID, tracked, start); perr != nil {
 		err = perr
@@ -606,6 +606,7 @@ func (s *Service) createWorktree(
 	row := &schema.Worktree{
 		RepositoryID: repo.ID, GithubPRNumber: &n,
 		BranchName: pr.HeadBranch, DirectoryPath: dir,
+		Origin: schema.OriginSynced,
 	}
 	if cerr := s.db.CreateWorktree(ctx, row); cerr != nil {
 		*errs = append(*errs, fmt.Errorf("recording worktree for PR #%d: %w", num, cerr))
@@ -914,6 +915,10 @@ func (s *Service) linkHistoricalPR(ctx context.Context, repo *schema.Repository,
 		return false, nil
 	}
 	num := pr.Number
+	closed := database.TrackedPR{Number: num, Branch: pr.HeadBranch, Author: pr.AuthorLogin}
+	if err := s.db.RecordClosedPR(ctx, repo.ID, closed, s.now()); err != nil {
+		return false, err
+	}
 	if err := s.db.SetWorktreePR(ctx, wt.ID, &num, pr.HeadBranch); err != nil {
 		return false, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err)
 	}

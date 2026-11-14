@@ -25,6 +25,8 @@ const EnvDBPath = "LUMBERJACK_DB_PATH"
 // driverName is modernc.org/sqlite's registered database/sql driver.
 const driverName = "sqlite"
 
+const whereID = "id = ?"
+
 // Client wraps a Bun DB handle bound to Lumberjack's SQLite database.
 type Client struct {
 	*bun.DB
