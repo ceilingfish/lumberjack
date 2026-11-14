@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
@@ -190,15 +192,23 @@ func (s *Server) ListWorktrees(ctx context.Context, req *lumberjackv1.ListWorktr
 	if err != nil {
 		return nil, toStatus(err)
 	}
-	views, err := s.svc.WorktreeViews(ctx, repo)
+	out, err := s.protoWorktrees(ctx, repo)
 	if err != nil {
 		return nil, toStatus(err)
+	}
+	return &lumberjackv1.ListWorktreesResponse{Worktrees: out}, nil
+}
+
+func (s *Server) protoWorktrees(ctx context.Context, repo *schema.Repository) ([]*lumberjackv1.Worktree, error) {
+	views, err := s.svc.WorktreeViews(ctx, repo)
+	if err != nil {
+		return nil, err
 	}
 	out := make([]*lumberjackv1.Worktree, len(views))
 	for i, v := range views {
 		out[i] = toProtoWorktree(v)
 	}
-	return &lumberjackv1.ListWorktreesResponse{Worktrees: out}, nil
+	return out, nil
 }
 
 func (s *Server) SetAuthorship(ctx context.Context, req *lumberjackv1.SetAuthorshipRequest) (*lumberjackv1.SetAuthorshipResponse, error) {
@@ -222,6 +232,26 @@ func (s *Server) SetAuthorship(ctx context.Context, req *lumberjackv1.SetAuthors
 		return nil, toStatus(err)
 	}
 	return &lumberjackv1.SetAuthorshipResponse{Worktree: toProtoWorktree(*view)}, nil
+}
+
+func (s *Server) MarkViewed(ctx context.Context, req *lumberjackv1.MarkViewedRequest) (*lumberjackv1.MarkViewedResponse, error) {
+	a, ok := fromProtoAuthorship(req.GetAuthorship())
+	if !ok {
+		return nil, status.Error(codes.InvalidArgument, "authorship must be mine or theirs")
+	}
+	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	var seenThrough *time.Time
+	if req.SeenThrough != nil {
+		t := req.GetSeenThrough().AsTime()
+		seenThrough = &t
+	}
+	if err := s.svc.MarkViewed(ctx, repo, a, seenThrough); err != nil {
+		return nil, toStatus(err)
+	}
+	return &lumberjackv1.MarkViewedResponse{}, nil
 }
 
 // AddWorktree creates a worktree for a branch on demand (see the domain
@@ -443,13 +473,9 @@ func (s *Server) Watch(_ *lumberjackv1.WatchRequest, stream grpc.ServerStreaming
 	}
 	for i := range repos {
 		repo := &repos[i]
-		views, err := s.svc.WorktreeViews(ctx, repo)
+		worktrees, err := s.protoWorktrees(ctx, repo)
 		if err != nil {
 			return toStatus(err)
-		}
-		worktrees := make([]*lumberjackv1.Worktree, len(views))
-		for j, v := range views {
-			worktrees[j] = toProtoWorktree(v)
 		}
 		if err := stream.Send(&lumberjackv1.WatchResponse{
 			Type:       lumberjackv1.WatchResponseType_WATCH_RESPONSE_TYPE_SNAPSHOT,
@@ -468,7 +494,13 @@ func (s *Server) Watch(_ *lumberjackv1.WatchRequest, stream grpc.ServerStreaming
 			if !ok {
 				return status.Error(codes.ResourceExhausted, "watch subscriber fell behind and was disconnected")
 			}
-			if err := stream.Send(toProtoWatchResponse(ev)); err != nil {
+			pb := toProtoWatchResponse(ev)
+			if ev.Type == EventSyncFinished {
+				if pb.Worktrees, err = s.protoWorktrees(ctx, ev.Repository); err != nil {
+					log.Printf("watch: listing worktrees of %s after sync: %v", displayName(ev.Repository), err)
+				}
+			}
+			if err := stream.Send(pb); err != nil {
 				return err
 			}
 		}

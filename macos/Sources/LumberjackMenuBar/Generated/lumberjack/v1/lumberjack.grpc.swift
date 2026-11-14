@@ -101,6 +101,11 @@ internal protocol Lumberjack_V1_LumberjackServiceClientProtocol: GRPCClient {
     _ request: Lumberjack_V1_SetAuthorshipRequest,
     callOptions: CallOptions?
   ) -> UnaryCall<Lumberjack_V1_SetAuthorshipRequest, Lumberjack_V1_SetAuthorshipResponse>
+
+  func markViewed(
+    _ request: Lumberjack_V1_MarkViewedRequest,
+    callOptions: CallOptions?
+  ) -> UnaryCall<Lumberjack_V1_MarkViewedRequest, Lumberjack_V1_MarkViewedResponse>
 }
 
 extension Lumberjack_V1_LumberjackServiceClientProtocol {
@@ -431,6 +436,24 @@ extension Lumberjack_V1_LumberjackServiceClientProtocol {
       interceptors: self.interceptors?.makeSetAuthorshipInterceptors() ?? []
     )
   }
+
+  /// Unary call to MarkViewed
+  ///
+  /// - Parameters:
+  ///   - request: Request to send to MarkViewed.
+  ///   - callOptions: Call options.
+  /// - Returns: A `UnaryCall` with futures for the metadata, status and response.
+  internal func markViewed(
+    _ request: Lumberjack_V1_MarkViewedRequest,
+    callOptions: CallOptions? = nil
+  ) -> UnaryCall<Lumberjack_V1_MarkViewedRequest, Lumberjack_V1_MarkViewedResponse> {
+    return self.makeUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.markViewed.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeMarkViewedInterceptors() ?? []
+    )
+  }
 }
 
 @available(*, deprecated)
@@ -577,6 +600,11 @@ internal protocol Lumberjack_V1_LumberjackServiceAsyncClientProtocol: GRPCClient
     _ request: Lumberjack_V1_SetAuthorshipRequest,
     callOptions: CallOptions?
   ) -> GRPCAsyncUnaryCall<Lumberjack_V1_SetAuthorshipRequest, Lumberjack_V1_SetAuthorshipResponse>
+
+  func makeMarkViewedCall(
+    _ request: Lumberjack_V1_MarkViewedRequest,
+    callOptions: CallOptions?
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_MarkViewedRequest, Lumberjack_V1_MarkViewedResponse>
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -780,6 +808,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       interceptors: self.interceptors?.makeSetAuthorshipInterceptors() ?? []
     )
   }
+
+  internal func makeMarkViewedCall(
+    _ request: Lumberjack_V1_MarkViewedRequest,
+    callOptions: CallOptions? = nil
+  ) -> GRPCAsyncUnaryCall<Lumberjack_V1_MarkViewedRequest, Lumberjack_V1_MarkViewedResponse> {
+    return self.makeAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.markViewed.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeMarkViewedInterceptors() ?? []
+    )
+  }
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -975,6 +1015,18 @@ extension Lumberjack_V1_LumberjackServiceAsyncClientProtocol {
       interceptors: self.interceptors?.makeSetAuthorshipInterceptors() ?? []
     )
   }
+
+  internal func markViewed(
+    _ request: Lumberjack_V1_MarkViewedRequest,
+    callOptions: CallOptions? = nil
+  ) async throws -> Lumberjack_V1_MarkViewedResponse {
+    return try await self.performAsyncUnaryCall(
+      path: Lumberjack_V1_LumberjackServiceClientMetadata.Methods.markViewed.path,
+      request: request,
+      callOptions: callOptions ?? self.defaultCallOptions,
+      interceptors: self.interceptors?.makeMarkViewedInterceptors() ?? []
+    )
+  }
 }
 
 @available(macOS 10.15, iOS 13, tvOS 13, watchOS 6, *)
@@ -1043,6 +1095,9 @@ internal protocol Lumberjack_V1_LumberjackServiceClientInterceptorFactoryProtoco
 
   /// - Returns: Interceptors to use when invoking 'setAuthorship'.
   func makeSetAuthorshipInterceptors() -> [ClientInterceptor<Lumberjack_V1_SetAuthorshipRequest, Lumberjack_V1_SetAuthorshipResponse>]
+
+  /// - Returns: Interceptors to use when invoking 'markViewed'.
+  func makeMarkViewedInterceptors() -> [ClientInterceptor<Lumberjack_V1_MarkViewedRequest, Lumberjack_V1_MarkViewedResponse>]
 }
 
 internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
@@ -1066,6 +1121,7 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setSetupConsent,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.trustSetupSteps,
       Lumberjack_V1_LumberjackServiceClientMetadata.Methods.setAuthorship,
+      Lumberjack_V1_LumberjackServiceClientMetadata.Methods.markViewed,
     ]
   )
 
@@ -1163,6 +1219,12 @@ internal enum Lumberjack_V1_LumberjackServiceClientMetadata {
     internal static let setAuthorship = GRPCMethodDescriptor(
       name: "SetAuthorship",
       path: "/lumberjack.v1.LumberjackService/SetAuthorship",
+      type: GRPCCallType.unary
+    )
+
+    internal static let markViewed = GRPCMethodDescriptor(
+      name: "MarkViewed",
+      path: "/lumberjack.v1.LumberjackService/MarkViewed",
       type: GRPCCallType.unary
     )
   }

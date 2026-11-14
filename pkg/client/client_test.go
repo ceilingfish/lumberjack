@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // stubServer is a hand-written LumberjackService for exercising the client's
@@ -81,6 +82,13 @@ func (stubServer) SetAuthorship(_ context.Context, req *lumberjackv1.SetAuthorsh
 	return &lumberjackv1.SetAuthorshipResponse{Worktree: &lumberjackv1.Worktree{
 		BranchName: req.GetWorktree(), Authorship: req.GetAuthorship(), AuthorshipOverridden: req.Authorship != nil,
 	}}, nil
+}
+
+func (stubServer) MarkViewed(_ context.Context, req *lumberjackv1.MarkViewedRequest) (*lumberjackv1.MarkViewedResponse, error) {
+	if req.GetAuthorship() == lumberjackv1.Authorship_AUTHORSHIP_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "authorship must be mine or theirs")
+	}
+	return &lumberjackv1.MarkViewedResponse{}, nil
 }
 
 func (stubServer) ListLogins(context.Context, *lumberjackv1.ListLoginsRequest) (*lumberjackv1.ListLoginsResponse, error) {
@@ -401,6 +409,16 @@ func TestClientSetAuthorship(t *testing.T) {
 	}
 	if _, err := c.SetAuthorship(context.Background(), "a", "ghost", nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestClientMarkViewed(t *testing.T) {
+	c := startStub(t)
+	if err := c.MarkViewed(context.Background(), "a", lumberjackv1.Authorship_AUTHORSHIP_MINE, timestamppb.Now()); err != nil {
+		t.Errorf("MarkViewed: %v", err)
+	}
+	if err := c.MarkViewed(context.Background(), "a", lumberjackv1.Authorship_AUTHORSHIP_UNSPECIFIED, nil); err == nil {
+		t.Error("expected the daemon's rejection")
 	}
 }
 

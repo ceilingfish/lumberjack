@@ -32,6 +32,7 @@ func (c *Client) ReplaceOpenPRs(ctx context.Context, repoID int64, prs []Tracked
 				BranchName:     pr.Branch,
 				LastSyncedAt:   &at,
 				AuthorLogin:    pr.Author,
+				FirstSeenAt:    &at,
 			}
 			if _, err := tx.NewInsert().Model(row).
 				On("CONFLICT (repository_id, github_pr_number) DO UPDATE").
@@ -58,16 +59,15 @@ func (c *Client) ReplaceOpenPRs(ctx context.Context, repoID int64, prs []Tracked
 	})
 }
 
-func (c *Client) PRAuthors(ctx context.Context, repoID int64) (map[int64]string, error) {
+func (c *Client) PullRequests(ctx context.Context, repoID int64) (map[int64]schema.PullRequest, error) {
 	var prs []schema.PullRequest
 	if err := c.NewSelect().Model(&prs).
-		Column("github_pr_number", "author_login").
 		Where("repository_id = ?", repoID).Scan(ctx); err != nil {
-		return nil, fmt.Errorf("listing pull request authors: %w", err)
+		return nil, fmt.Errorf("listing pull requests: %w", err)
 	}
-	out := make(map[int64]string, len(prs))
+	out := make(map[int64]schema.PullRequest, len(prs))
 	for _, pr := range prs {
-		out[pr.GithubPRNumber] = pr.AuthorLogin
+		out[pr.GithubPRNumber] = pr
 	}
 	return out, nil
 }
@@ -80,6 +80,7 @@ func (c *Client) RecordClosedPR(ctx context.Context, repoID int64, pr TrackedPR,
 		LastSyncedAt:   &at,
 		AuthorLogin:    pr.Author,
 		DeletedAt:      &at,
+		FirstSeenAt:    &at,
 	}
 	if _, err := c.NewInsert().Model(row).
 		On("CONFLICT (repository_id, github_pr_number) DO UPDATE").
@@ -88,4 +89,36 @@ func (c *Client) RecordClosedPR(ctx context.Context, repoID int64, pr TrackedPR,
 		return fmt.Errorf("recording pull request #%d: %w", pr.Number, err)
 	}
 	return nil
+}
+
+type PRCondition struct {
+	Number          int64
+	Conflicted      bool
+	ConflictUnknown bool
+	ChecksFailing   bool
+}
+
+func (c *Client) UpdatePRConditions(ctx context.Context, repoID int64, conds []PRCondition, at time.Time) error {
+	return c.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for _, cond := range conds {
+			q := tx.NewUpdate().Model((*schema.PullRequest)(nil)).
+				Where("repository_id = ?", repoID).
+				Where("github_pr_number = ?", cond.Number)
+			switch {
+			case cond.Conflicted:
+				q = q.Set("conflicted_since = COALESCE(conflicted_since, ?)", at)
+			case !cond.ConflictUnknown:
+				q = q.Set("conflicted_since = NULL")
+			}
+			if cond.ChecksFailing {
+				q = q.Set("checks_failing_since = COALESCE(checks_failing_since, ?)", at)
+			} else {
+				q = q.Set("checks_failing_since = NULL")
+			}
+			if _, err := q.Exec(ctx); err != nil {
+				return fmt.Errorf("updating pull request #%d conditions: %w", cond.Number, err)
+			}
+		}
+		return nil
+	})
 }

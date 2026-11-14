@@ -88,6 +88,7 @@ type GHOps interface {
 	// set-login can reject a login that authenticates but cannot operate the repo.
 	CheckRepoAccess(ctx context.Context, repo github.RepoInfo) error
 	CompareCommitAuthors(ctx context.Context, repo github.RepoInfo, base, head string) (github.CommitAuthors, error)
+	PullStates(ctx context.Context, repo github.RepoInfo, numbers []int64) (map[int64]github.PullState, error)
 }
 
 // Service is the daemon's domain layer: it owns every worktree mutation
@@ -112,6 +113,7 @@ type Service struct {
 	identities    sync.Map
 	branchHeads   sync.Map
 	commitAuthors sync.Map
+	rollups       sync.Map
 
 	// events fans out worktree/sync changes to Watch subscribers. Publishing
 	// is a side effect of a mutation that already happened under mu — it never
@@ -190,10 +192,11 @@ func (p progressFn) send(c WorktreeChange) {
 // WorktreeView pairs a stored worktree with its live reconciliation status and
 // whether its source PR is still open.
 type WorktreeView struct {
-	Worktree   schema.Worktree
-	Status     worktree.Status
-	PROpen     bool
-	Authorship schema.Authorship
+	Worktree    schema.Worktree
+	Status      worktree.Status
+	PROpen      bool
+	Authorship  schema.Authorship
+	PullRequest *PullView
 }
 
 // repoInfo builds the gh identity from a stored repository row.
@@ -274,11 +277,16 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 		if err != nil {
 			return err
 		}
-		authors, err := s.db.PRAuthors(ctx, repo.ID)
+		prs, err := s.db.PullRequests(ctx, repo.ID)
+		if err != nil {
+			return err
+		}
+		viewed, err := s.db.ListViews(ctx, repo.ID)
 		if err != nil {
 			return err
 		}
 		ids := s.identitiesFor(repo)
+		rollup := s.rollupFor(repo)
 		views = make([]WorktreeView, 0, len(stored))
 		for i := range stored {
 			wt := stored[i]
@@ -291,16 +299,19 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
 			}
 			applySetupError(&st, wt.SetupError)
-			views = append(views, WorktreeView{
+			v := WorktreeView{
 				Worktree: wt, Status: st, PROpen: prState == worktree.PROpen,
-				Authorship: s.resolveAuthorship(repo, wt, authors, ids),
-			})
+				Authorship: s.resolveAuthorship(repo, wt, prs, ids),
+			}
+			v.PullRequest = pullViewFor(v, rollup, prs, viewed, ids)
+			views = append(views, v)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	slices.SortStableFunc(views, compareViews)
 	return views, nil
 }
 
@@ -372,13 +383,17 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		return created, removed, err
 	}
 
+	var errs []error
+	if rerr := s.refreshRollup(ctx, repo, openByNum, start); rerr != nil {
+		errs = append(errs, rerr)
+	}
+
 	stored, lerr := s.db.ListWorktrees(ctx, repo.ID)
 	if lerr != nil {
 		err = lerr
 		return created, removed, err
 	}
 
-	var errs []error
 	// Every worktree git has registered, listed once and shared by both phases:
 	// it tells creation which directories can be adopted, and removal which
 	// tracked rows git no longer knows about. A listing failure is recorded but

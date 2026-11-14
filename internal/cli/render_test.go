@@ -155,7 +155,7 @@ func TestEmitWorktrees(t *testing.T) {
 	if err := EmitWorktrees(&out, present.Structured, wts); err != nil {
 		t.Fatalf("EmitWorktrees: %v", err)
 	}
-	for _, want := range []string{"DIRECTORY", "AUTHOR", "#7", "-", "mine", "theirs (set)", "⚠ drifted", "noted", "ok"} {
+	for _, want := range []string{"DIRECTORY", "AUTHOR", "PR STATE", "#7", "-", "mine", "theirs (set)", "⚠ drifted", "noted", "ok"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("out = %q, want it to contain %q", out.String(), want)
 		}

@@ -57,6 +57,18 @@ type PullRequest struct {
 	LastSyncedAt   *time.Time `bun:"last_synced_at"`
 	AuthorLogin    string     `bun:"author_login,notnull"`
 	DeletedAt      *time.Time `bun:"deleted_at"`
+
+	FirstSeenAt        *time.Time `bun:"first_seen_at"`
+	ConflictedSince    *time.Time `bun:"conflicted_since"`
+	ChecksFailingSince *time.Time `bun:"checks_failing_since"`
+}
+
+type ListView struct {
+	bun.BaseModel `bun:"table:list_views,alias:lv"`
+
+	RepositoryID int64      `bun:"repository_id,pk"`
+	Authorship   Authorship `bun:"authorship,pk"`
+	ViewedAt     time.Time  `bun:"viewed_at,notnull"`
 }
 
 type Origin string

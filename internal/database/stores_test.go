@@ -620,7 +620,7 @@ func TestReplaceOpenPRsRevivesReopenedPR(t *testing.T) {
 	}
 }
 
-func TestPRAuthorsIncludesClosedPRs(t *testing.T) {
+func TestPullRequestsIncludesClosedPRs(t *testing.T) {
 	c := openTemp(t)
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
@@ -633,19 +633,19 @@ func TestPRAuthorsIncludesClosedPRs(t *testing.T) {
 	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 2, Branch: "c", Author: "bob"}}, now)
 	_ = c.ReplaceOpenPRs(ctx, other.ID, []TrackedPR{{Number: 3, Branch: "d", Author: "carol"}}, now)
 
-	got, err := c.PRAuthors(ctx, repo.ID)
+	got, err := c.PullRequests(ctx, repo.ID)
 	if err != nil {
-		t.Fatalf("PRAuthors: %v", err)
+		t.Fatalf("PullRequests: %v", err)
 	}
-	if len(got) != 2 || got[1] != "alice" || got[2] != "bob" {
-		t.Errorf("PRAuthors = %v, want {1: alice, 2: bob}", got)
+	if len(got) != 2 || got[1].AuthorLogin != "alice" || got[2].AuthorLogin != "bob" || got[1].DeletedAt == nil {
+		t.Errorf("PullRequests = %v, want closed #1 by alice and open #2 by bob", got)
 	}
 }
 
-func TestPRAuthorsError(t *testing.T) {
+func TestPullRequestsError(t *testing.T) {
 	c := openTemp(t)
 	_ = c.Close()
-	if _, err := c.PRAuthors(context.Background(), 1); err == nil {
+	if _, err := c.PullRequests(context.Background(), 1); err == nil {
 		t.Error("expected an error from a closed database")
 	}
 }
@@ -788,5 +788,144 @@ func TestSetWorktreeAuthorshipOverride(t *testing.T) {
 	bogus := schema.Authorship("ours")
 	if err := c.SetWorktreeAuthorshipOverride(ctx, wt.ID, &bogus); err == nil {
 		t.Error("expected the authorship CHECK constraint to reject an unknown value")
+	}
+}
+
+func TestFirstSeenAtIsSetOnceAndSurvivesReopening(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	now := time.Now().UTC()
+
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, now)
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, nil, now.Add(time.Hour))
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, now.Add(2*time.Hour))
+	_ = c.RecordClosedPR(ctx, repo.ID, TrackedPR{Number: 2, Branch: "c"}, now.Add(3*time.Hour))
+
+	prs, _ := c.PullRequests(ctx, repo.ID)
+	if prs[1].FirstSeenAt == nil || !prs[1].FirstSeenAt.Equal(now) {
+		t.Errorf("#1 first_seen_at = %v, want the first sync", prs[1].FirstSeenAt)
+	}
+	if prs[2].FirstSeenAt == nil || !prs[2].FirstSeenAt.Equal(now.Add(3*time.Hour)) {
+		t.Errorf("#2 first_seen_at = %v, want when it was recorded", prs[2].FirstSeenAt)
+	}
+}
+
+func TestUpdatePRConditions(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	t0 := time.Now().UTC()
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, t0)
+	read := func() schema.PullRequest {
+		prs, _ := c.PullRequests(ctx, repo.ID)
+		return prs[1]
+	}
+	same := func(got *time.Time, want time.Time) bool { return got != nil && got.Equal(want) }
+
+	steps := []struct {
+		at                  time.Time
+		cond                PRCondition
+		conflicted, failing *time.Time
+	}{
+		{t0.Add(1 * time.Hour), PRCondition{Number: 1, Conflicted: true, ChecksFailing: true}, ptrTime(t0.Add(time.Hour)), ptrTime(t0.Add(time.Hour))},
+		{t0.Add(2 * time.Hour), PRCondition{Number: 1, Conflicted: true, ChecksFailing: true}, ptrTime(t0.Add(time.Hour)), ptrTime(t0.Add(time.Hour))},
+		{t0.Add(3 * time.Hour), PRCondition{Number: 1, ConflictUnknown: true}, ptrTime(t0.Add(time.Hour)), nil},
+		{t0.Add(4 * time.Hour), PRCondition{Number: 1}, nil, nil},
+		{t0.Add(5 * time.Hour), PRCondition{Number: 1, Conflicted: true}, ptrTime(t0.Add(5 * time.Hour)), nil},
+	}
+	for i, st := range steps {
+		if err := c.UpdatePRConditions(ctx, repo.ID, []PRCondition{st.cond}, st.at); err != nil {
+			t.Fatalf("step %d: %v", i, err)
+		}
+		pr := read()
+		if (st.conflicted == nil) != (pr.ConflictedSince == nil) || (st.conflicted != nil && !same(pr.ConflictedSince, *st.conflicted)) {
+			t.Errorf("step %d: conflicted_since = %v, want %v", i, pr.ConflictedSince, st.conflicted)
+		}
+		if (st.failing == nil) != (pr.ChecksFailingSince == nil) || (st.failing != nil && !same(pr.ChecksFailingSince, *st.failing)) {
+			t.Errorf("step %d: checks_failing_since = %v, want %v", i, pr.ChecksFailingSince, st.failing)
+		}
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
+
+func TestUpdatePRConditionsError(t *testing.T) {
+	c := openTemp(t)
+	_ = c.Close()
+	if err := c.UpdatePRConditions(context.Background(), 1, []PRCondition{{Number: 1}}, time.Now()); err == nil {
+		t.Error("expected an error from a closed database")
+	}
+}
+
+func TestMarkViewed(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	t0 := time.Now().UTC()
+
+	views, err := c.ListViews(ctx, repo.ID)
+	if err != nil || len(views) != 0 {
+		t.Fatalf("views = %v, %v; want none before anything is viewed", views, err)
+	}
+	for _, step := range []struct {
+		a  schema.Authorship
+		at time.Time
+	}{
+		{schema.AuthorshipMine, t0},
+		{schema.AuthorshipMine, t0.Add(time.Hour)},
+		{schema.AuthorshipMine, t0.Add(30 * time.Minute)},
+		{schema.AuthorshipTheirs, t0},
+	} {
+		if err := c.MarkViewed(ctx, repo.ID, step.a, step.at); err != nil {
+			t.Fatalf("MarkViewed: %v", err)
+		}
+	}
+	views, _ = c.ListViews(ctx, repo.ID)
+	if !views[schema.AuthorshipMine].Equal(t0.Add(time.Hour)) || !views[schema.AuthorshipTheirs].Equal(t0) {
+		t.Errorf("views = %v, want mine at the latest view (never moved back) and theirs at its own", views)
+	}
+
+	if err := c.MarkViewed(ctx, repo.ID, "unknown", t0); err == nil {
+		t.Error("expected the authorship CHECK constraint to reject an unknown tab")
+	}
+}
+
+func TestListViewsErrors(t *testing.T) {
+	c := openTemp(t)
+	_ = c.Close()
+	if _, err := c.ListViews(context.Background(), 1); err == nil {
+		t.Error("expected ListViews to fail on a closed database")
+	}
+	if err := c.MarkViewed(context.Background(), 1, schema.AuthorshipMine, time.Now()); err == nil {
+		t.Error("expected MarkViewed to fail on a closed database")
+	}
+}
+
+func TestUpdatePRConditionsUpdateFailure(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	repo := newRepo("/a", "a", "A")
+	_ = c.CreateRepository(ctx, repo)
+	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, time.Now())
+	if _, err := c.ExecContext(ctx, "CREATE TRIGGER no_update BEFORE UPDATE ON pull_requests BEGIN SELECT RAISE(ABORT, 'boom'); END"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpdatePRConditions(ctx, repo.ID, []PRCondition{{Number: 1}}, time.Now()); err == nil {
+		t.Error("expected the update failure to be reported")
+	}
+}
+
+func TestMarkViewedReadFailure(t *testing.T) {
+	c := openTemp(t)
+	ctx := context.Background()
+	if _, err := c.ExecContext(ctx, "ALTER TABLE list_views RENAME COLUMN viewed_at TO gone"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.MarkViewed(ctx, 1, schema.AuthorshipMine, time.Now()); err == nil {
+		t.Error("expected the read failure to be reported")
 	}
 }

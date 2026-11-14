@@ -340,6 +340,26 @@ type fakeGH struct {
 	compare      map[string]github.CommitAuthors
 	compareErr   error
 	compareCalls []string
+
+	states      map[int64]github.PullState
+	statesErr   error
+	statesCalls [][]int64
+}
+
+func (f *fakeGH) PullStates(_ context.Context, _ github.RepoInfo, numbers []int64) (map[int64]github.PullState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statesCalls = append(f.statesCalls, numbers)
+	if f.statesErr != nil {
+		return nil, f.statesErr
+	}
+	out := map[int64]github.PullState{}
+	for _, n := range numbers {
+		if ps, ok := f.states[n]; ok {
+			out[n] = ps
+		}
+	}
+	return out, nil
 }
 
 func (f *fakeGH) CompareCommitAuthors(_ context.Context, _ github.RepoInfo, base, head string) (github.CommitAuthors, error) {
@@ -981,12 +1001,12 @@ func TestSyncRecordsPRAuthors(t *testing.T) {
 	h.gh.prs = nil
 	h.seedSync(t, repo)
 
-	authors, err := h.db.PRAuthors(context.Background(), repo.ID)
+	prs, err := h.db.PullRequests(context.Background(), repo.ID)
 	if err != nil {
-		t.Fatalf("PRAuthors: %v", err)
+		t.Fatalf("PullRequests: %v", err)
 	}
-	if authors[1] != "alice" {
-		t.Errorf("authors = %v, want the closed PR's author kept", authors)
+	if prs[1].AuthorLogin != "alice" {
+		t.Errorf("prs = %v, want the closed PR's author kept", prs)
 	}
 }
 
@@ -2388,9 +2408,9 @@ func TestSyncRecordsAuthorOfPRLinkedAfterTheFact(t *testing.T) {
 	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
-	authors, _ := h.db.PRAuthors(context.Background(), repo.ID)
-	if authors[7] != "bob" {
-		t.Errorf("authors = %v, want PR #7 recorded with its author", authors)
+	prs, _ := h.db.PullRequests(context.Background(), repo.ID)
+	if prs[7].AuthorLogin != "bob" {
+		t.Errorf("prs = %v, want PR #7 recorded with its author", prs)
 	}
 }
 

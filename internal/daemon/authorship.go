@@ -31,10 +31,12 @@ func (s *Service) refreshIdentities(ctx context.Context, repo *schema.Repository
 	s.identities.Store(repo.ID, authorship.NewIdentities(append(logins, repo.Login)...))
 }
 
-func (s *Service) resolveAuthorship(repo *schema.Repository, wt schema.Worktree, authors map[int64]string, ids authorship.Identities) schema.Authorship {
+func (s *Service) resolveAuthorship(repo *schema.Repository, wt schema.Worktree, prs map[int64]schema.PullRequest, ids authorship.Identities) schema.Authorship {
 	in := authorship.Inputs{Override: wt.AuthorshipOverride, Origin: wt.Origin}
 	if wt.GithubPRNumber != nil {
-		in.PRAuthor, in.HasPR = authors[*wt.GithubPRNumber]
+		var pr schema.PullRequest
+		pr, in.HasPR = prs[*wt.GithubPRNumber]
+		in.PRAuthor = pr.AuthorLogin
 	}
 	if !in.HasPR {
 		in.Commits = s.commitsVerdict(repo, wt.BranchName, ids)

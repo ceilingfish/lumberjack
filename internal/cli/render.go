@@ -106,15 +106,15 @@ func renderWorktrees(w io.Writer, wts []*lumberjackv1.Worktree, color bool) erro
 		return err
 	}
 	t := newTabW(w)
-	t.row("DIRECTORY\tBRANCH\tPR\tAUTHOR\tLAST SYNCED\tSTATUS\n")
+	t.row("DIRECTORY\tBRANCH\tPR\tAUTHOR\tPR STATE\tLAST SYNCED\tSTATUS\n")
 	for _, wt := range wts {
 		pr := "-"
 		if wt.GithubPrNumber != nil {
 			pr = fmt.Sprintf("#%d", wt.GetGithubPrNumber())
 		}
-		t.row("%s\t%s\t%s\t%s\t%s\t%s\n",
+		t.row("%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			present.Path(filepath.Base(wt.GetDirectoryPath()), color), present.Branch(wt.GetBranchName(), color), pr,
-			authorshipLabel(wt), timestamp(wt.GetLastSyncedAt(), color), worktreeStatus(wt, color))
+			authorshipLabel(wt), pullRequestSummary(wt.GetPullRequest()), timestamp(wt.GetLastSyncedAt(), color), worktreeStatus(wt, color))
 	}
 	return t.flush()
 }

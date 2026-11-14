@@ -52,3 +52,27 @@ func TestEmitAuthorship(t *testing.T) {
 		t.Errorf("json = %q, want the worktree object", raw.String())
 	}
 }
+
+func TestPullRequestSummary(t *testing.T) {
+	if got := pullRequestSummary(nil); got != "-" {
+		t.Errorf("no PR state = %q, want -", got)
+	}
+	if got := pullRequestSummary(&lumberjackv1.PullRequestState{}); got != "clean" {
+		t.Errorf("nothing to report = %q, want clean", got)
+	}
+	busy := &lumberjackv1.PullRequestState{
+		HasNewActivity: true, IsDraft: true,
+		MergeStateStatus:      lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_DIRTY,
+		Checks:                &lumberjackv1.ChecksSummary{Failing: 2},
+		ReviewDecision:        lumberjackv1.ReviewDecision_REVIEW_DECISION_CHANGES_REQUESTED,
+		UnresolvedThreadCount: 3, ReviewRequestedFromMe: true,
+	}
+	want := "new, draft, conflicts, 2 failing, changes requested, 3 unresolved, review requested"
+	if got := pullRequestSummary(busy); got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	approved := &lumberjackv1.PullRequestState{ReviewDecision: lumberjackv1.ReviewDecision_REVIEW_DECISION_APPROVED}
+	if got := pullRequestSummary(approved); got != "approved" {
+		t.Errorf("summary = %q, want approved", got)
+	}
+}
