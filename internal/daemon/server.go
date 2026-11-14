@@ -201,6 +201,29 @@ func (s *Server) ListWorktrees(ctx context.Context, req *lumberjackv1.ListWorktr
 	return &lumberjackv1.ListWorktreesResponse{Worktrees: out}, nil
 }
 
+func (s *Server) SetAuthorship(ctx context.Context, req *lumberjackv1.SetAuthorshipRequest) (*lumberjackv1.SetAuthorshipResponse, error) {
+	if req.GetWorktree() == "" {
+		return nil, status.Error(codes.InvalidArgument, "worktree is required")
+	}
+	var override *schema.Authorship
+	if req.Authorship != nil {
+		a, ok := fromProtoAuthorship(req.GetAuthorship())
+		if !ok {
+			return nil, status.Error(codes.InvalidArgument, "authorship must be mine or theirs")
+		}
+		override = &a
+	}
+	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	view, err := s.svc.SetAuthorship(ctx, repo, req.GetWorktree(), override)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &lumberjackv1.SetAuthorshipResponse{Worktree: toProtoWorktree(*view)}, nil
+}
+
 // AddWorktree creates a worktree for a branch on demand (see the domain
 // Service.AddWorktree).
 func (s *Server) AddWorktree(ctx context.Context, req *lumberjackv1.AddWorktreeRequest) (*lumberjackv1.AddWorktreeResponse, error) {

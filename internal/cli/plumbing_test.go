@@ -372,3 +372,22 @@ func TestPromptSetupConsentSurfacesFailedWrites(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveWorktreeRef(t *testing.T) {
+	cwd, err := CwdAbs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct{ repo, wt, wantRepo, wantWT string }{
+		{"n", "feature/x", "n", "feature/x"},
+		{"n", "", "n", cwd},
+		{"", "feature/x", cwd, "feature/x"},
+		{"", "", cwd, cwd},
+	}
+	for _, tc := range cases {
+		repo, wt, err := ResolveWorktreeRef(tc.repo, tc.wt)
+		if err != nil || repo != tc.wantRepo || wt != tc.wantWT {
+			t.Errorf("ResolveWorktreeRef(%q, %q) = %q, %q, %v; want %q, %q", tc.repo, tc.wt, repo, wt, err, tc.wantRepo, tc.wantWT)
+		}
+	}
+}

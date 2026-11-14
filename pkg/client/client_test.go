@@ -74,6 +74,15 @@ func (stubServer) SetLogin(_ context.Context, req *lumberjackv1.SetLoginRequest)
 	}, nil
 }
 
+func (stubServer) SetAuthorship(_ context.Context, req *lumberjackv1.SetAuthorshipRequest) (*lumberjackv1.SetAuthorshipResponse, error) {
+	if req.GetWorktree() == "ghost" {
+		return nil, status.Error(codes.NotFound, "worktree not found")
+	}
+	return &lumberjackv1.SetAuthorshipResponse{Worktree: &lumberjackv1.Worktree{
+		BranchName: req.GetWorktree(), Authorship: req.GetAuthorship(), AuthorshipOverridden: req.Authorship != nil,
+	}}, nil
+}
+
 func (stubServer) ListLogins(context.Context, *lumberjackv1.ListLoginsRequest) (*lumberjackv1.ListLoginsResponse, error) {
 	return &lumberjackv1.ListLoginsResponse{Logins: []string{"alice", "bob"}, Current: "bob"}, nil
 }
@@ -374,6 +383,24 @@ func TestClientSetLoginAndListLogins(t *testing.T) {
 	}
 	if len(logins) != 2 || current != "bob" {
 		t.Errorf("ListLogins = %v, %q", logins, current)
+	}
+}
+
+func TestClientSetAuthorship(t *testing.T) {
+	c := startStub(t)
+	mine := lumberjackv1.Authorship_AUTHORSHIP_MINE
+	wt, err := c.SetAuthorship(context.Background(), "a", "feature/x", &mine)
+	if err != nil {
+		t.Fatalf("SetAuthorship: %v", err)
+	}
+	if wt.GetBranchName() != "feature/x" || wt.GetAuthorship() != mine || !wt.GetAuthorshipOverridden() {
+		t.Errorf("SetAuthorship = %+v", wt)
+	}
+	if wt, err := c.SetAuthorship(context.Background(), "a", "feature/x", nil); err != nil || wt.GetAuthorshipOverridden() {
+		t.Errorf("clearing: %+v, %v", wt, err)
+	}
+	if _, err := c.SetAuthorship(context.Background(), "a", "ghost", nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
 	}
 }
 

@@ -93,6 +93,24 @@ service LumberjackService {
   rpc SetSetupConsent(SetSetupConsentRequest) returns (SetSetupConsentResponse);
 
   rpc TrustSetupSteps(TrustSetupStepsRequest) returns (TrustSetupStepsResponse);
+
+  rpc SetAuthorship(SetAuthorshipRequest) returns (SetAuthorshipResponse);
+}
+
+enum Authorship {
+  AUTHORSHIP_UNSPECIFIED = 0;
+  AUTHORSHIP_MINE = 1;
+  AUTHORSHIP_THEIRS = 2;
+}
+
+message SetAuthorshipRequest {
+  string repository = 1;
+  string worktree = 2;
+  optional Authorship authorship = 3;
+}
+
+message SetAuthorshipResponse {
+  Worktree worktree = 1;
 }
 
 // SyncStatus mirrors schema.SyncStatus* (see internal/database/schema).
@@ -202,6 +220,8 @@ message Worktree {
   // checked_out_branch is the branch git reports in the directory, empty for a
   // detached HEAD. It differs from branch_name exactly when branch_disparity.
   string checked_out_branch = 12;
+  Authorship authorship = 13;
+  bool authorship_overridden = 15;
 }
 
 message HealthRequest {}

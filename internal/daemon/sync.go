@@ -107,6 +107,8 @@ type Service struct {
 	// after noPRLookupTTL, since a branch can gain a PR later.
 	noPRBranches sync.Map
 
+	identities sync.Map
+
 	// events fans out worktree/sync changes to Watch subscribers. Publishing
 	// is a side effect of a mutation that already happened under mu — it never
 	// creates new state of its own, so the daemon remains the single writer.
@@ -184,9 +186,10 @@ func (p progressFn) send(c WorktreeChange) {
 // WorktreeView pairs a stored worktree with its live reconciliation status and
 // whether its source PR is still open.
 type WorktreeView struct {
-	Worktree schema.Worktree
-	Status   worktree.Status
-	PROpen   bool
+	Worktree   schema.Worktree
+	Status     worktree.Status
+	PROpen     bool
+	Authorship schema.Authorship
 }
 
 // repoInfo builds the gh identity from a stored repository row.
@@ -267,6 +270,11 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 		if err != nil {
 			return err
 		}
+		authors, err := s.db.PRAuthors(ctx, repo.ID)
+		if err != nil {
+			return err
+		}
+		ids := s.identitiesFor(repo)
 		views = make([]WorktreeView, 0, len(stored))
 		for i := range stored {
 			wt := stored[i]
@@ -279,7 +287,10 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 				return fmt.Errorf("reconciling %s: %w", wt.DirectoryPath, rerr)
 			}
 			applySetupError(&st, wt.SetupError)
-			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: prState == worktree.PROpen})
+			views = append(views, WorktreeView{
+				Worktree: wt, Status: st, PROpen: prState == worktree.PROpen,
+				Authorship: s.resolveAuthorship(wt, authors, ids),
+			})
 		}
 		return nil
 	})
@@ -336,6 +347,8 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 			SyncCreated: created, SyncRemoved: removed, SyncErr: err,
 		})
 	}()
+
+	s.refreshIdentities(ctx, repo)
 
 	openByNum, ferr := s.fetchOpenPRs(ctx, repo)
 	if ferr != nil {

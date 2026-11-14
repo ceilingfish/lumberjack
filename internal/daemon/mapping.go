@@ -41,16 +41,18 @@ func toProtoRepository(r *schema.Repository) *lumberjackv1.Repository {
 func toProtoWorktree(v WorktreeView) *lumberjackv1.Worktree {
 	wt := v.Worktree
 	pb := &lumberjackv1.Worktree{
-		BranchName:          wt.BranchName,
-		DirectoryPath:       wt.DirectoryPath,
-		GithubPrNumber:      wt.GithubPRNumber,
-		NeedsReconciliation: v.Status.NeedsReconciliation,
-		Dirty:               v.Status.Dirty,
-		Orphaned:            v.Status.Orphaned,
-		LocalOnlyCommits:    v.Status.LocalOnlyCommits,
-		ReconciliationNote:  v.Status.Note,
-		BranchDisparity:     v.Status.BranchDisparity,
-		CheckedOutBranch:    v.Status.CheckedOutBranch,
+		BranchName:           wt.BranchName,
+		DirectoryPath:        wt.DirectoryPath,
+		GithubPrNumber:       wt.GithubPRNumber,
+		NeedsReconciliation:  v.Status.NeedsReconciliation,
+		Dirty:                v.Status.Dirty,
+		Orphaned:             v.Status.Orphaned,
+		LocalOnlyCommits:     v.Status.LocalOnlyCommits,
+		ReconciliationNote:   v.Status.Note,
+		BranchDisparity:      v.Status.BranchDisparity,
+		CheckedOutBranch:     v.Status.CheckedOutBranch,
+		Authorship:           toProtoAuthorship(v.Authorship),
+		AuthorshipOverridden: wt.AuthorshipOverride != nil,
 	}
 	pb.LastSyncedAt = toProtoTimestamp(wt.LastSyncedAt)
 	return pb
@@ -152,4 +154,24 @@ func toProtoSyncStatus(s *string) lumberjackv1.SyncStatus {
 	default:
 		return lumberjackv1.SyncStatus_SYNC_STATUS_UNSPECIFIED
 	}
+}
+
+func toProtoAuthorship(a schema.Authorship) lumberjackv1.Authorship {
+	switch a {
+	case schema.AuthorshipMine:
+		return lumberjackv1.Authorship_AUTHORSHIP_MINE
+	case schema.AuthorshipTheirs:
+		return lumberjackv1.Authorship_AUTHORSHIP_THEIRS
+	}
+	return lumberjackv1.Authorship_AUTHORSHIP_UNSPECIFIED
+}
+
+func fromProtoAuthorship(a lumberjackv1.Authorship) (schema.Authorship, bool) {
+	switch a {
+	case lumberjackv1.Authorship_AUTHORSHIP_MINE:
+		return schema.AuthorshipMine, true
+	case lumberjackv1.Authorship_AUTHORSHIP_THEIRS:
+		return schema.AuthorshipTheirs, true
+	}
+	return "", false
 }

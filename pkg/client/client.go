@@ -136,6 +136,16 @@ func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, c
 	return resp.GetLogins(), resp.GetCurrent(), nil
 }
 
+func (c *Client) SetAuthorship(ctx context.Context, ref, worktree string, authorship *lumberjackv1.Authorship) (*lumberjackv1.Worktree, error) {
+	resp, err := c.svc.SetAuthorship(ctx, &lumberjackv1.SetAuthorshipRequest{
+		Repository: ref, Worktree: worktree, Authorship: authorship,
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetWorktree(), nil
+}
+
 func (c *Client) SetSetupConsent(ctx context.Context, ref, checksum string) (*lumberjackv1.Repository, bool, error) {
 	resp, err := c.svc.SetSetupConsent(ctx, &lumberjackv1.SetSetupConsentRequest{
 		Repository: ref, Checksum: checksum,

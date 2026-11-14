@@ -43,6 +43,7 @@ const (
 	LumberjackService_Watch_FullMethodName            = "/lumberjack.v1.LumberjackService/Watch"
 	LumberjackService_SetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/SetSetupConsent"
 	LumberjackService_TrustSetupSteps_FullMethodName  = "/lumberjack.v1.LumberjackService/TrustSetupSteps"
+	LumberjackService_SetAuthorship_FullMethodName    = "/lumberjack.v1.LumberjackService/SetAuthorship"
 )
 
 // LumberjackServiceClient is the client API for LumberjackService service.
@@ -112,6 +113,7 @@ type LumberjackServiceClient interface {
 	// pending again.
 	SetSetupConsent(ctx context.Context, in *SetSetupConsentRequest, opts ...grpc.CallOption) (*SetSetupConsentResponse, error)
 	TrustSetupSteps(ctx context.Context, in *TrustSetupStepsRequest, opts ...grpc.CallOption) (*TrustSetupStepsResponse, error)
+	SetAuthorship(ctx context.Context, in *SetAuthorshipRequest, opts ...grpc.CallOption) (*SetAuthorshipResponse, error)
 }
 
 type lumberjackServiceClient struct {
@@ -290,6 +292,16 @@ func (c *lumberjackServiceClient) TrustSetupSteps(ctx context.Context, in *Trust
 	return out, nil
 }
 
+func (c *lumberjackServiceClient) SetAuthorship(ctx context.Context, in *SetAuthorshipRequest, opts ...grpc.CallOption) (*SetAuthorshipResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetAuthorshipResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_SetAuthorship_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LumberjackServiceServer is the server API for LumberjackService service.
 // All implementations must embed UnimplementedLumberjackServiceServer
 // for forward compatibility.
@@ -357,6 +369,7 @@ type LumberjackServiceServer interface {
 	// pending again.
 	SetSetupConsent(context.Context, *SetSetupConsentRequest) (*SetSetupConsentResponse, error)
 	TrustSetupSteps(context.Context, *TrustSetupStepsRequest) (*TrustSetupStepsResponse, error)
+	SetAuthorship(context.Context, *SetAuthorshipRequest) (*SetAuthorshipResponse, error)
 	mustEmbedUnimplementedLumberjackServiceServer()
 }
 
@@ -411,6 +424,9 @@ func (UnimplementedLumberjackServiceServer) SetSetupConsent(context.Context, *Se
 }
 func (UnimplementedLumberjackServiceServer) TrustSetupSteps(context.Context, *TrustSetupStepsRequest) (*TrustSetupStepsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TrustSetupSteps not implemented")
+}
+func (UnimplementedLumberjackServiceServer) SetAuthorship(context.Context, *SetAuthorshipRequest) (*SetAuthorshipResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetAuthorship not implemented")
 }
 func (UnimplementedLumberjackServiceServer) mustEmbedUnimplementedLumberjackServiceServer() {}
 func (UnimplementedLumberjackServiceServer) testEmbeddedByValue()                           {}
@@ -689,6 +705,24 @@ func _LumberjackService_TrustSetupSteps_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LumberjackService_SetAuthorship_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetAuthorshipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).SetAuthorship(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_SetAuthorship_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).SetAuthorship(ctx, req.(*SetAuthorshipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LumberjackService_ServiceDesc is the grpc.ServiceDesc for LumberjackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -747,6 +781,10 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TrustSetupSteps",
 			Handler:    _LumberjackService_TrustSetupSteps_Handler,
+		},
+		{
+			MethodName: "SetAuthorship",
+			Handler:    _LumberjackService_SetAuthorship_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

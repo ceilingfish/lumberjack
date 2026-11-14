@@ -58,6 +58,23 @@ type stubService struct {
 	// worktrees interactively takes two calls: a dry-run probe to find the locks,
 	// then the real tidy carrying the user's answers.
 	tidyRequests []*lumberjackv1.TidyRequest
+
+	lastAuthorship *lumberjackv1.SetAuthorshipRequest
+	authorshipErr  error
+}
+
+func (s *stubService) SetAuthorship(_ context.Context, req *lumberjackv1.SetAuthorshipRequest) (*lumberjackv1.SetAuthorshipResponse, error) {
+	s.lastAuthorship = req
+	if s.authorshipErr != nil {
+		return nil, s.authorshipErr
+	}
+	a := lumberjackv1.Authorship_AUTHORSHIP_THEIRS
+	if req.Authorship != nil {
+		a = req.GetAuthorship()
+	}
+	return &lumberjackv1.SetAuthorshipResponse{Worktree: &lumberjackv1.Worktree{
+		BranchName: "feature/x", Authorship: a, AuthorshipOverridden: req.Authorship != nil,
+	}}, nil
 }
 
 func (s *stubService) Tidy(_ context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
@@ -649,6 +666,63 @@ func TestCmdSetLoginPickerNoAccounts(t *testing.T) {
 	_, err := run(t, "", "set-login", "--repository", "n")
 	if err == nil || !strings.Contains(err.Error(), "gh auth login") {
 		t.Errorf("expected a no-accounts error pointing at gh auth login, got %v", err)
+	}
+}
+
+func TestCmdSetAuthorshipNamedWorktree(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	out, err := run(t, "", "set-authorship", "mine", "--repository", "n", "--worktree", "feature/x")
+	if err != nil {
+		t.Fatalf("set-authorship: %v", err)
+	}
+	req := stub.lastAuthorship
+	if req.GetRepository() != "n" || req.GetWorktree() != "feature/x" || req.GetAuthorship() != lumberjackv1.Authorship_AUTHORSHIP_MINE {
+		t.Errorf("request = %+v", req)
+	}
+	if !strings.Contains(out, "feature/x is now mine (set by hand)") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSetAuthorshipAutoDefaultsToCurrentDirectory(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	wd, _ := os.Getwd()
+	out, err := run(t, "", "set-authorship", "auto")
+	if err != nil {
+		t.Fatalf("set-authorship: %v", err)
+	}
+	req := stub.lastAuthorship
+	if req.Authorship != nil || req.GetWorktree() != wd || req.GetRepository() != wd {
+		t.Errorf("request = %+v, want no authorship and the working directory as both targets", req)
+	}
+	if !strings.Contains(out, "is now theirs (derived)") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSetAuthorshipJSON(t *testing.T) {
+	serveStub(t, &stubService{})
+	out, err := run(t, "", "set-authorship", "theirs", "--worktree", "feature/x", "--format", "json")
+	if err != nil {
+		t.Fatalf("set-authorship: %v", err)
+	}
+	if !strings.Contains(out, `"authorship"`) {
+		t.Errorf("out = %q, want the worktree as JSON", out)
+	}
+}
+
+func TestCmdSetAuthorshipFailures(t *testing.T) {
+	serveStub(t, &stubService{authorshipErr: status.Error(codes.NotFound, "worktree not found")})
+	if _, err := run(t, "", "set-authorship", "ours"); err == nil || !strings.Contains(err.Error(), "ours") {
+		t.Errorf("err = %v, want the bad argument rejected", err)
+	}
+	if _, err := run(t, "", "set-authorship", "mine", "--worktree", "ghost"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("err = %v, want the daemon's not-found", err)
+	}
+	if _, err := run(t, "", "set-authorship", "mine", "--format", "bogus"); err == nil {
+		t.Error("expected an invalid --format to be rejected")
 	}
 }
 

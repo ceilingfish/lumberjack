@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/ceilingfish/lumberjack/internal/authorship"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
 )
 
@@ -47,6 +48,7 @@ func (s *Service) SetLogin(ctx context.Context, repo *schema.Repository, login s
 		return nil, err
 	}
 	repo.Login = login
+	s.identities.Store(repo.ID, authorship.NewIdentities(append(logins, login)...))
 	return repo, nil
 }
 
