@@ -1,11 +1,14 @@
-# PR Ownership, Mergeability, and Prompt-Driven Automation
+# PR Ownership and Mergeability
 
 Status: design. Nothing here is implemented yet.
 
 This spec introduces a first-class distinction between pull requests **the user
-authored** and pull requests **other people authored that we sync**, and builds
-two automation lifecycles on top of it. It extends `docs/schema.md`; where the
-two disagree, this document is the newer intent.
+authored** and pull requests **other people authored that we sync**, and shows
+how far along each one is. It extends `docs/schema.md`; where the two disagree,
+this document is the newer intent.
+
+Automating the user's own PRs, which builds on this classification, is tracked
+separately in issue #110.
 
 ## Why ownership is the foundation
 
@@ -180,23 +183,30 @@ Cost is the open problem: this is one `gh pr view` per PR per tick, and issue
 
 ## gRPC surface
 
-The macOS app splits its PR list into `mine` and `theirs`, and orders each list
-by how much it needs the user. Everything it needs comes from the worktree view,
-so the change is additive fields on `Worktree` and nothing else. Each new field
-is new, so `buf breaking` passes and an already-released app ignores them.
+The macOS app shows one repository at a time, chosen from a dropdown. It splits
+that repository's PRs into two tabs, `mine` and `theirs`, the latter labelled
+"Incoming", and orders each tab by how much it needs the user. Worktrees the
+daemon cannot classify are summarised in a footer under `mine`, with a "Why?"
+link. The wire changes are additive fields on `Worktree` and one new RPC.
+Because every field and RPC is new, `buf breaking` passes and an
+already-released app ignores them.
 
 ### What the views need
 
-| need                            | source                                                                   | `mine` | `theirs` |
-| ------------------------------- | ------------------------------------------------------------------------ | ------ | -------- |
-| which list a PR belongs in      | `authorship` column                                                      | ✓      | ✓        |
-| unresolved comments             | GraphQL `reviewThreads { isResolved }`                                   | ✓      | ✓        |
-| blocking reviews                | `reviewDecision`, plus `latestReviews` in state `CHANGES_REQUESTED`      | ✓      | ✓        |
-| failing CI                      | `statusCheckRollup`                                                      | ✓      | ✓        |
-| merge conflicts                 | `mergeable`                                                              | ✓      | ✓        |
-| new activity from other people  | newest comment, review or thread reply not authored by the identity set  | ✓      | ✓        |
-| size                            | `additions`, `deletions`, `changedFiles`                                 |        | ✓        |
-| row label and link              | `title`, `url`                                                           | ✓      | ✓        |
+| need                         | source                                                                  | `mine` | `theirs` |
+| ---------------------------- | ----------------------------------------------------------------------- | ------ | -------- |
+| which tab a PR belongs in    | `authorship` column                                                     | ✓      | ✓        |
+| why a worktree is unclassified | the resolver's reasoning                                              | ✓      |          |
+| unresolved comments          | GraphQL `reviewThreads { isResolved }`                                  | ✓      | ✓        |
+| blocking reviews, approvals  | `reviewDecision`, `latestReviews { author, state }`                     | ✓      | ✓        |
+| review requested from me     | `reviewRequests`, matched against the identity set                      |        | ✓        |
+| failing CI                   | `statusCheckRollup`                                                     | ✓      | ✓        |
+| merge conflicts              | `mergeable`                                                             | ✓      | ✓        |
+| new activity from others     | newest comment, review or thread reply not by the identity set, against the last-viewed time | ✓ |  |
+| new PRs since last looked    | when the daemon first saw the PR, against the last-viewed time           |        | ✓        |
+| size                         | `additions`, `deletions`                                                |        | ✓        |
+| age column                   | `updatedAt`                                                             | ✓      | ✓        |
+| PR link                      | `url`                                                                   | ✓      | ✓        |
 
 `gh pr view --json` does not expose review-thread resolution, so unresolved
 comments need the GraphQL query anyway. That is one more reason the batched
@@ -206,6 +216,14 @@ unresolved comments.
 
 Bot accounts such as CodeRabbit count as "other people". Their review threads
 are exactly the feedback the user has to deal with.
+
+Review requests are matched against the identity set directly. A request made
+to a team the user belongs to does not count, because resolving team membership
+costs another call per team.
+
+GitHub reports only whether a PR conflicts, not which files conflict. A count
+of conflicting files needs a local merge attempt (issue #100's
+`conflict_count`), so the GitHub-side rollup does not carry one.
 
 ### Messages
 
@@ -229,11 +247,24 @@ enum ReviewDecision {
   REVIEW_DECISION_CHANGES_REQUESTED = 3;
 }
 
+enum ReviewState {
+  REVIEW_STATE_UNSPECIFIED = 0;
+  REVIEW_STATE_COMMENTED = 1;
+  REVIEW_STATE_APPROVED = 2;
+  REVIEW_STATE_CHANGES_REQUESTED = 3;
+}
+
 enum CheckState {
   CHECK_STATE_UNSPECIFIED = 0;
   CHECK_STATE_PENDING = 1;
   CHECK_STATE_PASSING = 2;
   CHECK_STATE_FAILING = 3;
+}
+
+message Review {
+  string login = 1;
+  ReviewState state = 2;
+  bool is_me = 3;
 }
 
 message ChecksSummary {
@@ -244,40 +275,54 @@ message ChecksSummary {
   repeated string failing_names = 5;
 }
 
-message PullRequestSize {
-  int32 additions = 1;
-  int32 deletions = 2;
-  int32 changed_files = 3;
-}
-
 message PullRequestState {
   google.protobuf.Timestamp fetched_at = 1;
-  string title = 2;
-  string url = 3;
-  string author_login = 4;
-  bool is_draft = 5;
-  string head_oid = 6;
+  string url = 2;
+  string author_login = 3;
+  bool is_draft = 4;
+  string head_oid = 5;
+  google.protobuf.Timestamp updated_at = 6;
   Mergeable mergeable = 7;
   ReviewDecision review_decision = 8;
-  repeated string changes_requested_by = 9;
-  int32 unresolved_thread_count = 10;
-  ChecksSummary checks = 11;
-  PullRequestSize size = 12;
-  optional google.protobuf.Timestamp last_activity_by_others_at = 13;
-  int64 priority = 14;
+  repeated Review latest_reviews = 9;
+  repeated string requested_reviewers = 10;
+  bool review_requested_from_me = 11;
+  int32 unresolved_thread_count = 12;
+  ChecksSummary checks = 13;
+  int32 additions = 14;
+  int32 deletions = 15;
+  bool has_new_activity = 16;
+  bool is_new = 17;
+  int64 score = 18;
 }
 
 message Worktree {
   Authorship authorship = 13;
-  optional PullRequestState pull_request = 14;
+  string authorship_note = 14;
+  optional PullRequestState pull_request = 15;
 }
+
+service LumberjackService {
+  rpc MarkViewed(MarkViewedRequest) returns (MarkViewedResponse);
+}
+
+message MarkViewedRequest {
+  string repository = 1;
+  Authorship authorship = 2;
+}
+
+message MarkViewedResponse {}
 ```
 
 Notes on the shape:
 
-- `AUTHORSHIP_UNSPECIFIED` doubles as `unknown`. Clients render it in neither
-  list, or in a third "unclassified" group, and never as `mine`. That is the same
-  rule automation follows.
+- `AUTHORSHIP_UNSPECIFIED` doubles as `unknown`. Clients count it in the
+  "unclassified" footer and never show it as `mine`. That is the same rule
+  automation follows.
+- `authorship_note` is the human-readable reason behind the classification,
+  shown by the footer's "Why?" link. It follows the existing
+  `reconciliation_note` convention, and is empty when there is nothing to
+  explain.
 - `pull_request` is absent when the worktree has no PR, and also before the
   first fetch after daemon start. Absent means "not known yet". It never means
   "clean".
@@ -285,41 +330,68 @@ Notes on the shape:
   mergeability lazily, so a freshly pushed PR reports `UNKNOWN` for a while.
 - `CHECK_STATE_UNSPECIFIED` means the PR has no checks. That is different from
   `PENDING`.
+- `latest_reviews` holds each reviewer's most recent review. It drives
+  "Approved by dmitri" on `mine` and "You approved this" on `theirs` (`is_me`).
 - `fetched_at` is how the UI shows staleness. With an hourly fetch, data up to
   an hour old is normal, and the user should be able to see that.
 
+### Seen state
+
+"New" in the wireframe means new since the user last looked at that tab, for
+that repository. GitHub cannot reconstruct that, so per `docs/schema.md` it is
+stored:
+
+```
+list_views(repository_id, authorship, viewed_at)
+```
+
+- `has_new_activity` is true when the newest activity by someone outside the
+  identity set is later than `viewed_at` for the PR's tab. The wireframe shows
+  it as a dot and a darker subtitle on `mine` rows.
+- `is_new` is true when the daemon first saw the PR after `viewed_at` for its
+  tab. The app shows the unread dot on the Incoming tab when any `theirs` row has
+  it.
+- The app calls `MarkViewed` when the user **leaves** a tab: by closing the
+  panel, switching tab, or switching repository. If it marked on arrival, the
+  markers would disappear while the user was still reading them.
+- A repository that has never been viewed has no row in `list_views`. Then
+  nothing is new, which stops a first launch from lighting up every PR.
+
 ### Ordering
 
-`priority` is an opaque sort key computed by the daemon: higher sorts first. It
-only compares within one authorship. A combined view groups by `authorship`
-first, then sorts by `priority` within each group.
+`ListWorktrees`, `GetRepository` and `Watch` return worktrees in display order:
+`mine` by `score` descending, then `theirs` by `score` ascending, then
+unclassified. The ordering lives in the daemon so that the CLI (Go) and the app
+(Swift) cannot drift apart.
 
-The daemon computes it, rather than each client sorting, for three reasons:
+`score` is the number the order came from, and the app uses it directly:
 
-- `ListWorktrees` is per repository, and the app merges lists across
-  repositories. A scalar key lets it do that without knowing the rules.
-- The CLI (Go) and the app (Swift) would otherwise implement the same ordering
-  twice and drift apart.
-- The weighting will need tuning. Because the key is opaque, tuning it needs no
-  proto change.
+**`mine`: an attention score, highest first.** A score above zero counts
+towards the badge on the Mine tab.
 
-The rules the key encodes:
+| signal                          | weight |
+| ------------------------------- | ------ |
+| new activity from others        | +40    |
+| changes requested               | +30    |
+| merge conflict                  | +25    |
+| failing checks                  | +25    |
+| each unresolved thread, up to 3 | +8     |
+| draft                           | −10    |
 
-**`mine`, most actionable first.** A PR needs the user if it has any of the
-following: changes requested, unresolved threads, a merge conflict, or failing
-checks. PRs that need the user sort above those that don't. Within each group,
-the newest `last_activity_by_others_at` sorts first. Drafts sort with everything
-else, since they are the user's own work in progress.
+**`theirs`: an effective size, smallest first.** Rows with an effective size of
+1,000 or more sit under a "Large or blocked" divider. The size chip's tooltip
+shows the effective size.
 
-**`theirs`, highest value first.** The base is lines changed
-(`additions + deletions`), with the smallest first. Each of the following
-doubles the effective size: failing checks, a merge conflict, and unresolved
-threads. A PR under 1000 effective lines always sorts above one over 1000.
-Drafts sort last.
+| signal                                | weight |
+| ------------------------------------- | ------ |
+| lines changed (additions + deletions) | n      |
+| failing checks                        | +800   |
+| merge conflict                        | +600   |
+| any unresolved threads                | +300   |
 
-Once ranking (lifecycle B) lands, its score replaces the size heuristic for
-`theirs` inside the daemon. Clients see the same `priority` field and need no
-change.
+The weights are starting values to tune. Changing them needs no proto change.
+`has_new_activity` feeds the `mine` score, so calling `MarkViewed` can reorder
+the tab the next time it is opened.
 
 ### Delivery
 
@@ -329,151 +401,11 @@ change.
   missing.
 - `ListWorktrees` and `GetRepository` serve the cached rollup. The app polls
   every 2 seconds, so these calls must never trigger a GitHub fetch.
+  `has_new_activity`, `is_new` and `score` are recomputed per call from the
+  cache and `list_views`, so `MarkViewed` takes effect on the next poll.
 - `Watch`: `SYNC_FINISHED` also populates `worktrees` (field 3, today only set
   on `SNAPSHOT`), so a subscriber re-renders after each fetch without a
   follow-up call. No new event type is needed.
-
-## Lifecycle A: owned PRs
-
-The path is worktree → commits → PR → _feedback loop_ → merge. The first three
-steps already work. The feedback loop is what this adds.
-
-The trigger is a change to the PR's head: a new push, a new review, or a check
-run completing. Polling `gh` for that on a tight loop is the wrong shape — the
-existing hourly sync tick is far too slow to feel responsive, and a one-minute
-poll per PR is exactly the cost issue #101 is already about. The right
-mechanism is a separate, cheap watch: one batched GraphQL query per repository
-returning head OID, review decision and check rollup for every owned open PR,
-on its own short interval, with the expensive per-PR work done only for PRs
-whose head OID or rollup actually moved.
-
-When one moves, and only for **owned** PRs, Lumberjack runs the configured
-prompts against that PR's worktree. Each prompt is a named unit with a
-condition it fires on:
-
-```yaml
-automation:
-  provider: claude
-  owned:
-    - name: fix-review-feedback
-      on: review_changes_requested
-      prompt: |
-        Address every unresolved review comment on this pull request.
-        Make the smallest change that resolves each one.
-    - name: fix-checks
-      on: checks_failed
-      prompt: |
-        The static analysis checks on this pull request are failing.
-        Read the failing check output and fix the cause.
-```
-
-Non-negotiable constraints on this loop:
-
-- **It only ever runs on `owned`.** `incoming` and `unknown` are never touched.
-- **It runs on a clean worktree only.** An agent editing a worktree with
-  uncommitted user changes can destroy work that exists nowhere else.
-- **It never pushes on its own.** It commits to the branch and stops. Pushing is
-  a separate, explicitly opted-in step; an automation loop that pushes can
-  re-trigger itself.
-- **It is bounded.** A maximum number of consecutive automated attempts per head
-  OID, after which the worktree is marked as needing the user and left alone.
-  Without this, a prompt that cannot fix the problem burns tokens forever.
-- **Its config is trusted config.** See "Trust", below.
-
-## Lifecycle B: incoming PRs
-
-Incoming PRs need reviewing, and the question the user actually has is _which
-one first_. So each incoming PR gets a rank.
-
-Ranking runs when an incoming PR's head changes — the same watch that drives
-lifecycle A — and produces a score plus a one-line rationale. Inputs are the
-PR's title, body, author, size (files and lines changed), age, whether the user
-is a requested reviewer, and its mergeability rollup.
-
-The rank is a cache of a model's judgement about a specific head OID, not a
-fact about the PR, and it is expensive to recompute. That makes it the one
-piece of derived state here worth persisting — keyed on the head OID it was
-computed for, so it self-invalidates on the next push:
-
-```
-pr_rankings(repository_id, github_pr_number, head_oid, score, rationale, provider, ranked_at)
-```
-
-A ranking whose `head_oid` no longer matches the live head is stale and is
-shown as such, or ignored, rather than being trusted.
-
-There is a **default ranking prompt compiled into the binary**, so this works
-with no configuration. `.lumberjack.yml` may override it:
-
-```yaml
-automation:
-  incoming:
-    ranking:
-      prompt: |
-        Rank this pull request by how urgently it needs my review.
-```
-
-The prompt must be readable from the CLI (`lumberjack ranking-prompt`, or
-similar) — the user needs to see what is actually being asked before trusting a
-number, and needs to see the default in order to base an override on it.
-
-## The provider abstraction
-
-Ranking and fix-feedback must not be bound to one vendor. Introduce a provider
-interface and one implementation.
-
-```go
-// internal/llm
-type Provider interface {
-    Name() string
-    Complete(ctx context.Context, req Request) (Response, error)
-}
-```
-
-`Request` carries the prompt, the input facts, and an optional JSON schema the
-response must satisfy. `Response` carries the text or the decoded structured
-result. This is deliberately the _narrow_ surface — a single structured
-completion — because that is all ranking needs, and a narrow interface is one a
-second provider can actually implement.
-
-The fix-feedback loop needs more than that: an agent that can read and write
-files in the worktree and run commands. That is a different capability and
-should be a **separate, optional interface** (`Agent`, say) that a provider may
-or may not implement, rather than being forced into `Provider`. Ranking works
-with any provider; fix-feedback only works with providers that are agentic.
-
-The first and only implementation is Claude. Selection is by name in
-`.lumberjack.yml` (`provider: claude`), defaulting to Claude when unset, so
-adding a second provider is a registry entry rather than a refactor.
-
-Credentials stay out of the database, exactly as `gh` tokens do (`docs/schema.md`,
-"Not stored"). The Claude provider reads its key from the environment.
-
-## Trust
-
-This is the part most likely to go wrong, so it is stated explicitly.
-
-`.lumberjack.yml` already has a trust model, and it exists because a `run_command`
-step is arbitrary code execution: config is read from the **trusted default
-branch**, never from the branch being cloned, and `run_command` steps require
-recorded consent keyed on the file's checksum (`trusted_setup_steps`).
-
-**A prompt that drives an agent with write access to a worktree is at least as
-dangerous as a `run_command`, and must inherit exactly the same treatment.** The
-`automation` block is trusted config:
-
-- Read from the default branch tip, never from a PR branch.
-- Covered by the same checksum consent — adding an `automation` block changes
-  the file's checksum, which invalidates existing consent and re-prompts. That
-  falls out of the existing mechanism for free.
-
-The sharper version of the same problem is ranking. Ranking an incoming PR
-means feeding an untrusted author's title and body to a model. If that model
-can also be steered by a prompt from the branch, a PR can rank itself first, or
-worse. Hence: the ranking prompt comes from the trusted default branch only,
-the PR's own content is passed as **data to be ranked and never as
-instructions**, and the ranking provider is given no tools and no write access —
-it returns a score and a string, nothing else.
 
 ## Proposed staging
 
@@ -483,37 +415,18 @@ Each of these is a mergeable PR on its own.
    `pull_requests`, migration `00006`, `AuthorLogin` on `github.PR`, sync
    wiring, the identity set, the three-condition resolver, the `Ownership` enum
    on the worktree view, and surfacing in `lumberjack worktrees` and the macOS
-   app. No automation. This is the whole safety boundary and everything else
-   depends on it.
+   app. This is the safety boundary that issue #110's automation depends on.
 
    Worth splitting: conditions 1 and 2 plus the identity set are one PR and
    deliver most of the value; condition 3, which needs the `compare` fetch and
    its SHA cache, is a second.
 
-2. **Mergeability rollup.** The batched GraphQL fetch and `PullRequestState` on
-   the worktree view. Coordinate with issue #100 so there is one merge-state
-   story, not two.
-3. **The head-change watch.** The cheap per-repository poll that detects a moved
-   head OID or a changed rollup, with the per-PR work gated on it. Also the fix
-   for the cost half of issue #101.
-4. **The provider interface and the Claude implementation.** `internal/llm`,
-   the narrow `Provider`, the default ranking prompt, and `automation` parsing
-   in `internal/setup`. No behaviour wired to it yet.
-5. **Ranking for incoming PRs.** `pr_rankings`, the ranking run on head change,
-   rank display and sort in `lumberjack worktrees`, and the command that prints
-   the effective prompt.
-6. **Fix-feedback for owned PRs.** The `Agent` interface, the prompt runner, and
-   every constraint listed under lifecycle A. Last, deliberately — it is the
-   only part that writes to the user's code.
+2. **Mergeability rollup.** The batched GraphQL fetch, `PullRequestState` on
+   the worktree view, the `list_views` table and `MarkViewed`, and server-side
+   ordering. Coordinate with issue #100 so there is one merge-state story, not
+   two.
 
 ## Open questions
-
-- **"New" activity.** `last_activity_by_others_at` orders `mine` by how recent
-  the activity is. It cannot say whether the user has already seen that
-  activity. Highlighting unseen activity needs a persisted "seen at" marker per
-  PR, plus an RPC to set it. That marker is user state GitHub cannot
-  reconstruct, so it would be stored. Add it only if recency alone proves not
-  to be enough.
 
 - **Interaction with issue #84 (sync scope).** Ownership is arguably a scope
   dimension too: "sync my PRs only" is a thing people will want. Whether that is
@@ -523,11 +436,5 @@ Each of these is a mergeable PR on its own.
   immutable head SHA, so steady-state cost is zero and only a moved head pays.
 - **Fork PRs.** An incoming PR from a fork has a head branch that does not exist
   on the origin remote. Worktree creation for those is a pre-existing question,
-  but ranking makes it more pressing, since fork PRs are exactly the incoming
-  ones.
-- **What "handled all the feedback" means.** Lifecycle A's stated goal is
-  reaching a mergeable state, but nothing here defines the terminal condition
-  precisely enough to stop on. `mergeStateStatus == CLEAN` plus
-  `reviewDecision == APPROVED` is the obvious candidate and is probably right.
-- **Cost controls.** There is no budget concept anywhere in this spec. Before
-  lifecycle A ships, there needs to be a ceiling the user sets and can see.
+  but the Incoming tab makes it more pressing, since fork PRs are exactly the
+  incoming ones.
