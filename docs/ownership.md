@@ -145,19 +145,19 @@ against an **identity set**:
 1. `repositories.login`, the account the repo was registered under.
 2. Every other login `gh` is authenticated as for that host (`gh auth status`),
    which is already available via `github.Client.ListLogins`.
-3. Any additional logins configured per-repository, for accounts `gh` does not
-   hold — a shared bot, or a second machine's account.
 
-Comparison is case-insensitive; GitHub logins are not case-sensitive. Set 2
-means the common multi-account case needs no configuration at all, which is why
-it is worth preferring over asking the user to list identities up front.
+Comparison is case-insensitive; GitHub logins are not case-sensitive. Source 2
+means the common multi-account case needs no configuration at all. There is no
+list of extra identities to maintain: a PR by an account `gh` does not hold — a
+shared bot, or a second machine's account — is `theirs`, and the user corrects
+the worktrees that matter with `set-authorship`.
 
 ### Manual override
 
 When the derived answer is wrong, the user sets it by hand:
 
 ```
-lumberjack set-authorship [--repository NAME] [--worktree BRANCH_OR_DIRECTORY_NAME] mine|theirs
+lumberjack set-authorship [--repository NAME] [--worktree BRANCH_OR_DIRECTORY_NAME] mine|theirs|auto
 ```
 
 `--repository` resolves like every other scoped command. `--worktree` resolves
@@ -169,7 +169,8 @@ in `worktrees.authorship_override`.
 The override is per worktree and permanent: it wins over every condition below,
 including a later PR, until the user sets it again. It is the user's explicit
 statement, and nothing the daemon learns afterwards is better evidence than
-that.
+that. `auto` clears it, setting `authorship_override` back to null so the
+conditions decide again.
 
 ### Resolution order
 
@@ -207,7 +208,7 @@ The fields used:
 | ------------------- | ------------------------------------------------------------------------------------ |
 | `mergeStateStatus`  | `CLEAN`, `BLOCKED`, `BEHIND`, `DIRTY`, `UNSTABLE`, ... `DIRTY` means a merge conflict |
 | `reviewDecision`    | `APPROVED` / `CHANGES_REQUESTED` / `REVIEW_REQUIRED`                                 |
-| `statusCheckRollup` | per-check conclusions — the static analysis signal                                   |
+| `statusCheckRollup` | per-check conclusions and `isRequired` — the static analysis signal                  |
 | `isDraft`           | shown on the row, and lowers the `mine` score                                        |
 
 **Conflicts are always against the PR's base branch, never the repository's
@@ -228,6 +229,36 @@ it) and `PullRequestState` for the GitHub-side rollup. The local attempt follows
 the same rule: it merges the PR's base branch (`baseRefName`, fetched with the
 rollup), not the default branch, so the two views can never disagree about
 which branch a conflict is against.
+
+### Failing checks
+
+**Only required checks count, and only when they would block the merge.** The
+aim is to mirror GitHub's own rule for when a check stops a PR merging, so the
+badge never flags a check GitHub would let the user merge past.
+
+- A check is **required** when GitHub says so for this PR: the `isRequired`
+  field on each `CheckRun` and `StatusContext` in `statusCheckRollup`, which
+  GitHub evaluates against the branch protection and rulesets of the PR's base
+  branch. Non-required checks are ignored entirely, whatever their result.
+- A required check is **failing** when its conclusion is `FAILURE`,
+  `CANCELLED`, `TIMED_OUT`, `ACTION_REQUIRED` or `STARTUP_FAILURE` (check runs),
+  or its state is `FAILURE` or `ERROR` (commit statuses).
+- `SKIPPED`, `NEUTRAL` and `SUCCESS` are passing, as they are to GitHub.
+- A required check that is queued, in progress, or has not reported yet is
+  pending. Pending is not failing: it is shown, but never counted as a problem.
+
+`ChecksSummary.state` is `FAILING` if any required check is failing, else
+`PENDING` if any is pending, else `PASSING`. A PR with no required checks —
+including every PR in a repository without branch protection — is
+`CHECK_STATE_UNSPECIFIED` and never shows a check problem. The counts in
+`ChecksSummary` cover required checks only.
+
+`isRequired` takes the PR number as an argument, which a single
+`repository.pullRequests` connection cannot supply per node. The fetch is
+therefore two steps: list the open PR numbers (which sync already does), then
+send one GraphQL query that aliases each PR — `pr123: pullRequest(number: 123)`
+— so each alias can pass its own number to `isRequired`. That is still one
+request per repository, not one per PR.
 
 `GetRepository`, `ListWorktrees` and `Watch` all carry the worktree view, so
 all three gain it at once. `Authorship` is an enum on the same message. See
@@ -271,10 +302,9 @@ already-released app ignores them.
 | unresolved comments         | GraphQL `reviewThreads { isResolved }`                                                       | ✓      | ✓        |
 | blocking reviews, approvals | `reviewDecision`, `latestReviews { author, state }`                                          | ✓      | ✓        |
 | review requested from me    | `reviewRequests`, matched against the identity set                                           |        | ✓        |
-| failing CI                  | `statusCheckRollup`                                                                          | ✓      | ✓        |
+| failing CI                  | required checks in `statusCheckRollup` (see "Failing checks")                                | ✓      | ✓        |
 | merge conflicts             | `mergeStateStatus == DIRTY`                                                                  | ✓      | ✓        |
-| new activity from others    | newest comment, review or thread reply not by the identity set, against the last-viewed time | ✓      |          |
-| new PRs since last looked   | when the daemon first saw the PR, against the last-viewed time                               |        | ✓        |
+| new activity                | see "Seen state"                                                                             | ✓      | ✓        |
 | size                        | `additions`, `deletions`                                                                     |        | ✓        |
 | age column                  | `updatedAt`                                                                                  | ✓      | ✓        |
 | PR link                     | `url`                                                                                        | ✓      | ✓        |
@@ -365,8 +395,7 @@ message PullRequestState {
   int32 additions = 11;
   int32 deletions = 12;
   bool has_new_activity = 13;
-  bool is_new = 14;
-  int64 score = 15;
+  int64 score = 14;
 }
 
 message Worktree {
@@ -383,6 +412,7 @@ service LumberjackService {
 message MarkViewedRequest {
   string repository = 1;
   Authorship authorship = 2;
+  google.protobuf.Timestamp seen_through = 3;
 }
 
 message MarkViewedResponse {}
@@ -390,7 +420,7 @@ message MarkViewedResponse {}
 message SetAuthorshipRequest {
   string repository = 1;
   string worktree = 2;
-  Authorship authorship = 3;
+  optional Authorship authorship = 3;
 }
 
 message SetAuthorshipResponse {
@@ -404,9 +434,11 @@ Notes on the shape:
   `AUTHORSHIP_UNSPECIFIED` only ever means the field was not sent — a daemon
   older than this change — and a client falls back to an unsplit list rather
   than showing two empty tabs.
-- `MarkViewedRequest.authorship` and `SetAuthorshipRequest.authorship` accept
-  only `AUTHORSHIP_MINE` or `AUTHORSHIP_THEIRS`; `UNSPECIFIED` is
-  `INVALID_ARGUMENT`.
+- `MarkViewedRequest.authorship` accepts only `AUTHORSHIP_MINE` or
+  `AUTHORSHIP_THEIRS`; `UNSPECIFIED` is `INVALID_ARGUMENT`.
+- `SetAuthorshipRequest.authorship` absent is `auto`: it clears the override.
+  Present, it must be `AUTHORSHIP_MINE` or `AUTHORSHIP_THEIRS`; `UNSPECIFIED`
+  is `INVALID_ARGUMENT`.
 - `SetAuthorshipRequest.worktree` is a branch or directory name, the same
   reference `DeleteWorktreeRequest.worktree` accepts; an unmatched one is
   `NOT_FOUND`. The response carries the updated worktree, so the caller can
@@ -420,8 +452,8 @@ Notes on the shape:
   conflict is `MERGE_STATE_STATUS_DIRTY`. GitHub computes it lazily, so a
   freshly pushed PR reports `UNKNOWN` for a while, which is never shown as a
   conflict. `UNSPECIFIED` means the field was not sent.
-- `CHECK_STATE_UNSPECIFIED` means the PR has no checks. That is different from
-  `PENDING`.
+- `CHECK_STATE_UNSPECIFIED` means the PR has no required checks. That is
+  different from `PENDING`.
 - `latest_reviews` holds each reviewer's most recent review. It drives
   "Approved by dmitri" on `mine` and "You approved this" on `theirs` (`is_me`).
 - Staleness is shown from the existing `Repository.last_synced_at` ("synced
@@ -439,23 +471,42 @@ stored:
 list_views(repository_id, authorship, viewed_at)
 ```
 
-- `has_new_activity` is true when the newest activity by someone outside the
-  identity set is later than `viewed_at` for the PR's tab. The wireframe shows
-  it as a dot and a darker subtitle on `mine` rows.
-- `is_new` is true when the daemon first saw the PR after `viewed_at` for its
-  tab. The app shows the unread dot on the Incoming tab when any `theirs` row has
-  it.
+`has_new_activity` is true when any of these happened after `viewed_at` for the
+PR's tab:
+
+| activity                    | timestamp compared                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------ |
+| the PR was newly synced     | `pull_requests.first_seen_at`                                                        |
+| a new comment               | `createdAt` of the newest comment, review or thread reply not by the identity set    |
+| a new merge conflict        | `pull_requests.conflicted_since` — when a sync first saw `mergeStateStatus == DIRTY` |
+| a new failing check         | `pull_requests.checks_failing_since` — when a sync first saw a failing required check |
+
+GitHub records when a comment was made, but not when a PR started conflicting
+or when its required checks started failing, so those two are stored: a sync
+sets the column the first time it observes the condition and clears it when the
+condition goes away. A conflict that is fixed and then comes back is new again.
+
+The same rule applies to both tabs. The app shows a dot and a darker subtitle
+on each row with new activity, and a dot on a tab when any of its rows has it.
+
 - The app calls `MarkViewed` when the user **leaves** a tab: by closing the
   panel, switching tab, or switching repository. If it marked on arrival, the
   markers would disappear while the user was still reading them.
+- `viewed_at` is the time of the data the user saw, not the time they left.
+  The app sends the `Repository.last_synced_at` it was displaying as
+  `seen_through`, and the daemon stores that, never moving `viewed_at`
+  backwards. Stamping the wall clock instead would mark as seen any activity
+  that happened after the last sync, which the user never saw because it had
+  not been fetched yet.
 - A repository that has never been viewed has no row in `list_views`. Then
   nothing is new, which stops a first launch from lighting up every PR.
 
 ### Ordering
 
 `ListWorktrees`, `GetRepository` and `Watch` return worktrees in display order:
-`mine` by `score` descending, then `theirs` by `score` ascending. The ordering lives in the daemon so that the CLI (Go) and the app
-(Swift) cannot drift apart.
+`mine` by `score` descending, then `theirs` by `score` ascending. Equal scores
+are broken by `updated_at`, most recent first. The ordering lives in the daemon
+so that the CLI (Go) and the app (Swift) cannot drift apart.
 
 `score` is the number the order came from, and the app uses it directly:
 
@@ -464,10 +515,10 @@ towards the badge on the Mine tab.
 
 | signal                          | weight |
 | ------------------------------- | ------ |
-| new activity from others        | +40    |
+| new activity                    | +40    |
 | changes requested               | +30    |
 | merge conflict (`DIRTY`)        | +25    |
-| failing checks                  | +25    |
+| failing required checks         | +25    |
 | each unresolved thread, up to 3 | +8     |
 | draft                           | −10    |
 
@@ -478,7 +529,7 @@ shows the effective size.
 | signal                                | weight |
 | ------------------------------------- | ------ |
 | lines changed (additions + deletions) | n      |
-| failing checks                        | +800   |
+| failing required checks               | +800   |
 | merge conflict (`DIRTY`)              | +600   |
 | any unresolved threads                | +300   |
 
@@ -494,8 +545,9 @@ the tab the next time it is opened.
   every repository, a restart leaves only a short window where it is missing.
 - `ListWorktrees` and `GetRepository` serve the cached rollup. The app polls
   every 2 seconds, so these calls must never trigger a GitHub fetch.
-  `has_new_activity`, `is_new` and `score` are recomputed per call from the
-  cache and `list_views`, so `MarkViewed` takes effect on the next poll.
+  `has_new_activity` and `score` are recomputed per call from the cache,
+  `pull_requests` and `list_views`, so `MarkViewed` takes effect on the next
+  poll.
 - `Watch`: `SYNC_FINISHED` also populates `worktrees` (field 3, today only set
   on `SNAPSHOT`), so a subscriber re-renders after each fetch without a
   follow-up call. No new event type is needed.
@@ -503,9 +555,10 @@ the tab the next time it is opened.
 ## Database changes
 
 Per `docs/schema.md`, only state that git and `gh` cannot reconstruct is
-stored. Six new facts qualify: the user created a worktree locally; the user
-overrode a worktree's authorship; a PR's author; that a PR has closed; extra
-logins the user has claimed; and when the user last looked at each tab. The
+stored. These new facts qualify: the user created a worktree locally; the user
+overrode a worktree's authorship; a PR's author; that a PR has closed; when the
+daemon first saw a PR, and when it first saw it conflicting or failing a
+required check; and when the user last looked at each tab. The
 authorship verdict itself is not stored. It is derived from those facts every
 time the view is built.
 
@@ -557,20 +610,7 @@ ALTER TABLE pull_requests ADD COLUMN author_login TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE pull_requests ADD COLUMN deleted_at TIMESTAMP;
 
-CREATE TABLE repository_identities (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    repository_id INTEGER NOT NULL REFERENCES repositories (id) ON DELETE CASCADE,
-    login TEXT NOT NULL COLLATE NOCASE,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE (repository_id, login)
-);
-
-CREATE INDEX idx_repository_identities_repository_id ON repository_identities (
-    repository_id
-);
-
 -- +goose Down
-DROP TABLE repository_identities;
 DELETE FROM pull_requests WHERE deleted_at IS NOT NULL;
 ALTER TABLE pull_requests DROP COLUMN deleted_at;
 ALTER TABLE pull_requests DROP COLUMN author_login;
@@ -581,10 +621,9 @@ ALTER TABLE worktrees DROP COLUMN origin;
 | change                       | values / notes                                                                                                                                                                                                              |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `worktrees.origin`           | `local` (`lumberjack worktree add`), `synced` (created by sync for an open PR), `adopted` (found on disk). Existing rows become `adopted`. Guessing `local` would mark branches `mine` that the user may never have created |
-| `worktrees.authorship_override` | `mine` / `theirs`, set by `lumberjack set-authorship`; null means derive it. Wins over every condition. Existing rows start null |
+| `worktrees.authorship_override` | `mine` / `theirs`, set by `lumberjack set-authorship`; null means derive it, and `set-authorship auto` sets it back to null. Wins over every condition. Existing rows start null |
 | `pull_requests.author_login` | Immutable for the life of the PR, so it is safe to persist, like `github_pr_number`. Existing rows start empty. **The backfill is the sync's upsert:** its `ON CONFLICT ... DO UPDATE` sets `author_login` alongside `branch_name` and `last_synced_at`, so the first sync after the migration — which runs at daemon start — fills every open PR. Until then an empty author resolves to `theirs` |
 | `pull_requests.deleted_at`   | Set when the PR leaves the open set, cleared when it reopens; see "Soft-deleted pull requests". Null means open. PRs that closed before this migration were already hard-deleted and are not recovered |
-| `repository_identities`      | Identity set 3: logins the user has claimed that `gh` does not hold. Sets 1 and 2 are `repositories.login` and `gh auth status`, which are already available. `COLLATE NOCASE` because GitHub logins are case-insensitive   |
 
 ### Migration `00007`: seen state (staging step 2)
 
@@ -593,6 +632,10 @@ ALTER TABLE worktrees DROP COLUMN origin;
 ALTER TABLE pull_requests ADD COLUMN first_seen_at TIMESTAMP;
 
 UPDATE pull_requests SET first_seen_at = COALESCE(last_synced_at, CURRENT_TIMESTAMP);
+
+ALTER TABLE pull_requests ADD COLUMN conflicted_since TIMESTAMP;
+
+ALTER TABLE pull_requests ADD COLUMN checks_failing_since TIMESTAMP;
 
 CREATE TABLE list_views (
     repository_id INTEGER NOT NULL REFERENCES repositories (id) ON DELETE CASCADE,
@@ -603,12 +646,16 @@ CREATE TABLE list_views (
 
 -- +goose Down
 DROP TABLE list_views;
+ALTER TABLE pull_requests DROP COLUMN checks_failing_since;
+ALTER TABLE pull_requests DROP COLUMN conflicted_since;
 ALTER TABLE pull_requests DROP COLUMN first_seen_at;
 ```
 
 | change                        | values / notes                                                                                                                                                          |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pull_requests.first_seen_at` | Set on insert, never updated — including when a soft-deleted PR reopens and its row is reused. Drives `is_new`. SQLite will not add a column with a `CURRENT_TIMESTAMP` default, so it is nullable and backfilled. Inserts always set it |
+| `pull_requests.first_seen_at` | Set on insert, never updated — including when a soft-deleted PR reopens and its row is reused. Feeds `has_new_activity`. SQLite will not add a column with a `CURRENT_TIMESTAMP` default, so it is nullable and backfilled. Inserts always set it |
+| `pull_requests.conflicted_since` | Set by the first sync that sees `mergeStateStatus == DIRTY`, left alone while it stays `DIRTY`, cleared by the first sync that sees anything else except `UNKNOWN` (which is GitHub still computing, not a resolution). Existing rows start null, so conflicts present at migration time count as new once |
+| `pull_requests.checks_failing_since` | Set by the first sync that sees a failing required check (see "Failing checks"), left alone while any stays failing, cleared once none are. Existing rows start null |
 | `list_views`                  | One row per repository and tab, upserted by `MarkViewed`. The `CHECK` limits `authorship` to `mine` / `theirs`. There is no row until the tab has been viewed once, so nothing is new on first launch |
 
 `first_seen_at` is when the daemon first saw the PR, not GitHub's `createdAt`.
@@ -622,7 +669,7 @@ should not count as new.
 | authorship verdict                              | derived per request from `authorship_override`, `origin`, `author_login` and the identity set                                            |
 | condition 3's commit authors                    | in memory, keyed on head SHA, alongside the existing `noPRBranches` cache. A restart costs one `compare` call per unlinked pushed branch |
 | the PR rollup (reviews, checks, size, activity) | in memory, refreshed each sync                                                                                                           |
-| `has_new_activity`, `is_new`, `score`           | derived per request from the rollup and `list_views`                                                                                     |
+| `has_new_activity`, `score`                     | derived per request from the rollup, `pull_requests` and `list_views`                                                                    |
 
 ## Proposed staging
 
@@ -652,7 +699,13 @@ Each of these is a mergeable PR on its own.
 - **Condition 3's cost.** One `compare` call per unlinked, pushed, PR-less
   worktree. Cheap individually, not free in aggregate. Results cache on the
   immutable head SHA, so steady-state cost is zero and only a moved head pays.
-- **Fork PRs.** A `theirs` PR from a fork has a head branch that does not exist
-  on the origin remote. Worktree creation for those is a pre-existing question,
-  but the Incoming tab makes it more pressing, since fork PRs are almost always
-  `theirs`.
+- **Open PRs with no worktree.** The tabs list worktrees, so an open PR that
+  sync gives no worktree is in neither tab. Today that happens in two cases.
+  A PR whose branch is checked out in the repository's main working tree, or in
+  a tracked worktree that has a branch disparity, is reported as retained and
+  gets no worktree of its own (a branch checked out in an _untracked_ worktree
+  is adopted, so that case is fine). And a fork PR's head branch does not exist
+  on the origin remote, so `AddWorktree`'s `origin/<branch>` checkout fails on
+  every sync — or, if a local branch happens to share the fork branch's name,
+  silently checks out that unrelated branch instead. Fork PRs are almost always
+  `theirs`, so they are exactly the PRs the Incoming tab exists for.
