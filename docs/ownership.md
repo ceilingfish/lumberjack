@@ -699,13 +699,3 @@ Each of these is a mergeable PR on its own.
 - **Condition 3's cost.** One `compare` call per unlinked, pushed, PR-less
   worktree. Cheap individually, not free in aggregate. Results cache on the
   immutable head SHA, so steady-state cost is zero and only a moved head pays.
-- **Open PRs with no worktree.** The tabs list worktrees, so an open PR that
-  sync gives no worktree is in neither tab. Today that happens in two cases.
-  A PR whose branch is checked out in the repository's main working tree, or in
-  a tracked worktree that has a branch disparity, is reported as retained and
-  gets no worktree of its own (a branch checked out in an _untracked_ worktree
-  is adopted, so that case is fine). And a fork PR's head branch does not exist
-  on the origin remote, so `AddWorktree`'s `origin/<branch>` checkout fails on
-  every sync — or, if a local branch happens to share the fork branch's name,
-  silently checks out that unrelated branch instead. Fork PRs are almost always
-  `theirs`, so they are exactly the PRs the Incoming tab exists for.
