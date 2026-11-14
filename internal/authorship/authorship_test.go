@@ -49,3 +49,24 @@ func TestResolve(t *testing.T) {
 		})
 	}
 }
+
+func TestCommitsVerdict(t *testing.T) {
+	ids := NewIdentities("me", "me-work")
+	cases := []struct {
+		name      string
+		logins    []string
+		truncated bool
+		want      schema.Authorship
+	}{
+		{"every commit by an identity", []string{"me", "ME-WORK"}, false, schema.AuthorshipMine},
+		{"a commit by someone else", []string{"me", "dmitri"}, false, schema.AuthorshipTheirs},
+		{"a commit with no resolved author", []string{"me", ""}, false, schema.AuthorshipTheirs},
+		{"no commits of its own", nil, false, schema.AuthorshipTheirs},
+		{"too many commits to see them all", []string{"me"}, true, schema.AuthorshipTheirs},
+	}
+	for _, tc := range cases {
+		if got := CommitsVerdict(tc.logins, tc.truncated, ids); got != tc.want {
+			t.Errorf("%s: CommitsVerdict = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

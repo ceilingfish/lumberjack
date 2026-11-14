@@ -797,3 +797,43 @@ func TestPRMergedBadJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestCompareCommitAuthors(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `{"total_commits":3,"commits":[{"author":{"login":"me"}},{"author":null},{"author":{"login":"you"}}]}`, nil
+	})
+	repo := RepoInfo{Owner: "o", Name: "n", Host: "ghe.example.com"}
+	got, err := c.CompareCommitAuthors(context.Background(), repo, "main", "abc123")
+	if err != nil {
+		t.Fatalf("CompareCommitAuthors: %v", err)
+	}
+	if !slices.Equal(got.Logins, []string{"me", "", "you"}) || got.Truncated {
+		t.Errorf("authors = %+v", got)
+	}
+	if !slices.Contains(gotArgs, "repos/o/n/compare/main...abc123") || !slices.Contains(gotArgs, "ghe.example.com") {
+		t.Errorf("args = %v", gotArgs)
+	}
+}
+
+func TestCompareCommitAuthorsTruncated(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `{"total_commits":300,"commits":[{"author":{"login":"me"}}]}`, nil
+	})
+	got, err := c.CompareCommitAuthors(context.Background(), RepoInfo{}, "main", "abc")
+	if err != nil || !got.Truncated {
+		t.Errorf("authors = %+v, err = %v; want truncated", got, err)
+	}
+}
+
+func TestCompareCommitAuthorsFailures(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("HTTP 404") })
+	if _, err := c.CompareCommitAuthors(context.Background(), RepoInfo{}, "main", "abc"); err == nil {
+		t.Error("expected the gh failure")
+	}
+	c = fakeClient(func(...string) (string, error) { return "{", nil })
+	if _, err := c.CompareCommitAuthors(context.Background(), RepoInfo{}, "main", "abc"); err == nil {
+		t.Error("expected a JSON parse error")
+	}
+}

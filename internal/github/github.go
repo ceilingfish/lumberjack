@@ -372,3 +372,32 @@ func resolveBinary(envVar, name string) (string, error) {
 	}
 	return p, nil
 }
+
+type CommitAuthors struct {
+	Logins    []string
+	Truncated bool
+}
+
+func (c *Client) CompareCommitAuthors(ctx context.Context, repo RepoInfo, base, head string) (CommitAuthors, error) {
+	out, err := c.run(ctx, "", "api", "--hostname", repo.Host,
+		fmt.Sprintf("repos/%s/%s/compare/%s...%s", repo.Owner, repo.Name, base, head))
+	if err != nil {
+		return CommitAuthors{}, err
+	}
+	var v struct {
+		TotalCommits int `json:"total_commits"`
+		Commits      []struct {
+			Author *prAuthor `json:"author"`
+		} `json:"commits"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return CommitAuthors{}, fmt.Errorf("parsing gh api compare: %w", err)
+	}
+	authors := CommitAuthors{Logins: make([]string, len(v.Commits)), Truncated: v.TotalCommits > len(v.Commits)}
+	for i, cm := range v.Commits {
+		if cm.Author != nil {
+			authors.Logins[i] = cm.Author.Login
+		}
+	}
+	return authors, nil
+}

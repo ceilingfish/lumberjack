@@ -298,3 +298,91 @@ func TestWorktreeViewsReportsAuthorLookupFailure(t *testing.T) {
 		t.Error("expected the author lookup failure to be reported")
 	}
 }
+
+func TestAdoptedBranchAuthorshipFromCommits(t *testing.T) {
+	cases := map[string]struct {
+		sha     string
+		authors github.CommitAuthors
+		want    schema.Authorship
+	}{
+		"never pushed":         {"", github.CommitAuthors{}, schema.AuthorshipMine},
+		"every commit by me":   {"abc", github.CommitAuthors{Logins: []string{"me", "me"}}, schema.AuthorshipMine},
+		"a commit by someone":  {"abc", github.CommitAuthors{Logins: []string{"me", "dmitri"}}, schema.AuthorshipTheirs},
+		"nothing of its own":   {"abc", github.CommitAuthors{}, schema.AuthorshipTheirs},
+		"too many to classify": {"abc", github.CommitAuthors{Logins: []string{"me"}, Truncated: true}, schema.AuthorshipTheirs},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			repo := h.unlinkedWorktree(t, "feature/x")
+			repo.Login = "me"
+			h.git.remoteSHAs = map[string]string{"feature/x": tc.sha}
+			h.gh.compare = map[string]github.CommitAuthors{"abc": tc.authors}
+			h.seedSync(t, repo)
+
+			if got := authorshipByBranch(t, h, repo); got["feature/x"] != tc.want {
+				t.Errorf("authorship = %q, want %q", got["feature/x"], tc.want)
+			}
+		})
+	}
+}
+
+func TestCommitAuthorsAreCachedOnTheHeadSHA(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	h.git.remoteSHAs = map[string]string{"feature/x": "abc"}
+	h.gh.compare = map[string]github.CommitAuthors{"abc": {Logins: []string{"me"}}}
+	h.seedSync(t, repo)
+	h.seedSync(t, repo)
+	if len(h.gh.compareCalls) != 1 || h.gh.compareCalls[0] != "main...abc" {
+		t.Errorf("compare calls = %v, want one against the default branch", h.gh.compareCalls)
+	}
+
+	h.git.remoteSHAs["feature/x"] = "def"
+	h.seedSync(t, repo)
+	if len(h.gh.compareCalls) != 2 {
+		t.Errorf("compare calls = %v, want a new lookup once the head moves", h.gh.compareCalls)
+	}
+}
+
+func TestCommitAuthorsAreNotFetchedWhenOtherwiseDecided(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "with-pr"}}
+	h.seedSync(t, repo)
+	if _, err := h.svc.AddWorktree(context.Background(), repo, "local"); err != nil {
+		t.Fatal(err)
+	}
+	h.git.remoteSHAs = map[string]string{"with-pr": "abc", "local": "def"}
+	h.seedSync(t, repo)
+	if len(h.gh.compareCalls) != 0 {
+		t.Errorf("compare calls = %v, want none for a PR or a locally created worktree", h.gh.compareCalls)
+	}
+}
+
+func TestCommitAuthorFailuresLeaveTheBranchTheirs(t *testing.T) {
+	cases := map[string]func(h *harness){
+		"remote lookup": func(h *harness) { h.git.remoteSHAErr = errors.New("git broke") },
+		"default branch": func(h *harness) {
+			h.git.remoteSHAs = map[string]string{"feature/x": "abc"}
+			h.git.defaultBranchErr = errors.New("no HEAD")
+		},
+		"compare": func(h *harness) {
+			h.git.remoteSHAs = map[string]string{"feature/x": "abc"}
+			h.gh.compareErr = errors.New("HTTP 500")
+		},
+	}
+	for name, fail := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			repo := h.unlinkedWorktree(t, "feature/x")
+			repo.Login = "me"
+			h.gh.compare = map[string]github.CommitAuthors{"abc": {Logins: []string{"me"}}}
+			fail(h)
+			h.seedSync(t, repo)
+			if got := authorshipByBranch(t, h, repo); got["feature/x"] != schema.AuthorshipTheirs {
+				t.Errorf("authorship = %q, want theirs", got["feature/x"])
+			}
+		})
+	}
+}

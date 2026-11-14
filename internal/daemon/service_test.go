@@ -70,6 +70,15 @@ type fakeGit struct {
 	locks     map[string]string
 	lockErr   map[string]error
 	unlockErr map[string]error
+
+	remoteSHAs   map[string]string
+	remoteSHAErr error
+}
+
+func (f *fakeGit) RemoteBranchSHA(_ context.Context, _, _, branch string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.remoteSHAs[branch], f.remoteSHAErr
 }
 
 func newFakeGit() *fakeGit {
@@ -327,6 +336,17 @@ type fakeGH struct {
 	// active when CheckRepoAccess ran.
 	accessErr    error
 	accessChecks []string
+
+	compare      map[string]github.CommitAuthors
+	compareErr   error
+	compareCalls []string
+}
+
+func (f *fakeGH) CompareCommitAuthors(_ context.Context, _ github.RepoInfo, base, head string) (github.CommitAuthors, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compareCalls = append(f.compareCalls, base+"..."+head)
+	return f.compare[head], f.compareErr
 }
 
 func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {

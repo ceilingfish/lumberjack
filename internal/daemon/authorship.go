@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/ceilingfish/lumberjack/internal/authorship"
 	"github.com/ceilingfish/lumberjack/internal/database"
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
+	"github.com/ceilingfish/lumberjack/internal/github"
 )
 
 func (s *Service) identitiesFor(repo *schema.Repository) authorship.Identities {
@@ -29,12 +31,71 @@ func (s *Service) refreshIdentities(ctx context.Context, repo *schema.Repository
 	s.identities.Store(repo.ID, authorship.NewIdentities(append(logins, repo.Login)...))
 }
 
-func (s *Service) resolveAuthorship(wt schema.Worktree, authors map[int64]string, ids authorship.Identities) schema.Authorship {
+func (s *Service) resolveAuthorship(repo *schema.Repository, wt schema.Worktree, authors map[int64]string, ids authorship.Identities) schema.Authorship {
 	in := authorship.Inputs{Override: wt.AuthorshipOverride, Origin: wt.Origin}
 	if wt.GithubPRNumber != nil {
 		in.PRAuthor, in.HasPR = authors[*wt.GithubPRNumber]
 	}
+	if !in.HasPR {
+		in.Commits = s.commitsVerdict(repo, wt.BranchName, ids)
+	}
 	return authorship.Resolve(in, ids)
+}
+
+func branchKey(repo *schema.Repository, branch string) string {
+	return fmt.Sprintf("%d\x00%s", repo.ID, branch)
+}
+
+func (s *Service) commitsVerdict(repo *schema.Repository, branch string, ids authorship.Identities) *schema.Authorship {
+	head, ok := s.branchHeads.Load(branchKey(repo, branch))
+	if !ok {
+		return nil
+	}
+	verdict := schema.AuthorshipMine
+	if sha, _ := head.(string); sha != "" {
+		cached, ok := s.commitAuthors.Load(sha)
+		if !ok {
+			return nil
+		}
+		ca, _ := cached.(github.CommitAuthors)
+		verdict = authorship.CommitsVerdict(ca.Logins, ca.Truncated, ids)
+	}
+	return &verdict
+}
+
+func needsCommitAuthors(wt schema.Worktree) bool {
+	return wt.GithubPRNumber == nil && wt.AuthorshipOverride == nil &&
+		wt.Origin != schema.OriginLocal && wt.BranchName != ""
+}
+
+func (s *Service) refreshBranchAuthors(ctx context.Context, repo *schema.Repository, stored []schema.Worktree) {
+	base := ""
+	for _, wt := range stored {
+		if !needsCommitAuthors(wt) {
+			continue
+		}
+		sha, err := s.git.RemoteBranchSHA(ctx, repo.LocalPath, repo.DefaultRemote, wt.BranchName)
+		if err != nil {
+			log.Printf("resolving %s on %s: %v", wt.BranchName, displayName(repo), err)
+			continue
+		}
+		s.branchHeads.Store(branchKey(repo, wt.BranchName), sha)
+		if _, cached := s.commitAuthors.Load(sha); sha == "" || cached {
+			continue
+		}
+		if base == "" {
+			if base, err = s.git.DefaultBranch(ctx, repo.LocalPath, repo.DefaultRemote); err != nil {
+				log.Printf("resolving the default branch of %s: %v", displayName(repo), err)
+				return
+			}
+		}
+		authors, err := s.gh.CompareCommitAuthors(ctx, repoInfo(repo), base, sha)
+		if err != nil {
+			log.Printf("listing commit authors of %s on %s: %v", wt.BranchName, displayName(repo), err)
+			continue
+		}
+		s.commitAuthors.Store(sha, authors)
+	}
 }
 
 func (s *Service) SetAuthorship(ctx context.Context, repo *schema.Repository, ref string, a *schema.Authorship) (*WorktreeView, error) {

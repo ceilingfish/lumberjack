@@ -58,6 +58,7 @@ type GitOps interface {
 	// `.lumberjack.yml` without checking it out. found is false (with a nil
 	// error) when ref exists but path does not.
 	ShowFile(ctx context.Context, repoPath, ref, path string) (data []byte, found bool, err error)
+	RemoteBranchSHA(ctx context.Context, repoPath, remote, branch string) (string, error)
 }
 
 // GHOps is the gh surface the sync engine and init need.
@@ -86,6 +87,7 @@ type GHOps interface {
 	// CheckRepoAccess verifies gh's active account can reach a repository, so
 	// set-login can reject a login that authenticates but cannot operate the repo.
 	CheckRepoAccess(ctx context.Context, repo github.RepoInfo) error
+	CompareCommitAuthors(ctx context.Context, repo github.RepoInfo, base, head string) (github.CommitAuthors, error)
 }
 
 // Service is the daemon's domain layer: it owns every worktree mutation
@@ -107,7 +109,9 @@ type Service struct {
 	// after noPRLookupTTL, since a branch can gain a PR later.
 	noPRBranches sync.Map
 
-	identities sync.Map
+	identities    sync.Map
+	branchHeads   sync.Map
+	commitAuthors sync.Map
 
 	// events fans out worktree/sync changes to Watch subscribers. Publishing
 	// is a side effect of a mutation that already happened under mu — it never
@@ -289,7 +293,7 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 			applySetupError(&st, wt.SetupError)
 			views = append(views, WorktreeView{
 				Worktree: wt, Status: st, PROpen: prState == worktree.PROpen,
-				Authorship: s.resolveAuthorship(wt, authors, ids),
+				Authorship: s.resolveAuthorship(repo, wt, authors, ids),
 			})
 		}
 		return nil
@@ -397,6 +401,7 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		return created, removed, err
 	}
 	removed += s.removeClosed(ctx, repo, openByNum, stored, registered, progress, &errs)
+	s.refreshBranchAuthors(ctx, repo, stored)
 
 	err = errors.Join(errs...)
 	return created, removed, err

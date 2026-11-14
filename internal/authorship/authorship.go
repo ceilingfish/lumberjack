@@ -49,3 +49,15 @@ func Resolve(in Inputs, ids Identities) schema.Authorship {
 	}
 	return schema.AuthorshipTheirs
 }
+
+func CommitsVerdict(logins []string, truncated bool, ids Identities) schema.Authorship {
+	if truncated || len(logins) == 0 {
+		return schema.AuthorshipTheirs
+	}
+	for _, l := range logins {
+		if !ids.Contains(l) {
+			return schema.AuthorshipTheirs
+		}
+	}
+	return schema.AuthorshipMine
+}
