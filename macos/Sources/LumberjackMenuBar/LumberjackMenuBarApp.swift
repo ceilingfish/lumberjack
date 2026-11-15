@@ -28,9 +28,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let popover = NSPopover()
     private let state: AppState
 
-    init(state: AppState = AppState()) {
+    init(state: AppState) {
         self.state = state
         super.init()
+    }
+
+    override convenience init() {
+        self.init(state: AppState())
     }
 
     /// Key under which our menu-bar slot is remembered. Unique to us, so the
