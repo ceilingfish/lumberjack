@@ -117,32 +117,46 @@ func (s *Service) refreshBranchAuthors(ctx context.Context, repo *schema.Reposit
 }
 
 func (s *Service) SetAuthorship(ctx context.Context, repo *schema.Repository, ref string, a *schema.Authorship) (*WorktreeView, error) {
-	id, err := s.setAuthorshipOverride(ctx, repo, ref, a)
+	wt, err := s.setAuthorshipOverride(ctx, repo, ref, a)
 	if err != nil {
 		return nil, err
 	}
-	views, err := s.WorktreeViews(ctx, repo)
-	if err != nil {
-		return nil, err
-	}
-	for i := range views {
-		if views[i].Worktree.ID == id {
-			return &views[i], nil
-		}
-	}
-	return nil, database.ErrWorktreeNotFound
+	s.events.Publish(Event{
+		Type: EventWorktreeChanged, Repository: repo,
+		Change: &WorktreeChange{
+			Branch: wt.BranchName, PRNumber: wt.GithubPRNumber, Action: ActionUpdated,
+			DirectoryPath: wt.DirectoryPath, Detail: "authorship set by request",
+		},
+	})
+	return s.storedView(ctx, repo, *wt)
 }
 
-func (s *Service) setAuthorshipOverride(ctx context.Context, repo *schema.Repository, ref string, a *schema.Authorship) (int64, error) {
+func (s *Service) storedView(ctx context.Context, repo *schema.Repository, wt schema.Worktree) (*WorktreeView, error) {
+	prs, err := s.db.PullRequests(ctx, repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	viewed, err := s.db.ListViews(ctx, repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	ids := s.identitiesFor(repo)
+	v := WorktreeView{Worktree: wt, Authorship: s.resolveAuthorship(repo, wt, prs, ids)}
+	v.PullRequest = pullViewFor(v, s.rollupFor(repo), prs, viewed, ids)
+	return &v, nil
+}
+
+func (s *Service) setAuthorshipOverride(ctx context.Context, repo *schema.Repository, ref string, a *schema.Authorship) (*schema.Worktree, error) {
 	defer s.lockRepository(repo.ID)()
 	wt, err := s.findWorktreeEnclosing(ctx, repo, ref)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := s.db.SetWorktreeAuthorshipOverride(ctx, wt.ID, a); err != nil {
-		return 0, err
+		return nil, err
 	}
-	return wt.ID, nil
+	wt.AuthorshipOverride = a
+	return wt, nil
 }
 
 func (s *Service) findWorktreeEnclosing(ctx context.Context, repo *schema.Repository, ref string) (*schema.Worktree, error) {

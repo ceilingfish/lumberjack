@@ -190,15 +190,31 @@ func TestSetAuthorshipNotFound(t *testing.T) {
 	}
 }
 
-func TestSetAuthorshipReportsViewErrors(t *testing.T) {
+func TestSetAuthorshipWorksOffline(t *testing.T) {
 	h := newHarness(t)
 	repo := h.repo(t)
 	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "feature/a"}}
 	h.seedSync(t, repo)
 	h.gh.prsErr = errors.New("gh down")
+	h.git.fetchErr = errors.New("offline")
+	events, cancel := h.svc.Subscribe()
+	defer cancel()
 
-	if _, err := h.svc.SetAuthorship(context.Background(), repo, "feature/a", nil); err == nil {
-		t.Error("expected the view failure to be reported")
+	mine := schema.AuthorshipMine
+	view, err := h.svc.SetAuthorship(context.Background(), repo, "feature/a", &mine)
+	if err != nil {
+		t.Fatalf("SetAuthorship: %v", err)
+	}
+	if view.Authorship != schema.AuthorshipMine {
+		t.Errorf("authorship = %q, want mine", view.Authorship)
+	}
+	select {
+	case ev := <-events:
+		if ev.Type != EventWorktreeChanged || ev.Change.Action != ActionUpdated || ev.Change.Branch != "feature/a" {
+			t.Errorf("event = %+v, want feature/a updated", ev)
+		}
+	default:
+		t.Error("expected a worktree change to be published")
 	}
 }
 
