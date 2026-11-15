@@ -72,6 +72,14 @@ run = [
 
 # swift-format ships with the Swift 6 toolchain the app already requires (see
 # macos/README.md), so linting and formatting Swift adds no new dependency.
+[tasks."osx:build"]
+description = "Build the menu-bar app bundle into macos/.build/app/LumberjackMenuBar.app"
+run = "macos/scripts/build-app.sh"
+
+[tasks."osx:run"]
+description = "Launch the last app bundle built by osx:build"
+run = "open macos/.build/app/LumberjackMenuBar.app"
+
 [tasks."osx:test"]
 description = "Run the Swift test suite, emitting the coverage data `osx:lcov` reads"
 run = "scripts/osx-test.sh"
