@@ -18,13 +18,6 @@ struct MenuBarPresentationTests {
         return repo
     }
 
-    @Test("the switcher prompts for a repository until one is selected")
-    func selectedRepositoryName() {
-        #expect(MenuBarPresentation.selectedRepositoryName(nil) == "Select repository")
-        #expect(
-            MenuBarPresentation.selectedRepositoryName(stubRepository(name: "repo", path: "/tmp/repo")) == "repo")
-    }
-
     @Test("the status area names why there is nothing to list")
     func statusMessages() {
         #expect(MenuBarPresentation.statusMessage(.connecting).text == "Connecting to daemon…")

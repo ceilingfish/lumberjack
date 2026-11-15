@@ -120,15 +120,6 @@ struct PullRequestPresentationTests {
         #expect(PullRequestPresentation.sizeTitle(p) == "1,305 lines changed · ranks as 1,305")
     }
 
-    @Test("the large divider sits before the first incoming PR ranked at 1,000 or more")
-    func divider() {
-        #expect(
-            PullRequestPresentation.largeDividerIndex([
-                theirs(pr(score: 10)), theirs(), theirs(pr(score: 1000)), theirs(pr(score: 5)),
-            ]) == 2)
-        #expect(PullRequestPresentation.largeDividerIndex([theirs(pr(score: 10))]) == nil)
-    }
-
     @Test("subtitles describe the PR from the user's side")
     func subtitles() {
         #expect(PullRequestPresentation.subtitle(theirs(pr(requested: true))) == "dmitri · requested your review")

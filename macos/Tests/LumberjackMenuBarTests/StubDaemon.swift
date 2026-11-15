@@ -1,3 +1,4 @@
+import Foundation
 import SwiftProtobuf
 
 @testable import LumberjackMenuBar
@@ -13,7 +14,11 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
     var failingRepositories: Set<String> = []
     var syncedRepositories: [String] = []
     var closeCount = 0
-    var viewed: [(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?)] = []
+    private let lock = NSLock()
+    private var viewedLog: [(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?)] = []
+    var viewed: [(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?)] {
+        lock.withLock { viewedLog }
+    }
 
     func health() async throws -> Lumberjack_V1_HealthResponse {
         if let healthError { throw healthError }
@@ -36,7 +41,7 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
     }
 
     func markViewed(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?) async throws {
-        viewed.append((repository, authorship, seenThrough))
+        lock.withLock { viewedLog.append((repository, authorship, seenThrough)) }
     }
 
     func close() async {

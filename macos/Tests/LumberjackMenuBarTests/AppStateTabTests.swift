@@ -35,47 +35,33 @@ struct AppStateTabTests {
     @Test("the selected tab filters the worktrees")
     func tabFiltersWorktrees() async {
         let state = AppState(connect: { self.splitDaemon() })
-        state.selectedRepository = "/tmp/repo"
         await state.refreshOnce()
 
-        #expect(state.tabWorktrees.map(\.branchName) == ["mine"])
+        #expect(state.tabRows.map(\.worktree.branchName) == ["mine"])
         state.selectedTab = .theirs
-        #expect(state.tabWorktrees.map(\.branchName) == ["theirs"])
+        #expect(state.tabRows.map(\.worktree.branchName) == ["theirs"])
     }
 
-    @Test("leaving a tab marks it viewed through the repository's last sync")
+    @Test("leaving a tab marks it viewed in every classified repository, through each one's last sync")
     func leavingATabMarksItViewed() async {
         let daemon = splitDaemon()
+        daemon.worktreesByRepository["/tmp/other"] = [
+            stubWorktree(branch: "o", path: "/tmp/other/o", authorship: .theirs)
+        ]
         let state = AppState(connect: { daemon })
-        state.selectedRepository = "/tmp/repo"
         await state.refreshOnce()
 
         state.selectedTab = .theirs
         state.selectedTab = .theirs
-        await waitUntil { daemon.viewed.count == 1 }
-        #expect(daemon.viewed.first?.repository == "/tmp/repo")
-        #expect(daemon.viewed.first?.authorship == .mine)
-        #expect(daemon.viewed.first?.seenThrough?.seconds == 100)
-
-        state.panelClosed()
         await waitUntil { daemon.viewed.count == 2 }
-        #expect(daemon.viewed.last?.authorship == .theirs)
-
-        state.selectedRepository = "/tmp/other"
-        await waitUntil { daemon.viewed.count == 3 }
-        #expect(daemon.viewed.last?.repository == "/tmp/repo")
-    }
-
-    @Test("a repository never synced is marked with no time, leaving the daemon to choose")
-    func unsyncedRepositorySendsNoTime() async {
-        let daemon = splitDaemon()
-        daemon.repositories = [stubRepository(name: "repo", path: "/tmp/repo")]
-        let state = AppState(connect: { daemon })
-        await state.refreshOnce()
+        #expect(Set(daemon.viewed.map(\.repository)) == ["/tmp/repo", "/tmp/other"])
+        #expect(daemon.viewed.allSatisfy { $0.authorship == .mine })
+        #expect(daemon.viewed.first { $0.repository == "/tmp/repo" }?.seenThrough?.seconds == 100)
+        #expect(daemon.viewed.first { $0.repository == "/tmp/other" }?.seenThrough == nil)
 
         state.panelClosed()
-        await waitUntil { daemon.viewed.count == 1 }
-        #expect(daemon.viewed.first?.seenThrough == nil)
+        await waitUntil { daemon.viewed.count == 4 }
+        #expect(daemon.viewed.suffix(2).allSatisfy { $0.authorship == .theirs })
     }
 
     @Test("nothing is marked viewed against an older daemon, before connecting, or with no repository")
@@ -89,7 +75,7 @@ struct AppStateTabTests {
         await state.refreshOnce()
         state.selectedTab = .theirs
         state.panelClosed()
-        #expect(state.tabWorktrees.map(\.branchName) == ["main"])
+        #expect(state.tabRows.map(\.worktree.branchName) == ["main"])
 
         let empty = AppState(connect: { StubDaemon() })
         await empty.refreshOnce()

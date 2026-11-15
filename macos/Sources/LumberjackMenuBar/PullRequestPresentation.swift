@@ -20,9 +20,6 @@ enum RowDot: Equatable {
 }
 
 enum PullRequestPresentation {
-    static let largeThreshold: Int64 = 1000
-    static let largeDividerLabel = "Large or blocked · 1,000+ lines"
-
     static func isSplit(_ worktrees: [Worktree]) -> Bool {
         worktrees.contains { $0.authorship != .unspecified }
     }
@@ -111,10 +108,6 @@ enum PullRequestPresentation {
 
     static func sizeTitle(_ pr: Lumberjack_V1_PullRequestState) -> String {
         "\(grouped(lines(pr))) lines changed · ranks as \(grouped(Int(pr.score)))"
-    }
-
-    static func largeDividerIndex(_ theirs: [Worktree]) -> Int? {
-        theirs.firstIndex { $0.hasPullRequest && $0.pullRequest.score >= largeThreshold }
     }
 
     static func subtitle(_ worktree: Worktree) -> String? {

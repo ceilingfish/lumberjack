@@ -11,7 +11,7 @@ enum ConnectionState: Equatable {
 }
 
 /// Drives the menu bar UI: connects to the daemon, keeps the repository list
-/// and the selected repository's worktrees up to date, and derives
+/// and every repository's worktrees up to date, and derives
 /// clone/delete notifications from what changed between refreshes.
 ///
 /// This polls on an interval rather than consuming a server-streamed feed.
@@ -19,59 +19,51 @@ enum ConnectionState: Equatable {
 /// and worktree events from the daemon as they happen; once it lands, this
 /// class's refresh loop should be replaced by consuming that stream directly
 /// instead of re-polling `ListRepositories`/`ListWorktrees` on a timer. The
-/// public surface (`connectionState`, `repositories`, `worktrees`,
-/// `selectedRepository`) is written so that swap only touches `refreshLoop()`.
+/// public surface (`connectionState`, `repositories`, `rows`) is written so that swap only touches `refreshLoop()`.
 @MainActor
 final class AppState: ObservableObject {
     @Published private(set) var connectionState: ConnectionState = .connecting
     @Published private(set) var repositories: [Lumberjack_V1_Repository] = []
-    @Published private(set) var worktrees: [Lumberjack_V1_Worktree] = []
-    /// False from the moment a repository is selected until its worktrees have
-    /// been fetched at least once, so the UI can show a spinner instead of
-    /// prematurely claiming "No worktrees" during the first poll.
+    @Published private(set) var rows: [UnifiedRow] = []
     @Published private(set) var worktreesLoaded: Bool = false
-    /// Worktree count per repository (keyed by local path), so the repository
-    /// switcher can show "N branches" for every repo, not just the selected
-    /// one. Populated as a side effect of the same per-repo listing the diff
-    /// notifier already performs each poll.
-    @Published private(set) var worktreeCountsByRepo: [String: Int] = [:]
-    /// True while a "Sync all" fan-out is in flight, so the footer can show
-    /// progress and avoid launching overlapping syncs.
     @Published private(set) var syncing = false
-    @Published var selectedRepository: String? {
-        didSet {
-            guard selectedRepository != oldValue else { return }
-            markViewed(repository: oldValue, tab: selectedTab)
-            worktrees = []
-            worktreesLoaded = false
-        }
-    }
     @Published var selectedTab: Authorship = .mine {
         didSet {
             guard selectedTab != oldValue else { return }
-            markViewed(repository: selectedRepository, tab: oldValue)
+            markViewed(tab: oldValue)
         }
     }
 
-    var tabWorktrees: [Lumberjack_V1_Worktree] {
-        PullRequestPresentation.worktrees(in: selectedTab, of: worktrees)
+    @Published private(set) var filters: [Authorship: PullRequestFilter]
+
+    var filter: PullRequestFilter {
+        get { filters[selectedTab] ?? PullRequestFilter() }
+        set { setFilter(newValue, for: selectedTab) }
     }
+
+    private func setFilter(_ filter: PullRequestFilter, for tab: Authorship) {
+        guard filters[tab] != filter else { return }
+        filters[tab] = filter
+        FilterStore.save(filter, for: tab, to: defaults)
+    }
+
+    var tabRows: [UnifiedRow] {
+        UnifiedList.rows(in: selectedTab, of: rows)
+    }
+
+    var worktrees: [Lumberjack_V1_Worktree] { rows.map(\.worktree) }
 
     func panelClosed() {
-        markViewed(repository: selectedRepository, tab: selectedTab)
+        markViewed(tab: selectedTab)
     }
 
-    private func markViewed(repository: String?, tab: Authorship) {
-        guard let repository, let client, PullRequestPresentation.isSplit(worktrees) else { return }
-        let repo = repositories.first { $0.localPath == repository }
-        let seenThrough = repo.flatMap { $0.hasLastSyncedAt ? $0.lastSyncedAt : nil }
-        Task { try? await client.markViewed(repository: repository, authorship: tab, seenThrough: seenThrough) }
-    }
-
-    /// The currently selected repository object, for details the worktree list
-    /// needs (GitHub owner/host to build pull-request URLs).
-    var selectedRepositoryObject: Lumberjack_V1_Repository? {
-        repositories.first { $0.localPath == selectedRepository }
+    private func markViewed(tab: Authorship) {
+        guard let client else { return }
+        for repo in repositories where PullRequestPresentation.isSplit(worktreesByRepo[repo.localPath] ?? []) {
+            let seenThrough = repo.hasLastSyncedAt ? repo.lastSyncedAt : nil
+            let path = repo.localPath
+            Task { try? await client.markViewed(repository: path, authorship: tab, seenThrough: seenThrough) }
+        }
     }
 
     private let pollInterval: UInt64
@@ -82,14 +74,22 @@ final class AppState: ObservableObject {
     /// name (not just the path) means a deleted worktree's branch is still
     /// known once it disappears from the current listing.
     private var knownWorktrees: [String: [String: String]] = [:]
+    private var worktreesByRepo: [String: [Lumberjack_V1_Worktree]] = [:]
     private var loopTask: Task<Void, Never>?
+    private let defaults: UserDefaults
 
     init(
         pollIntervalSeconds: UInt64 = 2,
+        defaults: UserDefaults = .standard,
         connect: @escaping () throws -> any DaemonConnection = { try DaemonClient(socketPath: SocketPath.resolve()) }
     ) {
         self.pollInterval = pollIntervalSeconds
+        self.defaults = defaults
         self.connect = connect
+        self.filters = [
+            .mine: FilterStore.load(.mine, from: defaults),
+            .theirs: FilterStore.load(.theirs, from: defaults),
+        ]
     }
 
     func start() {
@@ -153,28 +153,26 @@ final class AppState: ObservableObject {
         connectionState = .connected
 
         do {
-            let repos = try await client.listRepositories()
-            repositories = repos.sorted { $0.githubName < $1.githubName }
-            if selectedRepository == nil {
-                selectedRepository = repos.first?.localPath
+            let repos = try await client.listRepositories().sorted { $0.githubName < $1.githubName }
+            repositories = repos
+            if !repos.isEmpty {
+                for (tab, filter) in filters {
+                    setFilter(filter.keeping(repositories: repos.map(\.localPath)), for: tab)
+                }
             }
 
             pruneKnownWorktrees(tracking: repos.map(\.localPath))
 
             let tracked = Set(repos.map(\.localPath))
-            var counts = worktreeCountsByRepo.filter { tracked.contains($0.key) }
-            let ordered =
-                repos.filter { $0.localPath == selectedRepository } + repos.filter { $0.localPath != selectedRepository }
-            for repo in ordered {
+            var byRepo = worktreesByRepo.filter { tracked.contains($0.key) }
+            for repo in repos {
                 guard let current = try? await client.listWorktrees(repository: repo.localPath) else { continue }
-                counts[repo.localPath] = current.count
+                byRepo[repo.localPath] = current
                 diffAndNotify(repository: repo.githubName, worktrees: current, key: repo.localPath)
-                if repo.localPath == selectedRepository {
-                    worktrees = current
-                    worktreesLoaded = true
-                }
             }
-            worktreeCountsByRepo = counts
+            worktreesByRepo = byRepo
+            rows = UnifiedList.merge(repositories: repos, worktrees: byRepo)
+            worktreesLoaded = true
         } catch {
             // A transient RPC failure between two successful health checks;
             // leave the last-known-good data on screen and retry next tick.
