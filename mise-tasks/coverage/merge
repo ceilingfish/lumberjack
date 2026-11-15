@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#MISE description="Merge coverage-cli.lcov and coverage-osx.lcov into coverage.lcov"
+set -euo pipefail
+
+for report in coverage-cli.lcov coverage-osx.lcov; do
+  if [ ! -f "$report" ]; then
+    echo "error: $report not found — run 'mise run cli:coverage' and 'mise run osx:coverage' first" >&2
+    exit 1
+  fi
+done
+
+cat coverage-cli.lcov coverage-osx.lcov > coverage.lcov
+echo "wrote coverage.lcov"

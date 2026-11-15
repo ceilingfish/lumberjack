@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+#MISE description="Run osx:test and export its Swift coverage to coverage-osx.lcov"
+#MISE depends=["osx:test"]
+set -euo pipefail
+
+repo_root="$PWD"
+output="$repo_root/coverage-osx.lcov"
+
+cd macos
+
+profdata=".build/debug/codecov/default.profdata"
+binary=".build/debug/LumberjackMenuBarPackageTests.xctest/Contents/MacOS/LumberjackMenuBarPackageTests"
+
+# Excludes .build/ (dependency checkouts and SwiftPM's derived runner.swift),
+# Tests/ and Generated/; sed rewrites llvm-cov's absolute paths repo-relative,
+# to match the Go half.
+xcrun llvm-cov export \
+  -format=lcov \
+  -instr-profile "$profdata" \
+  "$binary" \
+  --ignore-filename-regex='(\.build|Tests|Generated)/' \
+  | sed "s|^SF:$repo_root/|SF:|" > "$output"
+
+echo "wrote $output ($(grep -c '^SF:' "$output") files)"

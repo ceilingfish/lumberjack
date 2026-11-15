@@ -9,9 +9,7 @@ runs:
       with:
         pattern: coverage-*
         merge-multiple: true
-    - run: mise run coverage:gate-test
-      shell: bash
-    - run: mise run coverage:check
+    - run: mise run coverage:ci-check
       shell: bash
     # Uploaded on failure too — that is when you need the report.
     - if: always()

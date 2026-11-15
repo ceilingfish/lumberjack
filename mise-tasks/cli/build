@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build the lumberjack binary into bin/"
+set -euo pipefail
+
+go build -o bin/lumberjack .

@@ -1,26 +1,17 @@
 #!/usr/bin/env bash
-#
-# Convert the Go coverage profile from `cli:test` into lcov, for merging with
-# the Swift half (scripts/osx-lcov.sh) in scripts/coverage-gate.ps1.
-#
+#MISE description="Run cli:test and convert its Go profile to coverage-cli.lcov"
+#MISE depends=["cli:test"]
+set -euo pipefail
+
+profile=coverage.out
+output=coverage-cli.lcov
+
+module="$(awk '/^module /{ print $2; exit }' go.mod)"
+
 # The Go profile counts statements per block, lcov counts lines: each block's
 # count is applied to every line it spans, highest wins where blocks overlap.
 # Import paths are rewritten repo-relative to match the Swift half. Sorting goes
 # through sort(1) because awk's asorti() is absent from the BSD awk on macOS.
-#
-# Usage: scripts/go-lcov.sh [profile] [output]   # coverage.out -> coverage-go.lcov
-set -euo pipefail
-
-profile="${1:-coverage.out}"
-output="${2:-coverage-go.lcov}"
-
-if [ ! -f "$profile" ]; then
-  echo "error: $profile not found — run 'mise run cli:test' first" >&2
-  exit 1
-fi
-
-module="$(awk '/^module /{ print $2; exit }' go.mod)"
-
 awk -v module="$module" -v OFS='\t' '
 /^mode:/    { next }
 /\.pb\.go:/ { next }   # generated protobuf/gRPC stubs

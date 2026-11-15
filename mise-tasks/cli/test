@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Run the Go test suite, writing the coverage.out profile cli:coverage reads"
+set -euo pipefail
+
+go test -covermode=atomic -coverprofile=coverage.out ./...

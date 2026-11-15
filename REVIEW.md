@@ -13,49 +13,35 @@ in [AGENTS.md](AGENTS.md). In particular:
 - `main.go` stays a one-liner and `cmd/` files stay thin — no business logic in
   Cobra `RunE` handlers.
 - One file per command under `cmd/`, mirroring the command hierarchy.
-- Non-trivial task logic lives in `scripts/`, not inline in `.mise.toml`.
+- Task logic lives in a mise file task under `mise-tasks/`, not inline in `.mise.toml`.
 - Tests live next to the code they test (`_test.go` in the same package).
 
 ## 2. Format & lint
 
-The two codebases are formatted and linted separately — `cli:*` for the Go
-CLI/daemon, `osx:*` for the Swift menu-bar app. Run the pair for whichever the
-branch touches, and resolve any issues:
+The two codebases are formatted and linted separately — `cli:format` for the Go
+CLI/daemon (which also covers the SQL migrations and protobuf), `osx:format` for
+the Swift menu-bar app. Each formats in place and then lints; pass `--check` to
+fail on a diff without writing, as CI does. Run whichever the branch touches,
+and resolve any issues:
 
 ```sh
-mise run cli:format    # Go
-mise run cli:lint
+mise run cli:format            # Go, SQL migrations, protobuf
+mise run cli:format --check    # what CI runs, including buf breaking against main
 
-mise run osx:format    # Swift, under macos/
-mise run osx:lint
+mise run osx:format            # Swift, under macos/
+
+mise run format --check        # both at once
 ```
 
-If the current branch changes any SQL files, also run the SQL formatter and
-linter and resolve any issues:
+If the current branch changes any protobuf files, also regenerate the stubs:
 
 ```sh
-if git diff --name-only main...HEAD | grep -q '\.sql$'; then
-  mise run format-sql
-  mise run lint-sql
-fi
-```
-
-If the current branch changes any protobuf files, also run the protobuf
-formatter, linter, breaking-change check, and regenerate the stubs, resolving
-any issues:
-
-```sh
-if git diff --name-only main...HEAD | grep -q '\.proto$'; then
-  mise run format-proto
-  mise run lint-proto
-  mise run lint-proto-breaking
-  mise run generate   # commit the regenerated stubs under pkg/client/
-fi
+mise run proto:generate-clients   # commit the regenerated Go and Swift stubs
 ```
 
 **All protobuf changes must be backward compatible.** The gRPC API is the
 contract between the CLI and the daemon, which may be running different
-versions, so `mise run lint-proto-breaking` must pass — it checks the proto
+versions, so `mise run proto:format --check` must pass — it checks the proto
 against `main` and fails on any wire-incompatible change. Evolve the API
 additively: add new fields, messages, and RPCs; never renumber or reuse field
 tags, change a field's type, or remove/rename existing fields (reserve retired
@@ -69,14 +55,17 @@ Run the test suite and ensure **all tests pass**:
 ```sh
 mise run cli:test    # Go
 mise run osx:test    # Swift, under macos/
+mise run test        # both
 ```
 
 ## 4. Coverage
 
-Run the coverage task and ensure all new code meets the coverage standard. Command must pass and ensure that the coverage requirements are met:
+Run the coverage tasks and ensure all new code meets the coverage standard. The check must pass:
 
 ```sh
-mise run coverage
+mise run cli:coverage
+mise run osx:coverage
+mise run coverage:ci-check
 ```
 
 **The floor is per package, not a global average**, so a well-covered package
@@ -88,14 +77,14 @@ exists to catch.
 
 It covers both codebases, with the Swift app treated as a package
 (`macos/Sources/LumberjackMenuBar`) alongside the Go ones. Both halves reach
-the gate as lcov, produced by `cli:lcov` and `osx:lcov`; the per-language
+the gate as lcov, produced by `cli:coverage` and `osx:coverage`; the per-language
 subtotals and merged total the run prints are information only, not the gate.
 
 The threshold is the gate's `-Threshold` argument, so it can be ratcheted
 upward as packages are brought up to standard:
 
 ```sh
-pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 80   # what `mise run coverage` runs today
+pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 95   # what `mise run coverage:ci-check` runs today
 ```
 
 It sits below the 95% target, and each coverage child of issue #6 raises it as
@@ -112,10 +101,9 @@ it, and prefer making code testable over exempting it. A leading `/` anchors a
 pattern to the repository root, a pattern with no `/` matches a base name at
 any depth, and `**` matches zero or more path segments.
 
-The gate's own logic is tested — run `mise run coverage:gate-test` (Pester)
-when changing it. Those tests are required, but **the PowerShell tooling itself
-is not measured for coverage**: only the Go and Swift halves are gated, and no
-`.ps1` file should appear as a package or in `coverage.lcov`.
+**The PowerShell tooling itself is not measured for coverage**: only the Go
+and Swift halves are gated, and no `.ps1` file should appear as a package or in
+`coverage.lcov`.
 
 ## 5. Stylistic review
 

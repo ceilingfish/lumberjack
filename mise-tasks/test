@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Test both candidates: cli:test and osx:test"
+#MISE depends=["cli:test", "osx:test"]

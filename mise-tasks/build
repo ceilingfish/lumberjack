@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+#MISE description="Build both candidates: cli:build and osx:build"
+#MISE depends=["cli:build", "osx:build"]

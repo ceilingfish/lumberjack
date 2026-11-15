@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-#
-# Run the Swift test suite with coverage enabled, leaving the profile data for
-# `scripts/osx-lcov.sh` to read (see the `coverage` mise task).
-#
+#MISE description="Run the Swift test suite with coverage, emitting the data osx:coverage reads"
+#MISE dir="macos"
+set -euo pipefail
+
 # swift-testing's Testing.framework ships with a full Xcode, not with the
 # Command Line Tools. A machine with both installed but `xcode-select` pointed
 # at the CLT fails with "no such module 'Testing'" — the tests are fine, the
@@ -10,11 +10,6 @@
 # to `sudo xcode-select -s`, fall back to a full Xcode when the selected
 # developer directory has no Swift Testing support. CI runners already select a
 # full Xcode, so this is a no-op there.
-set -euo pipefail
-
-cd "$(dirname "${BASH_SOURCE[0]}")/../macos"
-
-# Relative to a developer directory, the macOS Testing.framework lives here.
 testing_framework="Platforms/MacOSX.platform/Developer/Library/Frameworks/Testing.framework"
 
 developer_dir="$(xcode-select -p 2>/dev/null || true)"

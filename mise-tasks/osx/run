@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Launch the built LumberjackMenuBar.app"
+set -euo pipefail
+
+app=macos/.build/app/LumberjackMenuBar.app
+
+if [ ! -d "$app" ]; then
+  echo "error: $app not found — run 'mise run osx:build' first" >&2
+  exit 1
+fi
+
+exec open "$app"
