@@ -21,9 +21,9 @@ It runs as two pieces:
 Lumberjack shells out to two host tools rather than reimplementing them, so both
 must be installed and on your `PATH`:
 
-| Tool | Why | Check |
-| --- | --- | --- |
-| **[git](https://git-scm.com)** | all worktree operations | `git --version` |
+| Tool                                                                | Why                                                  | Check            |
+| ------------------------------------------------------------------- | ---------------------------------------------------- | ---------------- |
+| **[git](https://git-scm.com)**                                      | all worktree operations                              | `git --version`  |
 | **[GitHub CLI (`gh`)](https://cli.github.com)** — **authenticated** | GitHub API access; Lumberjack reuses your `gh` login | `gh auth status` |
 
 Authenticate `gh` before using Lumberjack:
@@ -68,8 +68,8 @@ separate `homebrew-lumberjack` repo.
 The formula **builds from source** (it pulls in Homebrew's `go` as a build-only
 dependency, and `gh` as a runtime one). That is deliberate: a binary you compile
 locally never carries the `com.apple.quarantine` attribute, so Gatekeeper has
-nothing to block — no *"cannot be opened because the developer cannot be
-verified"*, no `xattr -d` dance, no `spctl` override. It costs about half a
+nothing to block — no _"cannot be opened because the developer cannot be
+verified"_, no `xattr -d` dance, no `spctl` override. It costs about half a
 minute of build time on first install.
 
 Homebrew installs the CLI only. Register the daemon — a per-user LaunchAgent, no
@@ -216,26 +216,26 @@ That's the whole setup. New PRs get worktrees; closed PRs get theirs cleaned up.
 
 Run `lumberjack <command> --help` for full details on any of these.
 
-| Command | Does |
-| --- | --- |
-| `lumberjack doctor` | Check `git`/`gh` prerequisites (no daemon needed). |
-| `lumberjack init [path]` | Start tracking the repository at `path` (default: current dir). |
-| `lumberjack delete NAME` | Stop tracking a repository — removes it and its worktrees from the database only (nothing on disk or GitHub). |
-| `lumberjack list` | List every tracked repository. |
-| `lumberjack status [--repository NAME]` | Last-sync detail for the repo in the current dir, or the named one. |
-| `lumberjack sync [--repository NAME]` | Reconcile worktrees for the repo in the current dir, or the named one, now. Runs the repo's setup steps against every worktree it newly tracks — created or adopted. |
-| `lumberjack sync-all` | Sync **all** tracked repositories. |
-| `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR] [--dry-run] [--lock-strategy STRATEGY]` | Move worktrees that aren't in their idiomatic location (`<worktrees dir>/<name>-<branch slug>`) back into it. `--worktree` narrows it to one; `--dry-run` reports without moving. A locked worktree is prompted about — unlock it for the move and lock it again (default), skip it, delete the lock, or abort — and `--lock-strategy skip\|unlock\|delete\|abort` answers for all of them up front. |
-| `lumberjack worktrees [--repository NAME]` | List worktrees for the repo in the current dir, or the named one. |
-| `lumberjack worktree add BRANCH [--repository NAME]` | Create a worktree for `BRANCH` in the conventional location and run the repo's setup steps. Creates the branch off the default branch if it doesn't exist yet. |
-| `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
-| `lumberjack set-login [LOGIN] [--repository NAME]` | Set the `gh` account for the repo in the current dir, or the named one. |
-| `lumberjack setup-steps add/remove/list COMMAND` | Manage the current worktree's `.lumberjack.yml` run-command setup steps. |
-| `lumberjack setup-steps run` | Run the current worktree's setup steps now — inherits the main checkout's `.lumberjack.yml` unless the worktree has its own. Run-commands matching the default branch's config run straight away; a locally edited config's commands are shown and confirmed first. |
-| `lumberjack setup-steps trust` | Record this worktree's `.lumberjack.yml` checksum as one you have agreed to run, so it stops asking. Every trusted version stays trusted. |
-| `lumberjack install [--cli-only\|--daemon-only] [--force] [--autocomplete-shell <shell>\|--no-autocomplete]` | Install the CLI and/or daemon (see [Installation](#installation)). |
-| `lumberjack uninstall [--cli-only\|--daemon-only]` | Reverse `install`. |
-| `lumberjack daemon start/stop/status` | Manage the daemon's lifecycle once installed. |
+| Command                                                                                                      | Does                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lumberjack doctor`                                                                                          | Check `git`/`gh` prerequisites (no daemon needed).                                                                                                                                                                                                                                                                                                                                                   |
+| `lumberjack init [path]`                                                                                     | Start tracking the repository at `path` (default: current dir).                                                                                                                                                                                                                                                                                                                                      |
+| `lumberjack delete NAME`                                                                                     | Stop tracking a repository — removes it and its worktrees from the database only (nothing on disk or GitHub).                                                                                                                                                                                                                                                                                        |
+| `lumberjack list`                                                                                            | List every tracked repository.                                                                                                                                                                                                                                                                                                                                                                       |
+| `lumberjack status [--repository NAME]`                                                                      | Last-sync detail for the repo in the current dir, or the named one.                                                                                                                                                                                                                                                                                                                                  |
+| `lumberjack sync [--repository NAME]`                                                                        | Reconcile worktrees for the repo in the current dir, or the named one, now. Runs the repo's setup steps against every worktree it newly tracks — created or adopted.                                                                                                                                                                                                                                 |
+| `lumberjack sync-all`                                                                                        | Sync **all** tracked repositories.                                                                                                                                                                                                                                                                                                                                                                   |
+| `lumberjack tidy [--repository NAME] [--worktree BRANCH_OR_DIR] [--dry-run] [--lock-strategy STRATEGY]`      | Move worktrees that aren't in their idiomatic location (`<worktrees dir>/<name>-<branch slug>`) back into it. `--worktree` narrows it to one; `--dry-run` reports without moving. A locked worktree is prompted about — unlock it for the move and lock it again (default), skip it, delete the lock, or abort — and `--lock-strategy skip\|unlock\|delete\|abort` answers for all of them up front. |
+| `lumberjack worktrees [--repository NAME]`                                                                   | List worktrees for the repo in the current dir, or the named one.                                                                                                                                                                                                                                                                                                                                    |
+| `lumberjack worktree add BRANCH [--repository NAME]`                                                         | Create a worktree for `BRANCH` in the conventional location and run the repo's setup steps. Creates the branch off the default branch if it doesn't exist yet.                                                                                                                                                                                                                                       |
+| `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]`                                               | Delete a worktree (prompts if it would lose commits; `--force` to skip).                                                                                                                                                                                                                                                                                                                             |
+| `lumberjack set-login [LOGIN] [--repository NAME]`                                                           | Set the `gh` account for the repo in the current dir, or the named one.                                                                                                                                                                                                                                                                                                                              |
+| `lumberjack setup-steps add/remove/list COMMAND`                                                             | Manage the current worktree's `.lumberjack.yml` run-command setup steps.                                                                                                                                                                                                                                                                                                                             |
+| `lumberjack setup-steps run`                                                                                 | Run the current worktree's setup steps now — inherits the main checkout's `.lumberjack.yml` unless the worktree has its own. Run-commands matching the default branch's config run straight away; a locally edited config's commands are shown and confirmed first.                                                                                                                                  |
+| `lumberjack setup-steps trust`                                                                               | Record this worktree's `.lumberjack.yml` checksum as one you have agreed to run, so it stops asking. Every trusted version stays trusted.                                                                                                                                                                                                                                                            |
+| `lumberjack install [--cli-only\|--daemon-only] [--force] [--autocomplete-shell <shell>\|--no-autocomplete]` | Install the CLI and/or daemon (see [Installation](#installation)).                                                                                                                                                                                                                                                                                                                                   |
+| `lumberjack uninstall [--cli-only\|--daemon-only]`                                                           | Reverse `install`.                                                                                                                                                                                                                                                                                                                                                                                   |
+| `lumberjack daemon start/stop/status`                                                                        | Manage the daemon's lifecycle once installed.                                                                                                                                                                                                                                                                                                                                                        |
 
 `--repository NAME` resolves against a repository's name or its local path; omit it to target the tracked repository at the current working directory.
 
@@ -271,12 +271,12 @@ the install still succeeds and prints the line to add by hand.
 
 To wire it up by hand, add the line for your shell:
 
-| shell | rc file | line |
-|---|---|---|
-| zsh | `~/.zshrc` | `eval "$(lumberjack completion zsh)"` |
-| bash | `~/.bash_profile` or `~/.bashrc` | `eval "$(lumberjack completion bash)"` |
-| fish | `~/.config/fish/config.fish` | `lumberjack completion fish \| source` |
-| powershell | `$PROFILE` | `lumberjack completion powershell \| Out-String \| Invoke-Expression` |
+| shell      | rc file                          | line                                                                  |
+| ---------- | -------------------------------- | --------------------------------------------------------------------- |
+| zsh        | `~/.zshrc`                       | `eval "$(lumberjack completion zsh)"`                                 |
+| bash       | `~/.bash_profile` or `~/.bashrc` | `eval "$(lumberjack completion bash)"`                                |
+| fish       | `~/.config/fish/config.fish`     | `lumberjack completion fish \| source`                                |
+| powershell | `$PROFILE`                       | `lumberjack completion powershell \| Out-String \| Invoke-Expression` |
 
 From a source checkout with no installed binary, the `shell-completion` mise
 task prints the same script via `go run`:
@@ -330,3 +330,39 @@ few seconds rather than consuming a real-time push stream, because the
 daemon-side `Watch` RPC it's meant to consume (issue #13) has not landed
 yet. Once #13 ships, the app's refresh loop should be switched over to
 subscribe to that stream instead — see `macos/README.md` for detail.
+
+---
+
+## Building
+
+The repository uses mise to manage tasks
+
+### Building
+
+You can build the OSX or CLI tool using the mise build commands:
+
+```
+mise run cli:build
+mise run osx:build
+mise run build # Builds the OSX widget and CLI
+```
+
+### Formatting
+
+To check that the build meets all requirements you can use the `format` command:
+
+```
+mise run cli:format [ --check ]
+mise run osx:format [ --check ]
+mise run format # Checks the formatting of both OSX and CLI
+```
+
+### Testing
+
+Runs the unit tests for CLI or OSX with
+
+```
+mise run cli:test
+mise run osx:test
+mise run test # Run all the OSX and CLI tests
+```
