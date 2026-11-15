@@ -204,10 +204,7 @@ func (c *Client) PullStates(ctx context.Context, repo RepoInfo, numbers []int64)
 }
 
 func (c *Client) pullStateBatch(ctx context.Context, repo RepoInfo, numbers []int64, into map[int64]PullState) error {
-	raw, err := c.run(ctx, "", "api", "graphql", "--hostname", repo.Host, "-f", "query="+pullStateQuery(repo, numbers))
-	if err != nil {
-		return err
-	}
+	raw, runErr := c.run(ctx, "", "api", "graphql", "--hostname", repo.Host, "-f", "query="+pullStateQuery(repo, numbers))
 	var resp struct {
 		Data struct {
 			Repository map[string]*gqlPull `json:"repository"`
@@ -217,7 +214,20 @@ func (c *Client) pullStateBatch(ctx context.Context, repo RepoInfo, numbers []in
 		} `json:"errors"`
 	}
 	if err := json.Unmarshal([]byte(raw), &resp); err != nil {
+		if runErr != nil {
+			return runErr
+		}
 		return fmt.Errorf("parsing pull request states: %w", err)
+	}
+	found := 0
+	for _, p := range resp.Data.Repository {
+		if p != nil {
+			into[p.Number] = p.state()
+			found++
+		}
+	}
+	if found > 0 {
+		return nil
 	}
 	if len(resp.Errors) > 0 {
 		msgs := make([]error, len(resp.Errors))
@@ -226,10 +236,5 @@ func (c *Client) pullStateBatch(ctx context.Context, repo RepoInfo, numbers []in
 		}
 		return fmt.Errorf("fetching pull request states: %w", errors.Join(msgs...))
 	}
-	for _, p := range resp.Data.Repository {
-		if p != nil {
-			into[p.Number] = p.state()
-		}
-	}
-	return nil
+	return runErr
 }

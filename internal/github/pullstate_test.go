@@ -112,6 +112,19 @@ func TestPullStatesBatches(t *testing.T) {
 	}
 }
 
+func TestPullStatesKeepsPartialData(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `{"data":{"repository":{"pr1":{"number":1},"pr2":null}},"errors":[{"message":"gone"}]}`, errors.New("exit status 1")
+	})
+	states, err := c.PullStates(context.Background(), RepoInfo{}, []int64{1, 2})
+	if err != nil {
+		t.Fatalf("PullStates: %v", err)
+	}
+	if _, ok := states[1]; !ok || len(states) != 1 {
+		t.Errorf("states = %v, want only PR 1", states)
+	}
+}
+
 func TestPullStatesFailures(t *testing.T) {
 	cases := map[string]func(...string) (string, error){
 		"gh":   func(...string) (string, error) { return "", errors.New("HTTP 502") },

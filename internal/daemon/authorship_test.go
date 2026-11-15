@@ -327,6 +327,25 @@ func TestAdoptedBranchAuthorshipFromCommits(t *testing.T) {
 	}
 }
 
+func TestWorktreeWithoutAPRRowIsDecidedByCommits(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	repo.Login = "me"
+	wt := h.syncedWorktree(t, repo)
+	pr := int64(99)
+	if err := h.db.SetWorktreePR(context.Background(), wt.ID, &pr, "feature/x"); err != nil {
+		t.Fatal(err)
+	}
+	h.git.dirty[wt.DirectoryPath] = true
+	h.git.remoteSHAs = map[string]string{"feature/x": "abc"}
+	h.gh.compare = map[string]github.CommitAuthors{"abc": {Logins: []string{"me"}}}
+	h.seedSync(t, repo)
+
+	if got := authorshipByBranch(t, h, repo); got["feature/x"] != schema.AuthorshipMine {
+		t.Errorf("authorship = %q, want mine from its commits", got["feature/x"])
+	}
+}
+
 func TestCommitAuthorsAreCachedOnTheHeadSHA(t *testing.T) {
 	h := newHarness(t)
 	repo := h.unlinkedWorktree(t, "feature/x")

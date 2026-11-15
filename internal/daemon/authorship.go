@@ -65,23 +65,39 @@ func (s *Service) commitsVerdict(repo *schema.Repository, branch string, ids aut
 	return &verdict
 }
 
-func needsCommitAuthors(wt schema.Worktree) bool {
-	return wt.GithubPRNumber == nil && wt.AuthorshipOverride == nil &&
-		wt.Origin != schema.OriginLocal && wt.BranchName != ""
+func needsCommitAuthors(wt schema.Worktree, prs map[int64]schema.PullRequest) bool {
+	if wt.GithubPRNumber != nil {
+		if _, ok := prs[*wt.GithubPRNumber]; ok {
+			return false
+		}
+	}
+	return wt.AuthorshipOverride == nil && wt.Origin != schema.OriginLocal && wt.BranchName != ""
+}
+
+func (s *Service) branchesNeedingAuthors(ctx context.Context, repo *schema.Repository, stored []schema.Worktree) []string {
+	prs, err := s.db.PullRequests(ctx, repo.ID)
+	if err != nil {
+		log.Printf("listing pull requests of %s: %v", displayName(repo), err)
+		return nil
+	}
+	var branches []string
+	for _, wt := range stored {
+		if needsCommitAuthors(wt, prs) {
+			branches = append(branches, wt.BranchName)
+		}
+	}
+	return branches
 }
 
 func (s *Service) refreshBranchAuthors(ctx context.Context, repo *schema.Repository, stored []schema.Worktree) {
 	base := ""
-	for _, wt := range stored {
-		if !needsCommitAuthors(wt) {
-			continue
-		}
-		sha, err := s.git.RemoteBranchSHA(ctx, repo.LocalPath, repo.DefaultRemote, wt.BranchName)
+	for _, branch := range s.branchesNeedingAuthors(ctx, repo, stored) {
+		sha, err := s.git.RemoteBranchSHA(ctx, repo.LocalPath, repo.DefaultRemote, branch)
 		if err != nil {
-			log.Printf("resolving %s on %s: %v", wt.BranchName, displayName(repo), err)
+			log.Printf("resolving %s on %s: %v", branch, displayName(repo), err)
 			continue
 		}
-		s.branchHeads.Store(branchKey(repo, wt.BranchName), sha)
+		s.branchHeads.Store(branchKey(repo, branch), sha)
 		if _, cached := s.commitAuthors.Load(sha); sha == "" || cached {
 			continue
 		}
@@ -93,7 +109,7 @@ func (s *Service) refreshBranchAuthors(ctx context.Context, repo *schema.Reposit
 		}
 		authors, err := s.gh.CompareCommitAuthors(ctx, repoInfo(repo), base, sha)
 		if err != nil {
-			log.Printf("listing commit authors of %s on %s: %v", wt.BranchName, displayName(repo), err)
+			log.Printf("listing commit authors of %s on %s: %v", branch, displayName(repo), err)
 			continue
 		}
 		s.commitAuthors.Store(sha, authors)

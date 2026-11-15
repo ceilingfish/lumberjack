@@ -89,7 +89,7 @@ func (c *Client) exec(ctx context.Context, dir string, args ...string) (string, 
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
+		return strings.TrimSpace(stdout.String()), fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
