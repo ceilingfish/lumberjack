@@ -103,6 +103,25 @@ struct AppStateRefreshTests {
         #expect(state.worktreeCountsByRepo == ["/tmp/repo": 1])
     }
 
+    @Test("one repository whose worktree listing fails does not stop the others loading")
+    func oneFailingRepositoryDoesNotBlockTheRest() async {
+        let daemon = StubDaemon()
+        daemon.repositories = [
+            stubRepository(name: "broken", path: "/tmp/broken"),
+            stubRepository(name: "healthy", path: "/tmp/healthy"),
+        ]
+        daemon.worktreesByRepository = ["/tmp/healthy": [stubWorktree(branch: "main", path: "/tmp/healthy/main")]]
+        daemon.failingRepositories = ["/tmp/broken"]
+        let state = AppState(connect: { daemon })
+        state.selectedRepository = "/tmp/healthy"
+
+        await state.refreshOnce()
+
+        #expect(state.worktreesLoaded)
+        #expect(state.worktrees.map(\.branchName) == ["main"])
+        #expect(state.worktreeCountsByRepo == ["/tmp/healthy": 1])
+    }
+
     @Test("a repository listing that fails leaves the connection reported as up")
     func repositoryFailureKeepsTheConnectionUp() async {
         let daemon = StubDaemon()

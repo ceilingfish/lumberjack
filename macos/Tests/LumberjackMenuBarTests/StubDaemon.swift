@@ -10,6 +10,7 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
     var healthError: (any Error)?
     var listRepositoriesError: (any Error)?
     var listWorktreesError: (any Error)?
+    var failingRepositories: Set<String> = []
     var syncedRepositories: [String] = []
     var closeCount = 0
     var viewed: [(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?)] = []
@@ -26,6 +27,7 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
 
     func listWorktrees(repository: String) async throws -> [Lumberjack_V1_Worktree] {
         if let listWorktreesError { throw listWorktreesError }
+        if failingRepositories.contains(repository) { throw StubDaemonError() }
         return worktreesByRepository[repository] ?? []
     }
 

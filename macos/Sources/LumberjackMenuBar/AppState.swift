@@ -161,9 +161,12 @@ final class AppState: ObservableObject {
 
             pruneKnownWorktrees(tracking: repos.map(\.localPath))
 
-            var counts: [String: Int] = [:]
-            for repo in repos {
-                let current = try await client.listWorktrees(repository: repo.localPath)
+            let tracked = Set(repos.map(\.localPath))
+            var counts = worktreeCountsByRepo.filter { tracked.contains($0.key) }
+            let ordered =
+                repos.filter { $0.localPath == selectedRepository } + repos.filter { $0.localPath != selectedRepository }
+            for repo in ordered {
+                guard let current = try? await client.listWorktrees(repository: repo.localPath) else { continue }
                 counts[repo.localPath] = current.count
                 diffAndNotify(repository: repo.githubName, worktrees: current, key: repo.localPath)
                 if repo.localPath == selectedRepository {
