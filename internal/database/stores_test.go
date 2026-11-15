@@ -553,7 +553,7 @@ func TestReplaceOpenPRs(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
 	_ = c.CreateRepository(ctx, repo)
-	now := time.Now()
+	now := time.Now().Truncate(time.Microsecond)
 
 	err := c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{
 		{Number: 1, Branch: "feature/one", Author: "alice"},
@@ -612,7 +612,7 @@ func TestReplaceOpenPRsKeepsEarlierDeletionTime(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
 	_ = c.CreateRepository(ctx, repo)
-	now := time.Now()
+	now := time.Now().Truncate(time.Microsecond)
 
 	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, now)
 	_ = c.ReplaceOpenPRs(ctx, repo.ID, nil, now.Add(time.Hour))
@@ -821,7 +821,7 @@ func TestFirstSeenAtIsSetOnceAndSurvivesReopening(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
 	_ = c.CreateRepository(ctx, repo)
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, now)
 	_ = c.ReplaceOpenPRs(ctx, repo.ID, nil, now.Add(time.Hour))
@@ -842,7 +842,7 @@ func TestUpdatePRConditions(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
 	_ = c.CreateRepository(ctx, repo)
-	t0 := time.Now().UTC()
+	t0 := time.Now().UTC().Truncate(time.Microsecond)
 	_ = c.ReplaceOpenPRs(ctx, repo.ID, []TrackedPR{{Number: 1, Branch: "b"}}, t0)
 	read := func() schema.PullRequest {
 		prs, _ := c.PullRequests(ctx, repo.ID)
@@ -890,7 +890,7 @@ func TestMarkViewed(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepo("/a", "a", "A")
 	_ = c.CreateRepository(ctx, repo)
-	t0 := time.Now().UTC()
+	t0 := time.Now().UTC().Truncate(time.Microsecond)
 
 	views, err := c.ListViews(ctx, repo.ID)
 	if err != nil || len(views) != 0 {
