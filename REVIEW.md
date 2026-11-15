@@ -29,6 +29,8 @@ mise run cli:format            # Go, SQL migrations, protobuf
 mise run cli:format --check    # what CI runs, including buf breaking against main
 
 mise run osx:format            # Swift, under macos/
+
+mise run format --check        # both at once
 ```
 
 If the current branch changes any protobuf files, also regenerate the stubs:
@@ -53,6 +55,7 @@ Run the test suite and ensure **all tests pass**:
 ```sh
 mise run cli:test    # Go
 mise run osx:test    # Swift, under macos/
+mise run test        # both
 ```
 
 ## 4. Coverage

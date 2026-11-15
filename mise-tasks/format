@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Format and lint both candidates: cli:format and osx:format; --check fails on a diff instead of writing"
+#USAGE flag "--check" help="Check formatting without writing, and check protobuf for breaking changes"
+set -euo pipefail
+
+if [ "${usage_check:-false}" = "true" ]; then
+  flag=--check
+else
+  flag=
+fi
+
+mise run cli:format $flag ::: osx:format $flag
