@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#MISE description="Format and lint protobuf with buf; --check fails on a diff and on breaking changes against main"
+#USAGE flag "--check" help="Check formatting without writing, and run buf breaking against main"
+set -euo pipefail
+
+if [ "${usage_check:-false}" != "true" ]; then
+  buf format -w proto
+  buf lint
+  exit 0
+fi
+
+buf format -d --exit-code proto
+buf lint
+
+log="$(mktemp)"
+trap 'rm -f "$log"' EXIT
+
+if buf breaking --against '.git#branch=main' 2>&1 | tee "$log"; then
+  exit 0
+fi
+
+if ! git log --format='%B' refs/heads/main..HEAD |
+  grep -qE '^BREAKING[ -]CHANGE:|^[a-z]+(\([^)]*\))?!:'; then
+  message="Declare it with a '!' after the commit type/scope, or a 'BREAKING CHANGE:' footer, if it is intended."
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    echo "::error title=Breaking protobuf change::$message"
+  fi
+  echo "error: breaking protobuf change. $message" >&2
+  exit 1
+fi
+
+echo "A commit on this branch declares a breaking change; reporting wire breaks as warnings."
+
+if [ -n "${GITHUB_ACTIONS:-}" ]; then
+  grep -E '\.proto:[0-9]+:[0-9]+:' "$log" | while IFS= read -r finding; do
+    echo "::warning title=Declared breaking protobuf change::$finding"
+  done || true
+  {
+    echo "### Declared breaking protobuf change"
+    echo
+    echo "A commit on this branch declares a breaking change, so these wire breaks against \`main\` are reported rather than failing the build:"
+    echo
+    echo '```'
+    cat "$log"
+    echo '```'
+  } >>"$GITHUB_STEP_SUMMARY"
+fi

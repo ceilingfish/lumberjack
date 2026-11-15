@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Gate coverage.lcov; fail if any package is below 95%"
+#MISE depends=["coverage:merge"]
+set -euo pipefail
+
+exec pwsh -NoProfile -File scripts/coverage-gate.ps1 -Threshold 95

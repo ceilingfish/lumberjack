@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Build LumberjackMenuBar.app into macos/.build/app"
+set -euo pipefail
+
+exec macos/scripts/build-app.sh .build/app

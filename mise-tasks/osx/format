@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Format and lint Swift with swift-format; --check fails on a diff instead of writing"
+#MISE dir="macos"
+#USAGE flag "--check" help="Check formatting strictly without writing"
+set -euo pipefail
+
+if [ "${usage_check:-false}" = "true" ]; then
+  exec swift format lint --recursive --strict Sources Tests
+fi
+
+swift format --in-place --recursive Sources Tests
+swift format lint --recursive Sources Tests

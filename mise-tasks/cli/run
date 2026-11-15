@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Run the built bin/lumberjack, forwarding any arguments"
+#USAGE arg "[args]..." var=#true help="Arguments passed to lumberjack"
+set -euo pipefail
+
+if [ ! -x bin/lumberjack ]; then
+  echo "error: bin/lumberjack not found — run 'mise run cli:build' first" >&2
+  exit 1
+fi
+
+exec bin/lumberjack "$@"

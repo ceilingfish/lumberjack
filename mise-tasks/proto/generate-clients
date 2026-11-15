@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Generate Go stubs into pkg/client and Swift stubs into the macOS app from proto/"
+set -euo pipefail
+
+buf generate
+buf generate --template buf.gen.swift.yaml

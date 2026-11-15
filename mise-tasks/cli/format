@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+#MISE description="Format and lint Go, SQL migrations and protobuf; --check fails on a diff instead of writing"
+#USAGE flag "--check" help="Check formatting without writing, and check protobuf for breaking changes"
+set -euo pipefail
+
+migrations=internal/database/migrations
+
+if [ "${usage_check:-false}" = "true" ]; then
+  unformatted="$(gofumpt -l .)"
+  if [ -n "$unformatted" ]; then
+    echo "The following files are not gofumpt-formatted:" >&2
+    echo "$unformatted" >&2
+    exit 1
+  fi
+  proto_flag=--check
+else
+  gofumpt -w .
+  sqlfluff fix "$migrations"
+  proto_flag=
+fi
+
+golangci-lint run
+go run ./scripts/cmdlint .
+sqlfluff lint "$migrations"
+mise run proto:format $proto_flag
