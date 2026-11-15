@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Format and lint Go, SQL migrations and protobuf; --check fails on a diff instead of writing"
 #USAGE flag "--check" help="Check formatting without writing, and check protobuf for breaking changes"
+#USAGE flag "--base <base>" default="main" help="Git ref that --check compares protobuf against for breaking changes"
 set -euo pipefail
 
 migrations=internal/database/migrations
@@ -12,7 +13,7 @@ if [ "${usage_check:-false}" = "true" ]; then
     echo "$unformatted" >&2
     exit 1
   fi
-  proto_flag=--check
+  proto_flag="--check --base ${usage_base}"
 else
   gofumpt -w .
   sqlfluff fix "$migrations"

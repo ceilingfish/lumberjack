@@ -4,10 +4,14 @@ description: Lint and test the Go CLI/daemon, its SQL migrations and protobuf, a
 runs:
   using: composite
   steps:
-    - run: git rev-parse --verify -q refs/heads/main >/dev/null || git fetch --no-tags origin +refs/heads/main:refs/heads/main
-      shell: bash
     - uses: jdx/mise-action@v2
-    - run: mise run cli:format --check
+    - run: |
+        if [ -n "${GITHUB_BASE_REF:-}" ]; then
+          base="origin/$GITHUB_BASE_REF"
+        else
+          base="origin/main"
+        fi
+        mise run cli:format --check --base "$base"
       shell: bash
     - run: mise run cli:coverage
       shell: bash

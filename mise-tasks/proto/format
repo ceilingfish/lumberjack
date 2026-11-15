@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-#MISE description="Format and lint protobuf with buf; --check fails on a diff and on breaking changes against main"
-#USAGE flag "--check" help="Check formatting without writing, and run buf breaking against main"
+#MISE description="Format and lint protobuf with buf; --check fails on a diff and on breaking changes against --base"
+#USAGE flag "--check" help="Check formatting without writing, and run buf breaking against --base"
+#USAGE flag "--base <base>" default="main" help="Git ref that --check compares against for breaking changes"
 set -euo pipefail
 
 if [ "${usage_check:-false}" != "true" ]; then
@@ -15,11 +16,11 @@ buf lint
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
 
-if buf breaking --against '.git#branch=main' 2>&1 | tee "$log"; then
+if buf breaking --against ".git#ref=${usage_base}" 2>&1 | tee "$log"; then
   exit 0
 fi
 
-if ! git log --format='%B' refs/heads/main..HEAD |
+if ! git log --format='%B' "${usage_base}..HEAD" |
   grep -qE '^BREAKING[ -]CHANGE:|^[a-z]+(\([^)]*\))?!:'; then
   message="Declare it with a '!' after the commit type/scope, or a 'BREAKING CHANGE:' footer, if it is intended."
   if [ -n "${GITHUB_ACTIONS:-}" ]; then
@@ -38,7 +39,7 @@ if [ -n "${GITHUB_ACTIONS:-}" ]; then
   {
     echo "### Declared breaking protobuf change"
     echo
-    echo "A commit on this branch declares a breaking change, so these wire breaks against \`main\` are reported rather than failing the build:"
+    echo "A commit on this branch declares a breaking change, so these wire breaks against \`${usage_base}\` are reported rather than failing the build:"
     echo
     echo '```'
     cat "$log"
