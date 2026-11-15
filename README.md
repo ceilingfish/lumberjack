@@ -106,7 +106,7 @@ your `PATH`.
 ```sh
 git clone https://github.com/ceilingfish/lumberjack.git
 cd lumberjack
-mise run build          # produces ./bin/lumberjack
+mise run cli:build      # produces ./bin/lumberjack
 ./bin/lumberjack install # installs the CLI to ~/.local/bin and the daemon
 ```
 
@@ -119,13 +119,15 @@ including why it must be run from a built binary rather than `go run`.
 
 ## Running from source
 
-For day-to-day development, `mise run dev` runs the CLI straight from source —
-it is `go run .` with your arguments appended, so any command works:
+For day-to-day development, `mise run cli:build` builds `./bin/lumberjack` and
+`mise run cli:run` runs that build with your arguments appended, so any command
+works:
 
 ```sh
-mise run dev doctor           # = `go run . doctor`
-mise run dev daemon run       # run the daemon in the foreground (Ctrl-C to stop)
-mise run dev status           # any CLI command, straight from source
+mise run cli:build
+mise run cli:run doctor          # = `./bin/lumberjack doctor`
+mise run cli:run daemon run      # run the daemon in the foreground (Ctrl-C to stop)
+mise run cli:run status          # any CLI command, against the latest build
 ```
 
 Running the daemon this way (`daemon run`) ties it to your terminal with logs on
@@ -134,11 +136,11 @@ as a login service, that is a separate step, and it matters how you do it.
 
 **Installed CLI + daemon:** `install` copies the CLI to `~/.local/bin` and
 registers the daemon pointing at that installed copy, in one step — but it
-must be run from a **built binary**, never from `go run`. The `install` task
-builds one and installs it:
+must be run from a **built binary**, never from `go run`, so build one first:
 
 ```sh
-mise run install   # go build -o bin/lumberjack . && install --force
+mise run cli:build
+./bin/lumberjack install
 lumberjack daemon start
 ```
 
@@ -157,7 +159,8 @@ stops and removes the old daemon registration then reinstalls with the new
 binary path and environment (and overwrites the installed CLI copy):
 
 ```sh
-mise run install -- --force
+mise run cli:build
+./bin/lumberjack install --force
 lumberjack daemon start
 ```
 

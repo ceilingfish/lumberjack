@@ -3,9 +3,8 @@
 [CmdletBinding()]
 param(
     [double] $Threshold = 0,
-    [string[]] $Report = @('coverage-go.lcov', 'coverage-swift.lcov'),
-    [string] $Exclusions = 'coverage-exclude.txt',
-    [string] $Merged = 'coverage.lcov'
+    [string] $Report = 'coverage.lcov',
+    [string] $Exclusions = 'coverage-exclude.txt'
 )
 
 Set-StrictMode -Version Latest
@@ -234,23 +233,19 @@ function Write-Report {
 function Invoke-CoverageGate {
     param(
         [double] $Floor,
-        [string[]] $ReportPaths,
-        [string] $ExclusionsPath,
-        [string] $MergedPath
+        [string] $ReportPath,
+        [string] $ExclusionsPath
     )
 
     $repoRoot = Split-Path -Path $PSScriptRoot -Parent
     Push-Location $repoRoot
     try {
-        foreach ($path in $ReportPaths) {
-            if (-not (Test-Path -Path $path -PathType Leaf)) {
-                Write-Error -Message "error: $path not found — run 'mise run coverage' to build both halves" -ErrorAction Continue
-                return 1
-            }
+        if (-not (Test-Path -Path $ReportPath -PathType Leaf)) {
+            Write-Error -Message "error: $ReportPath not found — run 'mise run coverage:merge' first" -ErrorAction Continue
+            return 1
         }
 
-        $lcov = @($ReportPaths | ForEach-Object { Get-Content -Path $_ })
-        Set-Content -Path $MergedPath -Value $lcov
+        $lcov = @(Get-Content -Path $ReportPath)
 
         $results = Invoke-Gate `
             -Packages (Get-GoPackages -RepoRoot $repoRoot) `
@@ -266,5 +261,5 @@ function Invoke-CoverageGate {
 }
 
 if ($MyInvocation.InvocationName -ne '.') {
-    exit (Invoke-CoverageGate -Floor $Threshold -ReportPaths $Report -ExclusionsPath $Exclusions -MergedPath $Merged)
+    exit (Invoke-CoverageGate -Floor $Threshold -ReportPath $Report -ExclusionsPath $Exclusions)
 }

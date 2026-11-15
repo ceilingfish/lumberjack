@@ -57,13 +57,17 @@ The Swift tasks are driven from the repository root by `mise`, alongside the Go
 ones (`osx:*` acts on this package, `cli:*` on the Go CLI/daemon):
 
 ```sh
-mise run osx:test        # swift test --enable-code-coverage
-mise run osx:lcov        # export that coverage to coverage-swift.lcov
-mise run coverage        # both codebases, then the per-package floor
+mise run osx:build          # assemble .build/app/LumberjackMenuBar.app
+mise run osx:run            # launch that build
+mise run osx:format         # swift-format in place, then lint (--check to only check)
+mise run osx:test           # swift test --enable-code-coverage
+mise run osx:coverage       # osx:test, then export its coverage to coverage-osx.lcov
+mise run coverage:merge     # concatenate coverage-cli.lcov and coverage-osx.lcov
+mise run coverage:ci-check  # merge, then gate the merged coverage.lcov
 ```
 
-`mise run coverage` runs the two suites, exports both lcov reports and hands
-them to `scripts/coverage-gate.ps1`, which prints a per-package percentage
+`coverage:ci-check` merges both lcov reports (from `cli:coverage` and
+`osx:coverage`) and hands the result to `scripts/coverage-gate.ps1`, which prints a per-package percentage
 lowest-first and exits non-zero if any package is under the floor. Generated
 stubs (`*.pb.swift`, `*.grpc.swift`) and `MenuBarView.swift` are exempt via the
 repository-wide `coverage-exclude.txt` — the view exemption covers SwiftUI
@@ -78,12 +82,12 @@ in place of the notification centre and Launch Services, and
 ### Regenerating the gRPC stubs
 
 Only needed after `proto/lumberjack/v1/lumberjack.proto` changes. Requires
-`buf` (`brew install buf`) and network access (the Swift plugins are fetched
-remotely from buf.build, same as the Go codegen in `buf.gen.yaml`):
+network access (the Swift plugins are fetched remotely from buf.build, same as
+the Go codegen in `buf.gen.yaml`). From the repo root, this regenerates both the
+Go and Swift stubs:
 
 ```sh
-# from the repo root
-buf generate --template buf.gen.swift.yaml
+mise run proto:generate-clients
 ```
 
 ### Building a distributable `.app` / `.dmg`

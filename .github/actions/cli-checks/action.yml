@@ -1,19 +1,17 @@
 name: CLI checks
-description: Format, lint and test the Go CLI/daemon, and publish its lcov report
+description: Lint and test the Go CLI/daemon, its SQL migrations and protobuf, and publish its lcov report
 
 runs:
   using: composite
   steps:
+    - run: git rev-parse --verify -q refs/heads/main >/dev/null || git fetch --no-tags origin +refs/heads/main:refs/heads/main
+      shell: bash
     - uses: jdx/mise-action@v2
-    - run: mise run cli:format-check
+    - run: mise run cli:format --check
       shell: bash
-    - run: mise run cli:lint
-      shell: bash
-    - run: mise run cli:test
-      shell: bash
-    - run: mise run cli:lcov
+    - run: mise run cli:coverage
       shell: bash
     - uses: actions/upload-artifact@v4
       with:
-        name: coverage-go
-        path: coverage-go.lcov
+        name: coverage-cli
+        path: coverage-cli.lcov

@@ -29,8 +29,8 @@ func newInstallCmd() *cobra.Command {
 			"register the daemon with the platform service manager, so it starts " +
 			"at login. The daemon is registered against the installed CLI copy — a " +
 			"durable path — not whatever binary happens to be running.\n\n" +
-			"Must be run from a real built binary, e.g. `mise run install`, or " +
-			"`mise build && ./bin/lumberjack install` — a `go run` build is refused " +
+			"Must be run from a real built binary, e.g. " +
+			"`mise run cli:build && ./bin/lumberjack install` — a `go run` build is refused " +
 			"(see the error for why).\n\n" +
 			"--cli-only installs just the CLI copy. --daemon-only registers just the " +
 			"daemon, against the installed CLI if present, otherwise the current " +
@@ -252,7 +252,7 @@ func binDirOnPath(dir string) bool {
 // against it — leaves durable state pointing at a binary that moves or
 // disappears on the next build (the daemon then fails to launch, and under
 // KeepAlive, crash-loops). Installing must be done from a durable binary, e.g.
-// `mise run install`, or `mise build` then `./bin/lumberjack install`.
+// `mise run cli:build` then `./bin/lumberjack install`.
 func checkStableExecutable(exe string) error {
 	if !isEphemeralBuild(exe) {
 		return nil
@@ -263,8 +263,8 @@ func checkStableExecutable(exe string) error {
 			"and is pruned from the build cache over time, so the install "+
 			"would soon point at a binary that has moved or gone. Install from a "+
 			"durable binary instead:\n\n"+
-			"    mise run install\n"+
-			"    # or: mise build && ./bin/lumberjack install",
+			"    mise run cli:build\n"+
+			"    ./bin/lumberjack install",
 		exe)
 }
 

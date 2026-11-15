@@ -25,8 +25,8 @@ The gRPC contract is the boundary between the two. Design implications:
 - **Return errors, don't `os.Exit`** in command logic. Use `RunE` (not `Run`) so Cobra handles exit codes centrally.
 - **One file per command** under `cmd/`, mirroring the command hierarchy (`APPNAME VERB NOUN --FLAG`).
 - **Start flat, grow modular.** Add `internal/` packages as domains emerge rather than scaffolding everything up front.
-- **Non-trivial task logic lives in `scripts/`, not inline in `.mise.toml`.** `mise` tasks should stay one-liners that call a script in `scripts/` (e.g. `scripts/coverage-gate.ps1`).
-- **Per-codebase tasks are prefixed `cli:` or `osx:`.** `cli:format`, `cli:lint` and `cli:test` act on the Go CLI/daemon; `osx:format`, `osx:lint` and `osx:test` act on the Swift menu-bar app under `macos/`. The two share no task — the toolchains, file sets and failure modes have nothing in common, and a single combined task only ever means "run something irrelevant to what I changed". **The one exception is `coverage`**, which is deliberately shared: it runs no tests itself, but depends on `cli:test` and `osx:test` and gates the coverage data they produce. Add a new per-codebase task under the matching prefix rather than growing an unprefixed one.
+- **Tasks are [mise file tasks](https://mise.jdx.dev/tasks/file-tasks.html) under `mise-tasks/`, not inline in `.mise.toml`.** The directory path is the task name (`mise-tasks/cli/format` is `cli:format`), and metadata goes in `#MISE`/`#USAGE` headers. `.mise.toml` keeps only tools and a few top-level one-liners. `scripts/` holds programs too large to be a task body (`scripts/cmdlint`, `scripts/coverage-gate.ps1`), which tasks call.
+- **Each build candidate has the same verbs.** `cli:` is the Go CLI/daemon, `osx:` the Swift menu-bar app under `macos/`, and both have `build`, `test`, `format` (format in place then lint; `--check` to only check), `run` (the current build) and `coverage` (writes `coverage-cli.lcov` / `coverage-osx.lcov`). `cli:format` also covers the SQL migrations and protobuf. The two share no task — the toolchains, file sets and failure modes have nothing in common. Cross-cutting tasks have their own prefix: `proto:` (`proto:generate-clients`, `proto:format`) and `coverage:` (`coverage:merge` concatenates both lcov reports, `coverage:ci-check` gates the result). Add a new task under the matching prefix rather than an unprefixed one.
 - **Tests live next to the code**, in the same package directory as the code they test.
 - **Ship as a single self-contained binary** — no cgo, no C toolchain, no bundled libraries. Everything Lumberjack owns (SQLite engine, migrations) is compiled or embedded into the one executable. The exceptions are **`git` and `gh`, which are required host prerequisites**: Lumberjack shells out to the system `git` for all worktree operations and to the GitHub CLI (`gh`) for GitHub API access and authentication, rather than reimplementing them. Reusing `gh` also lets Lumberjack inherit the user's existing `gh auth login` credentials.
 - All new feature requests should, by default, be created in a new worktree using the currently installed `lumberjack` command.
@@ -56,7 +56,7 @@ A native Swift app lives under `macos/` — a separate Swift package, built and
 distributed independently of the Go binary (see `macos/README.md`). It talks
 to the daemon over the same Unix socket the CLI uses, using Swift gRPC/protobuf
 stubs generated from `proto/lumberjack/v1/lumberjack.proto` via
-`buf generate --template buf.gen.swift.yaml` (parallel to, and never mixed
+`buf.gen.swift.yaml` (parallel to, and never mixed
 with, the Go codegen in `buf.gen.yaml`). Regenerate those stubs — and only
 those stubs, never hand-edit them — whenever the proto changes.
 
