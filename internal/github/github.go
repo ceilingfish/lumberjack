@@ -66,8 +66,13 @@ type RepoInfo struct {
 // branch a worktree tracks. Everything else about a PR is re-fetched when
 // needed rather than cached (docs/schema.md).
 type PR struct {
-	Number     int64
-	HeadBranch string
+	Number      int64
+	HeadBranch  string
+	AuthorLogin string
+}
+
+type prAuthor struct {
+	Login string `json:"login"`
 }
 
 // exec runs gh with args in dir (empty dir = current directory), returning
@@ -84,7 +89,7 @@ func (c *Client) exec(ctx context.Context, dir string, args ...string) (string, 
 		if msg == "" {
 			msg = err.Error()
 		}
-		return "", fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
+		return strings.TrimSpace(stdout.String()), fmt.Errorf("gh %s: %s", strings.Join(args, " "), msg)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
@@ -268,20 +273,21 @@ func (c *Client) ListOpenPRs(ctx context.Context, repo RepoInfo) ([]PR, error) {
 		"--repo", fmt.Sprintf("%s/%s/%s", repo.Host, repo.Owner, repo.Name),
 		"--state", "open",
 		"--limit", "1000",
-		"--json", "number,headRefName")
+		"--json", "number,headRefName,author")
 	if err != nil {
 		return nil, err
 	}
 	var raw []struct {
-		Number      int64  `json:"number"`
-		HeadRefName string `json:"headRefName"`
+		Number      int64    `json:"number"`
+		HeadRefName string   `json:"headRefName"`
+		Author      prAuthor `json:"author"`
 	}
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
 		return nil, fmt.Errorf("parsing gh pr list: %w", err)
 	}
 	prs := make([]PR, len(raw))
 	for i, r := range raw {
-		prs[i] = PR{Number: r.Number, HeadBranch: r.HeadRefName}
+		prs[i] = PR{Number: r.Number, HeadBranch: r.HeadRefName, AuthorLogin: r.Author.Login}
 	}
 	return prs, nil
 }
@@ -298,7 +304,7 @@ func (c *Client) FindPRForBranch(ctx context.Context, repo RepoInfo, branch stri
 		"--state", "all",
 		"--head", branch,
 		"--limit", "100",
-		"--json", "number,headRefName,state,updatedAt")
+		"--json", "number,headRefName,state,updatedAt,author")
 	if err != nil {
 		return PR{}, false, err
 	}
@@ -307,6 +313,7 @@ func (c *Client) FindPRForBranch(ctx context.Context, repo RepoInfo, branch stri
 		HeadRefName string    `json:"headRefName"`
 		State       string    `json:"state"`
 		UpdatedAt   time.Time `json:"updatedAt"`
+		Author      prAuthor  `json:"author"`
 	}
 	if err := json.Unmarshal([]byte(out), &raw); err != nil {
 		return PR{}, false, fmt.Errorf("parsing gh pr list: %w", err)
@@ -326,7 +333,7 @@ func (c *Client) FindPRForBranch(ctx context.Context, repo RepoInfo, branch stri
 	if best < 0 {
 		return PR{}, false, nil
 	}
-	return PR{Number: raw[best].Number, HeadBranch: raw[best].HeadRefName}, true, nil
+	return PR{Number: raw[best].Number, HeadBranch: raw[best].HeadRefName, AuthorLogin: raw[best].Author.Login}, true, nil
 }
 
 const (
@@ -426,4 +433,33 @@ func resolveBinary(envVar, name string) (string, error) {
 		return "", fmt.Errorf("%s not found on PATH (set %s to override): %w", name, envVar, err)
 	}
 	return p, nil
+}
+
+type CommitAuthors struct {
+	Logins    []string
+	Truncated bool
+}
+
+func (c *Client) CompareCommitAuthors(ctx context.Context, repo RepoInfo, base, head string) (CommitAuthors, error) {
+	out, err := c.run(ctx, "", "api", "--hostname", repo.Host,
+		fmt.Sprintf("repos/%s/%s/compare/%s...%s", repo.Owner, repo.Name, base, head))
+	if err != nil {
+		return CommitAuthors{}, err
+	}
+	var v struct {
+		TotalCommits int `json:"total_commits"`
+		Commits      []struct {
+			Author *prAuthor `json:"author"`
+		} `json:"commits"`
+	}
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		return CommitAuthors{}, fmt.Errorf("parsing gh api compare: %w", err)
+	}
+	authors := CommitAuthors{Logins: make([]string, len(v.Commits)), Truncated: v.TotalCommits > len(v.Commits)}
+	for i, cm := range v.Commits {
+		if cm.Author != nil {
+			authors.Logins[i] = cm.Author.Login
+		}
+	}
+	return authors, nil
 }

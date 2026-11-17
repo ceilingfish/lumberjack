@@ -93,6 +93,112 @@ service LumberjackService {
   rpc SetSetupConsent(SetSetupConsentRequest) returns (SetSetupConsentResponse);
 
   rpc TrustSetupSteps(TrustSetupStepsRequest) returns (TrustSetupStepsResponse);
+
+  rpc SetAuthorship(SetAuthorshipRequest) returns (SetAuthorshipResponse);
+
+  rpc MarkViewed(MarkViewedRequest) returns (MarkViewedResponse);
+
+  rpc SetRepository(SetRepositoryRequest) returns (SetRepositoryResponse);
+}
+
+enum Authorship {
+  AUTHORSHIP_UNSPECIFIED = 0;
+  AUTHORSHIP_MINE = 1;
+  AUTHORSHIP_THEIRS = 2;
+}
+
+message SetAuthorshipRequest {
+  string repository = 1;
+  string worktree = 2;
+  optional Authorship authorship = 3;
+}
+
+message SetAuthorshipResponse {
+  Worktree worktree = 1;
+}
+
+message MarkViewedRequest {
+  string repository = 1;
+  Authorship authorship = 2;
+  google.protobuf.Timestamp seen_through = 3;
+}
+
+message MarkViewedResponse {}
+
+message SetRepositoryRequest {
+  string repository = 1;
+  string github_owner = 2;
+  string github_name = 3;
+}
+
+message SetRepositoryResponse {
+  Repository repository = 1;
+}
+
+enum MergeStateStatus {
+  MERGE_STATE_STATUS_UNSPECIFIED = 0;
+  MERGE_STATE_STATUS_UNKNOWN = 1;
+  MERGE_STATE_STATUS_CLEAN = 2;
+  MERGE_STATE_STATUS_DIRTY = 3;
+  MERGE_STATE_STATUS_BEHIND = 4;
+  MERGE_STATE_STATUS_BLOCKED = 5;
+  MERGE_STATE_STATUS_UNSTABLE = 6;
+  MERGE_STATE_STATUS_HAS_HOOKS = 7;
+  MERGE_STATE_STATUS_DRAFT = 8;
+}
+
+enum ReviewDecision {
+  REVIEW_DECISION_UNSPECIFIED = 0;
+  REVIEW_DECISION_REVIEW_REQUIRED = 1;
+  REVIEW_DECISION_APPROVED = 2;
+  REVIEW_DECISION_CHANGES_REQUESTED = 3;
+}
+
+enum ReviewState {
+  REVIEW_STATE_UNSPECIFIED = 0;
+  REVIEW_STATE_COMMENTED = 1;
+  REVIEW_STATE_APPROVED = 2;
+  REVIEW_STATE_CHANGES_REQUESTED = 3;
+  REVIEW_STATE_DISMISSED = 4;
+  REVIEW_STATE_PENDING = 5;
+}
+
+enum CheckState {
+  CHECK_STATE_UNSPECIFIED = 0;
+  CHECK_STATE_PENDING = 1;
+  CHECK_STATE_PASSING = 2;
+  CHECK_STATE_FAILING = 3;
+}
+
+message Review {
+  string login = 1;
+  ReviewState state = 2;
+  bool is_me = 3;
+}
+
+message ChecksSummary {
+  CheckState state = 1;
+  int32 passing = 2;
+  int32 failing = 3;
+  int32 pending = 4;
+}
+
+message PullRequestState {
+  string url = 1;
+  string author_login = 2;
+  bool is_draft = 3;
+  google.protobuf.Timestamp updated_at = 4;
+  MergeStateStatus merge_state_status = 5;
+  ReviewDecision review_decision = 6;
+  repeated Review latest_reviews = 7;
+  bool review_requested_from_me = 8;
+  int32 unresolved_thread_count = 9;
+  ChecksSummary checks = 10;
+  int32 additions = 11;
+  int32 deletions = 12;
+  bool has_new_activity = 13;
+  int64 score = 14;
+  string base_ref_name = 15;
 }
 
 // SyncStatus mirrors schema.SyncStatus* (see internal/database/schema).
@@ -202,6 +308,9 @@ message Worktree {
   // checked_out_branch is the branch git reports in the directory, empty for a
   // detached HEAD. It differs from branch_name exactly when branch_disparity.
   string checked_out_branch = 12;
+  Authorship authorship = 13;
+  optional PullRequestState pull_request = 14;
+  bool authorship_overridden = 15;
 }
 
 message HealthRequest {}

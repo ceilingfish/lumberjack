@@ -1,4 +1,5 @@
 import Foundation
+import SwiftProtobuf
 import Testing
 
 @testable import LumberjackMenuBar
@@ -40,6 +41,18 @@ struct DaemonClientTests {
         let sync = Task { try await client.sync(repository: "/tmp/repo") }
         sync.cancel()
         await #expect(throws: (any Error).self) { try await sync.value }
+
+        let viewed = Task {
+            try await client.markViewed(repository: "/tmp/repo", authorship: .mine, seenThrough: Google_Protobuf_Timestamp())
+        }
+        viewed.cancel()
+        await #expect(throws: (any Error).self) { try await viewed.value }
+
+        let viewedWithoutTime = Task {
+            try await client.markViewed(repository: "/tmp/repo", authorship: .theirs, seenThrough: nil)
+        }
+        viewedWithoutTime.cancel()
+        await #expect(throws: (any Error).self) { try await viewedWithoutTime.value }
 
         await client.close()
     }

@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // stubServer is a hand-written LumberjackService for exercising the client's
@@ -72,6 +73,31 @@ func (stubServer) SetLogin(_ context.Context, req *lumberjackv1.SetLoginRequest)
 	return &lumberjackv1.SetLoginResponse{
 		Repository: &lumberjackv1.Repository{DirPrefix: req.GetRepository(), Login: req.GetLogin()},
 	}, nil
+}
+
+func (stubServer) SetRepository(_ context.Context, req *lumberjackv1.SetRepositoryRequest) (*lumberjackv1.SetRepositoryResponse, error) {
+	if req.GetGithubName() == "ghost" {
+		return nil, status.Error(codes.NotFound, "repository not found")
+	}
+	return &lumberjackv1.SetRepositoryResponse{Repository: &lumberjackv1.Repository{
+		DirPrefix: req.GetRepository(), GithubOwner: req.GetGithubOwner(), GithubName: req.GetGithubName(),
+	}}, nil
+}
+
+func (stubServer) SetAuthorship(_ context.Context, req *lumberjackv1.SetAuthorshipRequest) (*lumberjackv1.SetAuthorshipResponse, error) {
+	if req.GetWorktree() == "ghost" {
+		return nil, status.Error(codes.NotFound, "worktree not found")
+	}
+	return &lumberjackv1.SetAuthorshipResponse{Worktree: &lumberjackv1.Worktree{
+		BranchName: req.GetWorktree(), Authorship: req.GetAuthorship(), AuthorshipOverridden: req.Authorship != nil,
+	}}, nil
+}
+
+func (stubServer) MarkViewed(_ context.Context, req *lumberjackv1.MarkViewedRequest) (*lumberjackv1.MarkViewedResponse, error) {
+	if req.GetAuthorship() == lumberjackv1.Authorship_AUTHORSHIP_UNSPECIFIED {
+		return nil, status.Error(codes.InvalidArgument, "authorship must be mine or theirs")
+	}
+	return &lumberjackv1.MarkViewedResponse{}, nil
 }
 
 func (stubServer) ListLogins(context.Context, *lumberjackv1.ListLoginsRequest) (*lumberjackv1.ListLoginsResponse, error) {
@@ -374,6 +400,48 @@ func TestClientSetLoginAndListLogins(t *testing.T) {
 	}
 	if len(logins) != 2 || current != "bob" {
 		t.Errorf("ListLogins = %v, %q", logins, current)
+	}
+}
+
+func TestClientSetRepository(t *testing.T) {
+	c := startStub(t)
+	repo, err := c.SetRepository(context.Background(), "a", "fork", "b")
+	if err != nil {
+		t.Fatalf("SetRepository: %v", err)
+	}
+	if repo.GetDirPrefix() != "a" || repo.GetGithubOwner() != "fork" || repo.GetGithubName() != "b" {
+		t.Errorf("SetRepository = %+v", repo)
+	}
+	if _, err := c.SetRepository(context.Background(), "a", "fork", "ghost"); err == nil {
+		t.Error("expected an error for an unknown repository")
+	}
+}
+
+func TestClientSetAuthorship(t *testing.T) {
+	c := startStub(t)
+	mine := lumberjackv1.Authorship_AUTHORSHIP_MINE
+	wt, err := c.SetAuthorship(context.Background(), "a", "feature/x", &mine)
+	if err != nil {
+		t.Fatalf("SetAuthorship: %v", err)
+	}
+	if wt.GetBranchName() != "feature/x" || wt.GetAuthorship() != mine || !wt.GetAuthorshipOverridden() {
+		t.Errorf("SetAuthorship = %+v", wt)
+	}
+	if wt, err := c.SetAuthorship(context.Background(), "a", "feature/x", nil); err != nil || wt.GetAuthorshipOverridden() {
+		t.Errorf("clearing: %+v, %v", wt, err)
+	}
+	if _, err := c.SetAuthorship(context.Background(), "a", "ghost", nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestClientMarkViewed(t *testing.T) {
+	c := startStub(t)
+	if err := c.MarkViewed(context.Background(), "a", lumberjackv1.Authorship_AUTHORSHIP_MINE, timestamppb.Now()); err != nil {
+		t.Errorf("MarkViewed: %v", err)
+	}
+	if err := c.MarkViewed(context.Background(), "a", lumberjackv1.Authorship_AUTHORSHIP_UNSPECIFIED, nil); err == nil {
+		t.Error("expected the daemon's rejection")
 	}
 }
 

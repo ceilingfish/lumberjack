@@ -10,6 +10,9 @@ import (
 
 // CreateWorktree inserts a worktree row, setting wt.ID.
 func (c *Client) CreateWorktree(ctx context.Context, wt *schema.Worktree) error {
+	if wt.Origin == "" {
+		wt.Origin = schema.OriginAdopted
+	}
 	if _, err := c.NewInsert().Model(wt).Exec(ctx); err != nil {
 		return fmt.Errorf("inserting worktree: %w", err)
 	}
@@ -52,7 +55,7 @@ func (c *Client) SetWorktreePR(ctx context.Context, id int64, prNumber *int64, b
 	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
 		Set("github_pr_number = ?", prNumber).
 		Set("branch_name = ?", branch).
-		Where("id = ?", id).Exec(ctx); err != nil {
+		Where(whereID, id).Exec(ctx); err != nil {
 		return fmt.Errorf("updating worktree PR: %w", err)
 	}
 	return nil
@@ -78,7 +81,7 @@ func (c *Client) TouchWorktreesSyncedAt(ctx context.Context, repoID int64, at ti
 func (c *Client) SetWorktreeDirectory(ctx context.Context, id int64, dir string) error {
 	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
 		Set("directory_path = ?", dir).
-		Where("id = ?", id).Exec(ctx); err != nil {
+		Where(whereID, id).Exec(ctx); err != nil {
 		return fmt.Errorf("updating worktree directory: %w", err)
 	}
 	return nil
@@ -99,8 +102,17 @@ func (c *Client) SetWorktreeBranch(ctx context.Context, id int64, branch string)
 func (c *Client) SetWorktreeSetupError(ctx context.Context, id int64, msg *string) error {
 	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
 		Set("setup_error = ?", msg).
-		Where("id = ?", id).Exec(ctx); err != nil {
+		Where(whereID, id).Exec(ctx); err != nil {
 		return fmt.Errorf("updating worktree setup error: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) SetWorktreeAuthorshipOverride(ctx context.Context, id int64, a *schema.Authorship) error {
+	if _, err := c.NewUpdate().Model((*schema.Worktree)(nil)).
+		Set("authorship_override = ?", a).
+		Where(whereID, id).Exec(ctx); err != nil {
+		return fmt.Errorf("updating worktree authorship: %w", err)
 	}
 	return nil
 }
@@ -108,7 +120,7 @@ func (c *Client) SetWorktreeSetupError(ctx context.Context, id int64, msg *strin
 // DeleteWorktree removes a worktree row by primary key.
 func (c *Client) DeleteWorktree(ctx context.Context, id int64) error {
 	if _, err := c.NewDelete().Model((*schema.Worktree)(nil)).
-		Where("id = ?", id).Exec(ctx); err != nil {
+		Where(whereID, id).Exec(ctx); err != nil {
 		return fmt.Errorf("deleting worktree: %w", err)
 	}
 	return nil

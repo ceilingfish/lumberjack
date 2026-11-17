@@ -62,6 +62,7 @@ type GitOps interface {
 	// `.lumberjack.yml` without checking it out. found is false (with a nil
 	// error) when ref exists but path does not.
 	ShowFile(ctx context.Context, repoPath, ref, path string) (data []byte, found bool, err error)
+	RemoteBranchSHA(ctx context.Context, repoPath, remote, branch string) (string, error)
 }
 
 // GHOps is the gh surface the sync engine and init need.
@@ -87,6 +88,8 @@ type GHOps interface {
 	// CheckRepoAccess verifies gh's active account can reach a repository, so
 	// set-login can reject a login that authenticates but cannot operate the repo.
 	CheckRepoAccess(ctx context.Context, repo github.RepoInfo) error
+	CompareCommitAuthors(ctx context.Context, repo github.RepoInfo, base, head string) (github.CommitAuthors, error)
+	PullStates(ctx context.Context, repo github.RepoInfo, numbers []int64) (map[int64]github.PullState, error)
 }
 
 // Service is the daemon's domain layer: it owns every worktree mutation
@@ -107,6 +110,11 @@ type Service struct {
 	// worktrees does not pay for a fresh lookup on every tick. Entries expire
 	// after noPRLookupTTL, since a branch can gain a PR later.
 	noPRBranches sync.Map
+
+	identities    sync.Map
+	branchHeads   sync.Map
+	commitAuthors sync.Map
+	rollups       sync.Map
 
 	// events fans out worktree/sync changes to Watch subscribers. Publishing
 	// is a side effect of a mutation that already happened under mu — it never
@@ -185,9 +193,11 @@ func (p progressFn) send(c WorktreeChange) {
 // WorktreeView pairs a stored worktree with its live reconciliation status and
 // whether its source PR is still open.
 type WorktreeView struct {
-	Worktree schema.Worktree
-	Status   worktree.Status
-	PROpen   bool
+	Worktree    schema.Worktree
+	Status      worktree.Status
+	PROpen      bool
+	Authorship  schema.Authorship
+	PullRequest *PullView
 }
 
 // repoInfo builds the gh identity from a stored repository row.
@@ -268,6 +278,16 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 		if err != nil {
 			return err
 		}
+		prs, err := s.db.PullRequests(ctx, repo.ID)
+		if err != nil {
+			return err
+		}
+		viewed, err := s.db.ListViews(ctx, repo.ID)
+		if err != nil {
+			return err
+		}
+		ids := s.identitiesFor(repo)
+		rollup := s.rollupFor(repo)
 		states, serrs := s.prStates(ctx, repo, stored, openByNum)
 		for i, serr := range serrs {
 			if serr != nil {
@@ -282,13 +302,19 @@ func (s *Service) WorktreeViews(ctx context.Context, repo *schema.Repository) ([
 			}
 			st := statuses[i]
 			applySetupError(&st, wt.SetupError)
-			views = append(views, WorktreeView{Worktree: wt, Status: st, PROpen: states[i] == worktree.PROpen})
+			v := WorktreeView{
+				Worktree: wt, Status: st, PROpen: states[i] == worktree.PROpen,
+				Authorship: s.resolveAuthorship(repo, wt, prs, ids),
+			}
+			v.PullRequest = pullViewFor(v, rollup, prs, viewed, ids)
+			views = append(views, v)
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	slices.SortStableFunc(views, compareViews)
 	return views, nil
 }
 
@@ -340,6 +366,8 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		})
 	}()
 
+	s.refreshIdentities(ctx, repo)
+
 	openByNum, ferr := s.fetchOpenPRs(ctx, repo)
 	if ferr != nil {
 		err = ferr
@@ -351,11 +379,16 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 
 	tracked := make([]database.TrackedPR, 0, len(openByNum))
 	for _, pr := range openByNum {
-		tracked = append(tracked, database.TrackedPR{Number: pr.Number, Branch: pr.HeadBranch})
+		tracked = append(tracked, database.TrackedPR{Number: pr.Number, Branch: pr.HeadBranch, Author: pr.AuthorLogin})
 	}
 	if perr := s.db.ReplaceOpenPRs(ctx, repo.ID, tracked, start); perr != nil {
 		err = perr
 		return created, removed, err
+	}
+
+	var errs []error
+	if rerr := s.refreshRollup(ctx, repo, openByNum, start); rerr != nil {
+		errs = append(errs, rerr)
 	}
 
 	stored, lerr := s.db.ListWorktrees(ctx, repo.ID)
@@ -364,7 +397,6 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 		return created, removed, err
 	}
 
-	var errs []error
 	// Every worktree git has registered, listed once and shared by both phases:
 	// it tells creation which directories can be adopted, and removal which
 	// tracked rows git no longer knows about. A listing failure is recorded but
@@ -388,6 +420,7 @@ func (s *Service) syncRepositoryLocked(ctx context.Context, repo *schema.Reposit
 	}
 	s.alignBranches(ctx, repo, openByNum, stored, refs, progress, &errs)
 	removed += s.removeClosed(ctx, repo, openByNum, stored, registered, progress, &errs)
+	s.refreshBranchAuthors(ctx, repo, stored)
 
 	err = errors.Join(errs...)
 	return created, removed, err
@@ -649,6 +682,7 @@ func (s *Service) createWorktree(
 	row := &schema.Worktree{
 		RepositoryID: repo.ID, GithubPRNumber: &n,
 		BranchName: pr.HeadBranch, DirectoryPath: dir,
+		Origin: schema.OriginSynced,
 	}
 	if cerr := s.db.CreateWorktree(ctx, row); cerr != nil {
 		*errs = append(*errs, fmt.Errorf("recording worktree for PR #%d: %w", num, cerr))
@@ -998,6 +1032,10 @@ func (s *Service) linkHistoricalPR(ctx context.Context, repo *schema.Repository,
 		return false, nil
 	}
 	num := pr.Number
+	closed := database.TrackedPR{Number: num, Branch: pr.HeadBranch, Author: pr.AuthorLogin}
+	if err := s.db.RecordClosedPR(ctx, repo.ID, closed, s.now()); err != nil {
+		return false, err
+	}
 	if err := s.db.SetWorktreePR(ctx, wt.ID, &num, pr.HeadBranch); err != nil {
 		return false, fmt.Errorf("linking PR #%d to worktree %s: %w", num, wt.DirectoryPath, err)
 	}

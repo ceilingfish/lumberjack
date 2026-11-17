@@ -10,10 +10,6 @@ enum WorktreeStatus {
 }
 
 enum MenuBarPresentation {
-    static func selectedRepositoryName(_ repository: Lumberjack_V1_Repository?) -> String {
-        repository?.githubName ?? "Select repository"
-    }
-
     static func statusMessage(_ connection: ConnectionState) -> (text: String, symbol: String) {
         switch connection {
         case .connecting: return ("Connecting to daemon…", "arrow.triangle.2.circlepath")

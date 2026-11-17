@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // EnvSocketPath overrides the daemon socket location (see docs/prd.md).
@@ -126,6 +127,14 @@ func (c *Client) SetLogin(ctx context.Context, ref, login string) (*lumberjackv1
 	return resp.GetRepository(), nil
 }
 
+func (c *Client) SetRepository(ctx context.Context, ref, owner, name string) (*lumberjackv1.Repository, error) {
+	resp, err := c.svc.SetRepository(ctx, &lumberjackv1.SetRepositoryRequest{Repository: ref, GithubOwner: owner, GithubName: name})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetRepository(), nil
+}
+
 // ListLogins returns the gh accounts authenticated for the host of the
 // repository resolved by ref, plus the login it currently operates under.
 func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, current string, err error) {
@@ -134,6 +143,23 @@ func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, c
 		return nil, "", mapError(err)
 	}
 	return resp.GetLogins(), resp.GetCurrent(), nil
+}
+
+func (c *Client) SetAuthorship(ctx context.Context, ref, worktree string, authorship *lumberjackv1.Authorship) (*lumberjackv1.Worktree, error) {
+	resp, err := c.svc.SetAuthorship(ctx, &lumberjackv1.SetAuthorshipRequest{
+		Repository: ref, Worktree: worktree, Authorship: authorship,
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetWorktree(), nil
+}
+
+func (c *Client) MarkViewed(ctx context.Context, ref string, authorship lumberjackv1.Authorship, seenThrough *timestamppb.Timestamp) error {
+	_, err := c.svc.MarkViewed(ctx, &lumberjackv1.MarkViewedRequest{
+		Repository: ref, Authorship: authorship, SeenThrough: seenThrough,
+	})
+	return mapError(err)
 }
 
 func (c *Client) SetSetupConsent(ctx context.Context, ref, checksum string) (*lumberjackv1.Repository, bool, error) {

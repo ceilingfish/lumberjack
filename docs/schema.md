@@ -54,6 +54,11 @@ The PRs the daemon is tracking for a repo. Deliberately minimal — just enough 
 | `repository_id`  | integer   | FK → `repositories.id`                                            |
 | `branch_name`    | text      | The PR's head branch, exact/unslugged (e.g. `feature/my-feature`) |
 | `last_synced_at` | timestamp | When this sync last observed the PR                               |
+| `author_login`   | text      | The PR's author; immutable for the life of the PR. Drives authorship (`docs/ownership.md`) |
+| `deleted_at`     | timestamp | Nullable; set when the PR leaves the open set, cleared if it reopens. Rows are soft-deleted, never removed |
+| `first_seen_at`  | timestamp | When the daemon first saw the PR; never updated, so a reopened PR is not new again |
+| `conflicted_since` | timestamp | Nullable; when a sync first saw `mergeStateStatus == DIRTY`, cleared once it is not (an `UNKNOWN` status leaves it alone) |
+| `checks_failing_since` | timestamp | Nullable; when a sync first saw a failing required check, cleared once none fail |
 
 Unique constraint on (`repository_id`, `github_pr_number`). Everything else about a PR (title, state, head SHA, merge commit, fork status) is fetched live from `gh` when needed.
 
@@ -71,10 +76,24 @@ The local side, and the crucial branch ↔ directory mapping. Holds only what gi
 | `last_synced_at`   | timestamp | When Lumberjack last reconciled this worktree                                                                          |
 | `created_at`       | timestamp |                                                                                                                        |
 | `setup_error`      | text      | Nullable; names the `.lumberjack.yml` setup step that failed when this worktree was cloned (fail-fast — later steps are skipped, the worktree is kept). Folded into the live reconciliation note/status |
+| `origin`           | text      | `local` (`worktree add`), `synced` (created for an open PR) or `adopted` (found on disk) |
+| `authorship_override` | text   | Nullable; `mine` or `theirs`, set by `lumberjack set-authorship`. Null means authorship is derived (`docs/ownership.md`) |
 
 Unique constraint on (`repository_id`, `directory_path`).
 
 `lumberjack worktrees` displays just **directory**, **branch**, and **last synced at** from this table. Reconciliation status (dirty tree, local-only commits, orphaned) is computed live from git when needed, not stored.
+
+### `list_views`
+
+When the user last looked at each tab of a repository in the macOS app — the one fact behind "new" that GitHub cannot reconstruct (`docs/ownership.md`).
+
+| Column          | Type      | Notes                                                                 |
+| --------------- | --------- | --------------------------------------------------------------------- |
+| `repository_id` | integer   | FK → `repositories.id`                                                |
+| `authorship`    | text      | `mine` or `theirs` (`CHECK`)                                          |
+| `viewed_at`     | timestamp | The sync time of the data the user saw; never moves backwards         |
+
+Primary key (`repository_id`, `authorship`). No row means the tab has never been viewed, so nothing in it counts as new.
 
 ### `sync_runs`
 

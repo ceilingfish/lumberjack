@@ -36,7 +36,7 @@ func (c *Client) FinishSyncRun(ctx context.Context, run *schema.SyncRun, at time
 		Set("worktrees_created = ?", created).
 		Set("worktrees_removed = ?", removed).
 		Set("error = ?", errMsg).
-		Where("id = ?", run.ID).Exec(ctx); err != nil {
+		Where(whereID, run.ID).Exec(ctx); err != nil {
 		return fmt.Errorf("finishing sync run: %w", err)
 	}
 	return nil

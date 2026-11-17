@@ -412,3 +412,17 @@ func resolveBinary(envVar, name string) (string, error) {
 	}
 	return p, nil
 }
+
+func (g *Git) RemoteBranchSHA(ctx context.Context, repoPath, remote, branch string) (string, error) {
+	ref := "refs/remotes/" + remote + "/" + branch
+	out, err := g.run(ctx, repoPath, "for-each-ref", "--format=%(refname) %(objectname)", ref)
+	if err != nil {
+		return "", err
+	}
+	for line := range strings.Lines(out) {
+		if name, sha, ok := strings.Cut(strings.TrimSpace(line), " "); ok && name == ref {
+			return sha, nil
+		}
+	}
+	return "", nil
+}

@@ -386,15 +386,21 @@ func TestListOpenPRs(t *testing.T) {
 	var gotArgs []string
 	c := fakeClient(func(args ...string) (string, error) {
 		gotArgs = args
-		return `[{"number":42,"headRefName":"feature/x"},{"number":7,"headRefName":"fix/y"}]`, nil
+		return `[{"number":42,"headRefName":"feature/x","author":{"login":"alice"}},{"number":7,"headRefName":"fix/y"}]`, nil
 	})
 	repo := RepoInfo{Owner: "o", Name: "n", Host: "github.com"}
 	prs, err := c.ListOpenPRs(context.Background(), repo)
 	if err != nil {
 		t.Fatalf("ListOpenPRs: %v", err)
 	}
-	if len(prs) != 2 || prs[0].Number != 42 || prs[0].HeadBranch != "feature/x" {
+	if len(prs) != 2 || prs[0].Number != 42 || prs[0].HeadBranch != "feature/x" || prs[0].AuthorLogin != "alice" {
 		t.Errorf("prs = %+v", prs)
+	}
+	if prs[1].AuthorLogin != "" {
+		t.Errorf("PR without an author = %q, want empty", prs[1].AuthorLogin)
+	}
+	if !slices.Contains(gotArgs, "number,headRefName,author") {
+		t.Errorf("expected author in --json selection, got %v", gotArgs)
 	}
 	// The repo selector must be host/owner/name.
 	joined := ""
@@ -420,13 +426,13 @@ func TestFindPRForBranch(t *testing.T) {
 	c := fakeClient(func(args ...string) (string, error) {
 		gotArgs = args
 		return `[{"number":7,"headRefName":"feature/x","state":"CLOSED","updatedAt":"2026-01-01T00:00:00Z"},
-			{"number":9,"headRefName":"feature/x","state":"MERGED","updatedAt":"2026-02-01T00:00:00Z"}]`, nil
+			{"number":9,"headRefName":"feature/x","state":"MERGED","updatedAt":"2026-02-01T00:00:00Z","author":{"login":"bob"}}]`, nil
 	})
 	pr, found, err := c.FindPRForBranch(context.Background(), RepoInfo{Owner: "o", Name: "n", Host: "github.com"}, "feature/x")
 	if err != nil || !found {
 		t.Fatalf("FindPRForBranch: found=%v err=%v", found, err)
 	}
-	if pr.Number != 9 {
+	if pr.Number != 9 || pr.AuthorLogin != "bob" {
 		t.Errorf("pr = %+v, want the most recently updated", pr)
 	}
 	if !slices.Contains(gotArgs, "all") || !slices.Contains(gotArgs, "feature/x") {
@@ -888,5 +894,45 @@ func TestMergedPRsDoesNotSplitOnTransportFailure(t *testing.T) {
 		if r.Err == nil {
 			t.Errorf("PR %d: expected the transport error", n)
 		}
+	}
+}
+
+func TestCompareCommitAuthors(t *testing.T) {
+	var gotArgs []string
+	c := fakeClient(func(args ...string) (string, error) {
+		gotArgs = args
+		return `{"total_commits":3,"commits":[{"author":{"login":"me"}},{"author":null},{"author":{"login":"you"}}]}`, nil
+	})
+	repo := RepoInfo{Owner: "o", Name: "n", Host: "ghe.example.com"}
+	got, err := c.CompareCommitAuthors(context.Background(), repo, "main", "abc123")
+	if err != nil {
+		t.Fatalf("CompareCommitAuthors: %v", err)
+	}
+	if !slices.Equal(got.Logins, []string{"me", "", "you"}) || got.Truncated {
+		t.Errorf("authors = %+v", got)
+	}
+	if !slices.Contains(gotArgs, "repos/o/n/compare/main...abc123") || !slices.Contains(gotArgs, "ghe.example.com") {
+		t.Errorf("args = %v", gotArgs)
+	}
+}
+
+func TestCompareCommitAuthorsTruncated(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) {
+		return `{"total_commits":300,"commits":[{"author":{"login":"me"}}]}`, nil
+	})
+	got, err := c.CompareCommitAuthors(context.Background(), RepoInfo{}, "main", "abc")
+	if err != nil || !got.Truncated {
+		t.Errorf("authors = %+v, err = %v; want truncated", got, err)
+	}
+}
+
+func TestCompareCommitAuthorsFailures(t *testing.T) {
+	c := fakeClient(func(...string) (string, error) { return "", errors.New("HTTP 404") })
+	if _, err := c.CompareCommitAuthors(context.Background(), RepoInfo{}, "main", "abc"); err == nil {
+		t.Error("expected the gh failure")
+	}
+	c = fakeClient(func(...string) (string, error) { return "{", nil })
+	if _, err := c.CompareCommitAuthors(context.Background(), RepoInfo{}, "main", "abc"); err == nil {
+		t.Error("expected a JSON parse error")
 	}
 }

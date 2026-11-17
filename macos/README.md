@@ -32,7 +32,14 @@ issue #9. Installing the Go binary never installs this app, and vice versa.
   `selectedRepository`, `Notifier`) was written to stay the same across that
   swap.
 - `MenuBarView` mirrors the CLI's worktree listing columns (branch, PR,
-  status/reconciliation note, last-synced) for the selected repository.
+  status/reconciliation note, last-synced) for the selected repository,
+  split into a **Mine** and an **Incoming** tab by each worktree's
+  authorship (`docs/ownership.md`). Rows arrive in the daemon's display
+  order; `PullRequestPresentation` turns each row's `PullRequestState` into
+  its chips, dot and subtitle. Leaving a tab (switching tab or repository, or
+  closing the panel) calls `MarkViewed`, which is what "new" is measured
+  against. Against a daemon too old to send authorship, the list is shown
+  unsplit.
 
 ## Building
 
@@ -120,7 +127,10 @@ with a Developer ID certificate and notarize before distributing the `.dmg`.
    no daemon is reachable, the menu shows "Daemon not running" and keeps
    retrying — no restart of the app needed once the daemon comes up.
 4. Click the menu-bar icon to open the panel: pick a tracked repository from
-   the switcher to see its live worktree list. A notification appears
+   the switcher to see its live worktree list. **Mine** lists your own PRs,
+   most in need of you first, with a badge counting those that need you;
+   **Incoming** lists everyone else's, smallest first, with a dot when
+   anything is new since you last looked. A notification appears
    whenever a worktree is cloned or deleted for any tracked repository,
    regardless of which one is currently selected.
 

@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A2 · Unified across repositories</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Helvetica Neue",sans-serif;color:#1f2430;-webkit-font-smoothing:antialiased}
+a{color:#000081}a:hover{color:#00005a}
+button{font-family:inherit}
+.pop{width:360px;background:#fff;border-radius:12px;box-shadow:0 0 0 1px rgba(0,0,0,.08),0 18px 40px rgba(20,24,40,.18);overflow:hidden;display:flex;flex-direction:column}
+.hair{height:1px;background:#eceef2}
+.hdr{display:flex;align-items:center;gap:10px;padding:12px 14px}
+.appicon{width:26px;height:26px;border-radius:7px;background:#eef3ee;border:1px solid #dbe6dc;box-sizing:border-box;display:flex;align-items:center;justify-content:center;color:#2f7d46}
+.ttl{font-size:13px;font-weight:600;color:#1f2430}
+.sub{font-size:11px;color:#6b7280}
+.conn{display:flex;align-items:center;gap:6px;padding:3px 8px;border-radius:99px;background:#eef6f0;border:1px solid #d8e7dc;font-size:10px;font-weight:600;color:#2f7d46}
+.conn i{width:6px;height:6px;border-radius:50%;background:#2f9e52}
+.seclabel{font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:#6b7280}
+.repo{display:flex;align-items:center;gap:9px;padding:8px 9px;border:1px solid #dfe2e9;border-radius:8px;font-size:13px;font-weight:600;color:#1f2430}
+.list{display:flex;flex-direction:column;padding:0 6px 6px;overflow:auto}
+.row{display:flex;align-items:flex-start;gap:8px;padding:8px 8px 9px;border-radius:7px}
+.row:hover{background:#f6f7fa}
+.dot{width:6px;height:6px;border-radius:50%;margin-top:6px;flex:none}
+.rmain{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.rtop{display:flex;align-items:center;gap:6px;min-width:0}
+.branch{font:500 11.5px ui-monospace,"SF Mono",Menlo,monospace;color:#1f2430;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.num{font:10px ui-monospace,"SF Mono",Menlo,monospace;color:#6b7280;flex:none}
+.rsub{font-size:10.5px;color:#6b7280;display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.newdot{width:6px;height:6px;border-radius:50%;background:#2a5bd7;flex:none}
+.rsub.isnew{color:#1f2430}
+.age{font-size:10px;color:#6b7280;flex:none;margin-top:2px}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:600;white-space:nowrap;box-sizing:border-box}
+.chip svg{width:11px;height:11px;flex:none}
+.c-red{background:#fdf1f1;color:#a32323;border:1px solid #f0d2d2}
+.c-amber{background:#fdf3e3;color:#7a4800;border:1px solid #f0dcbb}
+.c-green{background:#eef6f0;color:#2a6e3e;border:1px solid #d8e7dc}
+.c-blue{background:#eef1fb;color:#2443a8;border:1px solid #d6ddf3}
+.c-grey{background:#f1f2f6;color:#4b5160;border:1px solid #e4e6ec}
+.size{display:inline-flex;align-items:center;gap:5px;height:18px;padding:0 6px 0 5px;border-radius:5px;background:#fff;border:1px solid #dfe2e9;font-size:10px;font-weight:600;color:#333;box-sizing:border-box}
+.sz{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:12px;border-radius:3px;font-size:8.5px;font-weight:700;color:#fff;padding:0 2px;box-sizing:border-box}
+.szbar{width:34px;height:4px;border-radius:2px;background:#eceef2;overflow:hidden;display:flex}
+.szbar span{display:block;height:4px;border-radius:2px}
+.owner{font-size:9.5px;font-weight:600;padding:1px 5px;border-radius:4px;flex:none}
+.o-mine{background:#eef3ee;color:#2a6e3e}
+.o-theirs{background:#f1f2f6;color:#4b5160}
+.divider{display:flex;align-items:center;gap:8px;padding:8px 8px 4px;font-size:10px;font-weight:600;color:#6b7280}
+.divider::after{content:"";flex:1;height:1px;background:#eceef2}
+.sorthint{display:flex;align-items:center;gap:5px;font-size:10.5px;color:#6b7280}
+.foot{display:flex;align-items:center;gap:6px;padding:9px 10px;background:#fbfbfd}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid #dfe2e9;border-radius:7px;background:#fff;font-size:11.5px;font-weight:600;color:#333;cursor:pointer}
+.btn:hover{background:#f4f5f9}
+.btn.quit{color:#b42d2d;border-color:#e6d3d3}
+.btn.quit kbd{font:500 10px ui-monospace,monospace;color:rgba(180,45,45,.75)}
+.unknown{display:flex;align-items:center;gap:6px;margin:2px 8px 4px;padding:7px 9px;border-radius:7px;background:#fbfbfd;border:1px dashed #dfe2e9;font-size:10.5px;color:#6b7280}
+
+.badge{position:relative;display:inline-flex}
+.badge .tip{display:none;position:absolute;top:22px;left:0;z-index:5;min-width:180px;padding:8px 10px;border-radius:8px;background:#1f2430;color:#fff;font-size:10.5px;font-weight:500;line-height:1.5;box-shadow:0 8px 20px rgba(20,24,40,.25);white-space:normal}
+.badge:hover .tip,.badge:focus-within .tip{display:block}
+.tip ul{margin:0;padding:0 0 0 14px}
+.c-yellow{background:#fdf6dc;color:#6b4e00;border:1px solid #efe0a6}
+.tabdot{width:7px;height:7px;border-radius:50%;background:#e0a100;box-shadow:0 0 0 2px #fff}
+</style>
+</helmet>
+<div style="width: 360px; height: 1000px; display: flex; align-items: flex-start"><div class="pop" style="max-height: 1000px; overflow: visible">
+<div class="hdr">
+  <div class="appicon"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 1l4 5H9l3 4H8v3H6v-3H2l3-4H3z"></path></svg></div>
+  <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px">
+    <div class="ttl">Lumberjack</div>
+    <div class="sub">Watching 7 repositories · synced 3 m ago</div>
+  </div>
+  <span class="conn"><i></i>Connected</span>
+</div>
+<div class="hair"></div>
+
+
+<div style="padding: 10px 14px 6px; display: flex; flex-direction: column; gap: 8px">
+  <div role="tablist" aria-label="Pull requests" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; padding: 2px; background: #f1f2f6; border-radius: 8px">
+    <button type="button" role="tab" aria-selected="{{mineSel}}" onClick="{{pickMine}}" style="{{mineTabStyle}}">Mine<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 600; color: #a32323"><span style="width: 6px; height: 6px; border-radius: 50%; background: #b42d2d"></span>{{needsYou}}</span></button>
+    <button type="button" role="tab" aria-selected="{{theirsSel}}" onClick="{{pickTheirs}}" style="{{theirsTabStyle}}">Incoming<span style="font-size: 10px; color: #6b7280; font-weight: 500">{{theirsCount}}</span><sc-if value="{{unread}}" hint-placeholder-val="{{true}}"><span class="tabdot" role="img" aria-label="New pull requests since you last looked"></span></sc-if></button>
+  </div>
+  <div style="display: flex; align-items: center; gap: 6px">
+    <button type="button" aria-expanded="{{filterOpen}}" aria-controls="filter-panel" onClick="{{toggleFilter}}" style="{{filterBtnStyle}}"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M1.5 2.5h9L7 6.6V10L5 9V6.6z"></path></svg><span>Filter</span><sc-if value="{{filtered}}" hint-placeholder-val="{{false}}"><span style="display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: #2f7d46; color: #fff; font-size: 9.5px; font-weight: 700">{{activeCount}}</span></sc-if><span style="{{chevStyle}}"><svg aria-hidden="true" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5L6 7.5 9 4.5"></path></svg></span></button>
+    <span style="flex: 1; font-size: 10.5px; color: #6b7280; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">{{filterSummary}}</span>
+    <sc-if value="{{filtered}}" hint-placeholder-val="{{false}}"><button type="button" onClick="{{clearFilter}}" style="border: 0; background: transparent; padding: 0 2px; font-size: 11px; font-weight: 600; color: #000081; cursor: pointer">Clear</button></sc-if>
+  </div>
+  <sc-if value="{{filterOpen}}" hint-placeholder-val="{{false}}">
+  <div id="filter-panel" role="group" aria-label="Filters" style="display: flex; flex-direction: column; gap: 12px; padding: 11px 11px 13px; border: 1px solid #d5d8e0; border-radius: 9px; background: #eef0f4; box-shadow: inset 0 1px 2px rgba(20,24,40,.06)">
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <span class="seclabel">Repository</span>
+      <div style="display: flex; flex-wrap: wrap; gap: 5px">
+        <sc-for list="{{repoChips}}" as="c" hint-placeholder-count="5"><button type="button" aria-pressed="{{c.on}}" onClick="{{c.toggle}}" style="{{c.style}}"><span style="{{c.dot}}"></span><sc-if value="{{c.check}}" hint-placeholder-val="{{false}}"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.5l2.3 2.3L9.5 3.8"></path></svg></sc-if>{{c.label}}<span style="font-weight: 500; opacity: .8">{{c.count}}</span></button></sc-for>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <span class="seclabel">Size</span>
+      <div style="display: flex; flex-wrap: wrap; gap: 5px">
+        <sc-for list="{{sizeChips}}" as="c" hint-placeholder-count="5"><button type="button" aria-pressed="{{c.on}}" onClick="{{c.toggle}}" style="{{c.style}}"><span style="{{c.dot}}"></span><sc-if value="{{c.check}}" hint-placeholder-val="{{false}}"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.5l2.3 2.3L9.5 3.8"></path></svg></sc-if>{{c.label}}<span style="font-weight: 500; opacity: .8">{{c.count}}</span></button></sc-for>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <span class="seclabel">Status</span>
+      <div style="display: flex; flex-wrap: wrap; gap: 5px">
+        <sc-for list="{{statusChips}}" as="c" hint-placeholder-count="5"><button type="button" aria-pressed="{{c.on}}" onClick="{{c.toggle}}" style="{{c.style}}"><span style="{{c.dot}}"></span><sc-if value="{{c.check}}" hint-placeholder-val="{{false}}"><svg aria-hidden="true" width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.5l2.3 2.3L9.5 3.8"></path></svg></sc-if>{{c.label}}<span style="font-weight: 500; opacity: .8">{{c.count}}</span></button></sc-for>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+</div>
+<div class="hair" style="margin-top: 4px"></div>
+<div style="display: flex; flex-direction: column; padding: 6px 6px 6px">
+<sc-if value="{{empty}}" hint-placeholder-val="{{false}}"><div style="padding: 28px 8px; text-align: center; font-size: 12px; color: #6b7280">No pull requests match these filters</div></sc-if>
+<sc-for list="{{items}}" as="pr" hint-placeholder-count="5">
+<div class="row">
+  <span class="dot" style="background: {{pr.dot}}"></span>
+  <div class="rmain">
+    <div class="rtop">
+      <span class="branch">{{pr.branch}}</span>
+      <a class="num" href="https://github.com/">#{{pr.num}}</a>
+      <sc-if value="{{pr.newAct}}" hint-placeholder-val="{{false}}"><span class="newdot" role="img" aria-label="New activity"></span></sc-if>
+    </div>
+    <div class="rsub"><span style="font-weight: 600; color: #4b5160">{{pr.repo}}</span><sc-if value="{{pr.isTheirs}}" hint-placeholder-val="{{false}}"><span>· {{pr.author}}</span></sc-if></div>
+    <sc-if value="{{pr.hasBadges}}" hint-placeholder-val="{{true}}">
+    <div class="chips">
+      <sc-if value="{{pr.isTheirs}}" hint-placeholder-val="{{false}}"><span class="chip" style="background: {{pr.szBg}}; color: {{pr.szColor}}; border: 1px solid {{pr.szBorder}}" title="{{pr.sizeTitle}}">{{pr.szLabel}}</span></sc-if>
+      <sc-if value="{{pr.oneProblem}}" hint-placeholder-val="{{false}}"><span class="chip c-red">{{pr.problemText}}</span></sc-if>
+      <sc-if value="{{pr.blocked}}" hint-placeholder-val="{{false}}">
+        <span class="badge" tabindex="0" aria-label="{{pr.blockedAria}}"><span class="chip c-red"><svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="6" cy="6" r="4.6" stroke-width="1.2"></circle><path d="M4.4 4.4l3.2 3.2M7.6 4.4L4.4 7.6"></path></svg>Blocked · {{pr.problemCount}}</span>
+          <span class="tip" role="tooltip"><ul><sc-for list="{{pr.problems}}" as="p" hint-placeholder-count="2"><li>{{p.text}}</li></sc-for></ul></span>
+        </span>
+      </sc-if>
+      <sc-if value="{{pr.approvedChip}}" hint-placeholder-val="{{false}}"><span class="chip c-green" title="{{pr.approvedTip}}"><svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.5l2.3 2.3L9.5 3.8"></path></svg>Approved</span></sc-if>
+      <sc-if value="{{pr.review}}" hint-placeholder-val="{{false}}"><span class="chip c-yellow"><svg aria-hidden="true" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.2 6S3 2.8 6 2.8 10.8 6 10.8 6 9 9.2 6 9.2 1.2 6 1.2 6z"></path><circle cx="6" cy="6" r="1.4"></circle></svg>Review</span></sc-if>
+    </div>
+    </sc-if>
+  </div>
+  <span class="age">{{pr.updated}}</span>
+</div>
+</sc-for>
+</div>
+
+<div class="hair"></div>
+<div class="foot" style="border-radius: 0 0 12px 12px">
+  <button class="btn" type="button"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#6b7280" stroke-width="1.4" stroke-linecap="round"><path d="M10 4.5A4 4 0 002.6 3.4M2 7.5a4 4 0 007.4 1.1"></path><path d="M2.4 1.6v1.9h1.9M9.6 10.4V8.5H7.7"></path></svg>Sync all</button>
+  <span style="flex: 1"></span>
+  <button class="btn quit" type="button"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="#b42d2d" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2H2.5v8H5M7.5 4l2 2-2 2M9.5 6H5"></path></svg>Quit<kbd>⌘Q</kbd></button>
+</div>
+</div></div></x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"startTab": {"editor": "enum", "options": ["mine", "theirs"], "default": "mine"}, "newSynced": {"editor": "boolean", "default": true}, "chipStyle": {"editor": "enum", "options": ["solid", "outline", "faded", "dot"], "default": "solid"}, "filterOpen": {"editor": "boolean", "default": true}, "$preview": {"width": 360, "height": 1000}}'>
+class Component extends DCLogic {
+
+  mineRaw() {
+    return [
+      { branch: 'feat/infra-tenants', num: 318, newAct: true, activity: 'jakubparallax requested changes on TenantScope.php', comments: 3, review: 'changes', ci: 'fail', ciText: '2 of 9 failing', updated: '12m' },
+      { branch: 'fix/key-rotation-audit', num: 321, activity: 'main moved · 4 files conflict', conflict: true, review: 'approved', ci: 'pass', updated: '1h' },
+      { branch: 'feat/signing-key-hsm', num: 319, newAct: true, activity: 'ana-p commented on KeyStore.php', comments: 1, review: 'required', ci: 'pending', updated: '34m' },
+      { branch: 'feat/fleet-metrics-export', num: 323, activity: 'Waiting on review from dmitri', review: 'required', ci: 'pass', updated: '3h' },
+      { branch: 'chore/laravel-11-upgrade', num: 315, draft: true, activity: 'You pushed 2 commits', review: 'none', ci: 'pass', updated: '2d' }
+    ];
+  }
+  theirsRaw() {
+    return [
+      { branch: 'jakubparallax/firmware-build-id', num: 324, author: 'jakubparallax', add: 86, del: 12, review: 'me', ci: 'pass', updated: '2m' },
+      { branch: 'sarah-k/fix-null-tenant', num: 327, author: 'sarah-k', add: 14, del: 3, review: 'me', ci: 'pass', updated: '20m' },
+      { branch: 'jakubparallax/ota-rollout-api', num: 320, author: 'jakubparallax', add: 310, del: 95, conflict: true, comments: 4, review: 'changes', ci: 'pass', updated: '5h' },
+      { branch: 'ana-p/device-fleet-ui', num: 325, author: 'ana-p', add: 612, del: 40, review: 'me', ci: 'fail', ciText: '1 of 9 failing', updated: '1h' },
+      { branch: 'dmitri/refactor-signing-service', num: 322, author: 'dmitri', add: 1240, del: 880, review: 'me', ci: 'pass', updated: '1d' },
+      { branch: 'lee-w/deps-bump-2026-11', num: 326, author: 'lee-w', add: 1902, del: 1848, review: 'required', ci: 'pass', updated: '3d' }
+    ];
+  }
+  // Mine: what needs me most, first.
+  mineScore(p) {
+    return (p.newAct ? 40 : 0) + Math.min(p.comments || 0, 3) * 8 + (p.review === 'changes' ? 30 : 0)
+      + (p.conflict ? 25 : 0) + (p.ci === 'fail' ? 25 : 0) - (p.draft ? 10 : 0);
+  }
+  // Theirs: effective size = changed lines + penalty lines. Smallest first.
+  effSize(p) {
+    return p.add + p.del + (p.ci === 'fail' ? 800 : 0) + (p.conflict ? 600 : 0) + ((p.comments || 0) > 0 ? 300 : 0);
+  }
+  decorate(p, theirs, showOwner) {
+    const lines = theirs ? p.add + p.del : 0;
+    const blocked = p.ci === 'fail' || p.conflict || p.review === 'changes';
+    let dot = '#2f9e52';
+    if (!theirs) dot = blocked ? '#b42d2d' : (p.newAct ? '#2a5bd7' : (p.draft ? '#9aa0ae' : '#2f9e52'));
+    else dot = blocked || (p.comments || 0) > 0 ? '#d98b1f' : '#2f9e52';
+    const sz = lines < 50 ? ['XS', '#2f7d46'] : lines < 250 ? ['S', '#2f7d46'] : lines < 1000 ? ['M', '#6b7a2a'] : lines < 2500 ? ['L', '#a35a00'] : ['XL', '#a32323'];
+    const pct = theirs ? Math.max(6, Math.min(100, Math.round(Math.log10(lines + 1) / Math.log10(5000) * 100))) : 0;
+    const fmt = (n) => n.toLocaleString('en-GB');
+    let activity = p.activity;
+    if (theirs) activity = p.author + (p.review === 'me' ? ' · requested your review' : p.review === 'changes' ? ' · changes requested' : ' · opened') ;
+    return Object.assign({}, p, {
+      isRow: true, isDivider: false, isTheirs: theirs, dot: dot, activity: activity,
+      subClass: p.newAct ? 'isnew' : '',
+      showOwner: !!showOwner, ownerLabel: theirs ? p.author : 'You', ownerClass: theirs ? 'o-theirs' : 'o-mine',
+      ciFail: p.ci === 'fail', ciPass: p.ci === 'pass', ciPending: p.ci === 'pending',
+      ciText: p.ciText || '',
+      conflict: !!p.conflict, changes: p.review === 'changes', approved: p.review === 'approved',
+      reviewMe: p.review === 'me', draft: !!p.draft,
+      hasComments: (p.comments || 0) > 0, commentsText: (p.comments || 0) + ' unresolved',
+      newAct: !!p.newAct,
+      szLabel: sz[0], szColor: sz[1], szPct: pct + '%',
+      linesText: theirs ? '+' + fmt(p.add) + ' −' + fmt(p.del) : '',
+      sizeTitle: theirs ? fmt(lines) + ' lines changed · ranks as ' + fmt(this.effSize(p)) : ''
+    });
+  }
+  mineList(showOwner) {
+    return this.mineRaw().slice().sort((a, b) => this.mineScore(b) - this.mineScore(a)).map((p) => this.decorate(p, false, showOwner));
+  }
+  theirsList(showOwner, withDivider) {
+    const sorted = this.theirsRaw().slice().sort((a, b) => this.effSize(a) - this.effSize(b));
+    const out = [];
+    let dividerDone = false;
+    sorted.forEach((p) => {
+      if (withDivider && !dividerDone && this.effSize(p) >= 1000) {
+        out.push({ isDivider: true, isRow: false, label: 'Large or blocked · 1,000+ lines' });
+        dividerDone = true;
+      }
+      out.push(this.decorate(p, true, showOwner));
+    });
+    return out;
+  }
+  mineNeedsYou() { return this.mineRaw().filter((p) => this.mineScore(p) > 0).length; }
+
+
+  problemsOf(p) {
+    const out = [];
+    if (p.ci === 'fail') out.push({ text: (p.ciText || 'Checks failing').replace(' failing', ' checks failing') });
+    if (p.conflict) out.push({ text: 'Merge conflicts' });
+    if (p.review === 'changes') out.push({ text: 'Changes requested' });
+    if ((p.comments || 0) > 0) out.push({ text: p.comments + ' unresolved comment' + (p.comments > 1 ? 's' : '') });
+    return out;
+  }
+  badge(p, theirs) {
+    const probs = this.problemsOf(p);
+    const lines = (p.add || 0) + (p.del || 0);
+    const sz = lines < 50 ? ['XS', '#2a6e3e', '#eef6f0', '#d8e7dc'] : lines < 250 ? ['S', '#2a6e3e', '#eef6f0', '#d8e7dc'] : lines < 1000 ? ['M', '#55621f', '#f4f6e6', '#e1e6c4'] : lines < 2500 ? ['L', '#8a4a00', '#fdf1e3', '#f0d9bb'] : ['XL', '#a32323', '#fdf1f1', '#f0d2d2'];
+    return Object.assign(this.decorate(p, theirs, false), {
+      problems: probs, problemCount: probs.length,
+      oneProblem: probs.length === 1, problemText: probs.length === 1 ? probs[0].text : '',
+      blocked: probs.length > 1, blockedAria: 'Blocked: ' + probs.map((x) => x.text).join(', '),
+      approvedChip: probs.length === 0 && (theirs ? p.review === 'approvedByMe' : p.review === 'approved'),
+      approvedTip: theirs ? 'You approved this' : 'Approved by ' + (p.approver || 'a reviewer'),
+      review: theirs && probs.length === 0 && p.review !== 'approvedByMe',
+      hasBadges: theirs || probs.length > 0 || (p.review === 'approved' && probs.length === 0),
+      activity: p.activityOverride || this.decorate(p, theirs, false).activity,
+      szLabel: sz[0], szColor: sz[1], szBg: sz[2], szBorder: sz[3]
+    });
+  }
+  renderVals() {
+    const s = this.state || {};
+    const tab = s.tab || this.props.startTab || 'mine';
+    const mine = tab === 'mine';
+    const seen = s.seen || tab === 'theirs';
+    const mineData = this.mineRaw().map((p) => p.num === 323 ? Object.assign({}, p, { review: 'approved', approver: 'dmitri', activity: 'dmitri approved' }) : p);
+    const theirsData = this.theirsRaw().map((p) => p.num === 327 ? Object.assign({}, p, { review: 'approvedByMe', activityOverride: 'sarah-k · you approved' }) : p);
+    const f = s.f || { repos: ['TurnTide'], sizes: [], status: ['ci', 'comments'] };
+    const allRepos = ['TurnTide', 'lumberjack', 'kbuild-charts', 'parallax-web', 'infra-modules', 'design-tokens', 'dotfiles'];
+    const sizes = ['XS', 'S', 'M', 'L', 'XL'];
+    const statuses = [
+      { id: 'blocked', label: 'Blocked', test: (p) => p.problemCount > 1 },
+      { id: 'ci', label: 'Failing checks', test: (p) => p.ci === 'fail' },
+      { id: 'conflict', label: 'Merge conflicts', test: (p) => !!p.conflict },
+      { id: 'changes', label: 'Changes requested', test: (p) => !!p.changes },
+      { id: 'comments', label: 'Unresolved comments', test: (p) => (p.comments || 0) > 0 },
+      { id: 'approved', label: 'Approved', test: (p) => !!p.approvedChip },
+      { id: 'review', label: 'Needs review', test: (p) => !!p.review, theirsOnly: true }
+    ];
+    const decMine = mineData.slice().sort((a, b) => this.mineScore(b) - this.mineScore(a)).map((p) => this.badge(p, false));
+    const decTheirs = theirsData.slice().sort((a, b) => this.effSize(a) - this.effSize(b)).map((p) => this.badge(p, true));
+    const pass = (p, theirs, skip) => {
+      if (skip !== 'repos' && f.repos.length && f.repos.indexOf(p.repo) < 0) return false;
+      if (skip !== 'sizes' && f.sizes.length && f.sizes.indexOf(p.szLabel) < 0) return false;
+      if (skip !== 'status' && f.status.length && !statuses.some((st) => f.status.indexOf(st.id) >= 0 && st.test(p))) return false;
+      return true;
+    };
+    const pool = mine ? decMine : decTheirs;
+    const flip = (key, v) => { const cur = f[key]; const next = cur.indexOf(v) >= 0 ? cur.filter((x) => x !== v) : cur.concat([v]); this.setState({ f: Object.assign({}, f, { [key]: next }) }); };
+    const variant = this.props.chipStyle || 'solid';
+    const PAL = {"green": {"fg": "#2a6e3e", "bg": "#eef6f0", "border": "#d8e7dc", "solid": "#2f7d46", "solidText": "#ffffff"}, "olive": {"fg": "#55621f", "bg": "#f4f6e6", "border": "#e1e6c4", "solid": "#5f6d22", "solidText": "#ffffff"}, "orange": {"fg": "#8a4a00", "bg": "#fdf1e3", "border": "#f0d9bb", "solid": "#a35a00", "solidText": "#ffffff"}, "red": {"fg": "#a32323", "bg": "#fdf1f1", "border": "#f0d2d2", "solid": "#b42d2d", "solidText": "#ffffff"}, "yellow": {"fg": "#6b4e00", "bg": "#fdf6dc", "border": "#efe0a6", "solid": "#e0a100", "solidText": "#2b1f00"}, "slate": {"fg": "#3f4553", "bg": "#f1f2f6", "border": "#e1e3ea", "solid": "#4b5160", "solidText": "#ffffff"}};
+    const BASE = "display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600; cursor: pointer; box-sizing: border-box; font-family: inherit; ";
+    const css = (p, on) => {
+      if (variant === 'solid') return BASE + (on ? 'background: ' + p.solid + '; border: 1px solid ' + p.solid + '; color: ' + p.solidText : 'background: ' + p.bg + '; border: 1px solid ' + p.border + '; color: ' + p.fg);
+      if (variant === 'outline') return BASE + (on ? 'background: ' + p.bg + '; border: 1px solid ' + p.fg + '; box-shadow: inset 0 0 0 1px ' + p.fg + '; color: ' + p.fg : 'background: #fff; border: 1px solid ' + p.border + '; color: ' + p.fg);
+      if (variant === 'faded') return BASE + (on ? 'background: ' + p.bg + '; border: 1px solid ' + p.border + '; color: ' + p.fg + '; box-shadow: 0 1px 2px rgba(20,24,40,.12)' : 'background: ' + p.bg + '; border: 1px solid ' + p.border + '; color: ' + p.fg + '; opacity: .5');
+      return BASE + (on ? 'background: ' + p.bg + '; border: 1px solid ' + p.border + '; color: ' + p.fg : 'background: #fff; border: 1px solid #d5d8e0; color: #4b5160');
+    };
+    const sizePal = { XS: 'green', S: 'green', M: 'olive', L: 'orange', XL: 'red' };
+    const statusPal = { blocked: 'red', ci: 'red', conflict: 'red', changes: 'red', comments: 'red', approved: 'green', review: 'yellow' };
+    const chip = (key, v, label, count, palName) => {
+      const on = f[key].indexOf(v) >= 0;
+      const p = PAL[palName];
+      return { label: label, count: count, on: on, check: false,
+        dot: variant === 'dot' ? 'width: 6px; height: 6px; border-radius: 50%; background: ' + p.solid + '; flex: none' : 'display: none',
+        style: css(p, on) + (count || on ? '' : '; opacity: .4'), toggle: () => flip(key, v) };
+    };
+    const repoChips = allRepos.map((r) => chip('repos', r, r, pool.filter((p) => p.repo === r && pass(p, !mine, 'repos')).length, 'slate'));
+    const sizeChips = sizes.map((z) => chip('sizes', z, z, pool.filter((p) => p.szLabel === z && pass(p, !mine, 'sizes')).length, sizePal[z]));
+    const statusChips = statuses.filter((st) => !(mine && st.theirsOnly)).map((st) => chip('status', st.id, st.label, pool.filter((p) => st.test(p) && pass(p, !mine, 'status')).length, statusPal[st.id]));
+    const mineF = decMine.filter((p) => pass(p, false));
+    const theirsF = decTheirs.filter((p) => pass(p, true));
+    const activeCount = f.repos.length + f.sizes.length + f.status.length;
+    const summaryParts = [];
+    if (f.repos.length) summaryParts.push(f.repos.length === 1 ? f.repos[0] : f.repos.length + ' repos');
+    if (f.sizes.length) summaryParts.push(f.sizes.join('/'));
+    if (f.status.length) summaryParts.push(f.status.map((id) => statuses.filter((st) => st.id === id)[0].label).join(', '));
+    const open = s.open !== undefined ? s.open : this.props.filterOpen !== false;
+    const sortedMine = mineF;
+    const sortedTheirs = theirsF;
+    return {
+      mineSel: mine, theirsSel: !mine,
+      pickMine: () => this.setState({ tab: 'mine' }),
+      pickTheirs: () => this.setState({ tab: 'theirs', seen: true }),
+      mineTabStyle: mine ? "display: flex; align-items: center; justify-content: center; gap: 6px; height: 28px; border: 0; border-radius: 6px; background: #fff; box-shadow: 0 1px 2px rgba(20,24,40,.12), 0 0 0 1px rgba(20,24,40,.04); font-size: 12px; font-weight: 600; color: #1f2430; cursor: pointer" : "display: flex; align-items: center; justify-content: center; gap: 6px; height: 28px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; font-weight: 500; color: #4b5160; cursor: pointer",
+      theirsTabStyle: mine ? "display: flex; align-items: center; justify-content: center; gap: 6px; height: 28px; border: 0; border-radius: 6px; background: transparent; font-size: 12px; font-weight: 500; color: #4b5160; cursor: pointer" : "display: flex; align-items: center; justify-content: center; gap: 6px; height: 28px; border: 0; border-radius: 6px; background: #fff; box-shadow: 0 1px 2px rgba(20,24,40,.12), 0 0 0 1px rgba(20,24,40,.04); font-size: 12px; font-weight: 600; color: #1f2430; cursor: pointer",
+      needsYou: mineF.filter((p) => p.newAct || p.problemCount > 0).length,
+      theirsCount: theirsF.length,
+      filterOpen: open, filtered: activeCount > 0, activeCount: activeCount,
+      filterSummary: summaryParts.join(' · '),
+      repoChips: repoChips, sizeChips: sizeChips, statusChips: statusChips,
+      empty: (mine ? mineF : theirsF).length === 0,
+      chevStyle: 'display: inline-flex; transition: transform .15s; transform: rotate(' + (open ? '180' : '0') + 'deg)',
+      toggleFilter: () => this.setState({ open: !open }),
+      clearFilter: () => this.setState({ f: { repos: [], sizes: [], status: [] } }),
+      filterBtnStyle: 'display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; ' + (activeCount || open ? 'background: #eef3ee; border: 1px solid #c9dccd; color: #2a6e3e' : 'background: #fff; border: 1px solid #dfe2e9; color: #4b5160'),
+      unread: !seen && this.props.newSynced !== false,
+      items: mine ? sortedMine : sortedTheirs
+    };
+  }
+
+  mineRaw() {
+    return [
+      { repo: 'TurnTide', branch: 'feat/infra-tenants', num: 318, add: 420, del: 96, newAct: true, comments: 3, review: 'changes', ci: 'fail', ciText: '2 of 9 failing', updated: '12m' },
+      { repo: 'lumberjack', branch: 'feat/pr-ownership', num: 142, add: 690, del: 210, newAct: true, comments: 2, review: 'required', ci: 'pass', updated: '25m' },
+      { repo: 'TurnTide', branch: 'fix/key-rotation-audit', num: 321, add: 64, del: 18, conflict: true, review: 'approved', ci: 'pass', updated: '1h' },
+      { repo: 'TurnTide', branch: 'feat/signing-key-hsm', num: 319, add: 1180, del: 240, newAct: true, comments: 1, review: 'required', ci: 'pending', updated: '34m' },
+      { repo: 'kbuild-charts', branch: 'feat/fleet-metrics-export', num: 323, add: 152, del: 30, review: 'required', ci: 'pass', updated: '3h' },
+      { repo: 'parallax-web', branch: 'chore/laravel-11-upgrade', num: 315, add: 2650, del: 1900, draft: true, review: 'none', ci: 'pass', updated: '2d' }
+    ];
+  }
+  theirsRaw() {
+    return [
+      { repo: 'TurnTide', branch: 'jakubparallax/firmware-build-id', num: 324, author: 'jakubparallax', add: 86, del: 12, review: 'me', ci: 'pass', updated: '2m' },
+      { repo: 'TurnTide', branch: 'sarah-k/fix-null-tenant', num: 327, author: 'sarah-k', add: 14, del: 3, review: 'me', ci: 'pass', updated: '20m' },
+      { repo: 'lumberjack', branch: 'renovate/go-1.25', num: 140, author: 'renovate[bot]', add: 41, del: 38, review: 'required', ci: 'pass', updated: '6h' },
+      { repo: 'parallax-web', branch: 'mk/hero-copy', num: 88, author: 'mk', add: 22, del: 9, review: 'me', ci: 'fail', ciText: '1 of 4 failing', updated: '40m' },
+      { repo: 'TurnTide', branch: 'jakubparallax/ota-rollout-api', num: 320, author: 'jakubparallax', add: 310, del: 95, conflict: true, comments: 4, review: 'changes', ci: 'pass', updated: '5h' },
+      { repo: 'TurnTide', branch: 'ana-p/device-fleet-ui', num: 325, author: 'ana-p', add: 612, del: 40, review: 'me', ci: 'fail', ciText: '1 of 9 failing', updated: '1h' },
+      { repo: 'TurnTide', branch: 'dmitri/refactor-signing-service', num: 322, author: 'dmitri', add: 1240, del: 880, review: 'me', ci: 'pass', updated: '1d' },
+      { repo: 'kbuild-charts', branch: 'lee-w/deps-bump-2026-11', num: 61, author: 'lee-w', add: 1902, del: 1848, review: 'required', ci: 'pass', updated: '3d' }
+    ];
+  }
+
+}
+</script>
+</body>
+</html>

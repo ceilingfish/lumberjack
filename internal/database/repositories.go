@@ -137,7 +137,7 @@ func (c *Client) DeleteRepository(ctx context.Context, repoID int64) (worktreesR
 		}
 
 		res, derr = tx.NewDelete().Model((*schema.Repository)(nil)).
-			Where("id = ?", repoID).Exec(ctx)
+			Where(whereID, repoID).Exec(ctx)
 		if derr != nil {
 			return fmt.Errorf("deleting repository: %w", derr)
 		}
@@ -170,10 +170,42 @@ func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Tim
 		Set("last_synced_at = ?", at).
 		Set("last_sync_status = ?", status).
 		Set("last_sync_error = ?", errMsg).
-		Where("id = ?", repoID).Exec(ctx); err != nil {
+		Where(whereID, repoID).Exec(ctx); err != nil {
 		return fmt.Errorf("updating sync result: %w", err)
 	}
 	return nil
+}
+
+func (c *Client) ChangeGithubRepository(ctx context.Context, repoID int64, owner, name string) error {
+	return c.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		res, err := tx.NewUpdate().Model((*schema.Repository)(nil)).
+			Set("github_owner = ?", owner).
+			Set("github_name = ?", name).
+			Set("etag_pulls = NULL").
+			Where(whereID, repoID).Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("updating repository: %w", err)
+		}
+		if affected, err := res.RowsAffected(); err != nil {
+			return fmt.Errorf("counting updated repository: %w", err)
+		} else if affected == 0 {
+			return ErrRepositoryNotFound
+		}
+		if _, err := tx.NewDelete().Model((*schema.PullRequest)(nil)).
+			Where("repository_id = ?", repoID).Exec(ctx); err != nil {
+			return fmt.Errorf("deleting pull requests: %w", err)
+		}
+		if _, err := tx.NewDelete().Model((*schema.ListView)(nil)).
+			Where("repository_id = ?", repoID).Exec(ctx); err != nil {
+			return fmt.Errorf("deleting list views: %w", err)
+		}
+		if _, err := tx.NewUpdate().Model((*schema.Worktree)(nil)).
+			Set("github_pr_number = NULL").
+			Where("repository_id = ?", repoID).Exec(ctx); err != nil {
+			return fmt.Errorf("unlinking worktrees: %w", err)
+		}
+		return nil
+	})
 }
 
 // UpdateLogin sets the gh account a repository operates under. An empty login
@@ -181,7 +213,7 @@ func (c *Client) UpdateSyncResult(ctx context.Context, repoID int64, at time.Tim
 func (c *Client) UpdateLogin(ctx context.Context, repoID int64, login string) error {
 	if _, err := c.NewUpdate().Model((*schema.Repository)(nil)).
 		Set("login = ?", login).
-		Where("id = ?", repoID).Exec(ctx); err != nil {
+		Where(whereID, repoID).Exec(ctx); err != nil {
 		return fmt.Errorf("updating repository login: %w", err)
 	}
 	return nil

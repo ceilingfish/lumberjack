@@ -1,6 +1,10 @@
 package cli
 
-import "github.com/spf13/cobra"
+import (
+	"cmp"
+
+	"github.com/spf13/cobra"
+)
 
 // RepositoryFlagName is the uniform scope flag every per-repository command
 // (status, sync, worktrees, worktree delete, set-login) exposes.
@@ -26,4 +30,15 @@ func ResolveRepositoryRef(repository string) (string, error) {
 		return repository, nil
 	}
 	return CwdAbs()
+}
+
+func ResolveWorktreeRef(repository, worktree string) (repo, wt string, err error) {
+	if repository != "" && worktree != "" {
+		return repository, worktree, nil
+	}
+	cwd, err := CwdAbs()
+	if err != nil {
+		return "", "", err
+	}
+	return cmp.Or(repository, cwd), cmp.Or(worktree, cwd), nil
 }

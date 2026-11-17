@@ -1,3 +1,6 @@
+import Foundation
+import SwiftProtobuf
+
 @testable import LumberjackMenuBar
 
 struct StubDaemonError: Error {}
@@ -8,8 +11,14 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
     var healthError: (any Error)?
     var listRepositoriesError: (any Error)?
     var listWorktreesError: (any Error)?
+    var failingRepositories: Set<String> = []
     var syncedRepositories: [String] = []
     var closeCount = 0
+    private let lock = NSLock()
+    private var viewedLog: [(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?)] = []
+    var viewed: [(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?)] {
+        lock.withLock { viewedLog }
+    }
 
     func health() async throws -> Lumberjack_V1_HealthResponse {
         if let healthError { throw healthError }
@@ -23,11 +32,16 @@ final class StubDaemon: DaemonConnection, @unchecked Sendable {
 
     func listWorktrees(repository: String) async throws -> [Lumberjack_V1_Worktree] {
         if let listWorktreesError { throw listWorktreesError }
+        if failingRepositories.contains(repository) { throw StubDaemonError() }
         return worktreesByRepository[repository] ?? []
     }
 
     func sync(repository: String) async throws {
         syncedRepositories.append(repository)
+    }
+
+    func markViewed(repository: String, authorship: Authorship, seenThrough: Google_Protobuf_Timestamp?) async throws {
+        lock.withLock { viewedLog.append((repository, authorship, seenThrough)) }
     }
 
     func close() async {
@@ -51,7 +65,9 @@ func stubWorktree(
     reconciliationNote: String = "",
     orphaned: Bool = false,
     branchDisparity: Bool = false,
-    checkedOutBranch: String = ""
+    checkedOutBranch: String = "",
+    authorship: Authorship = .unspecified,
+    pullRequest: Lumberjack_V1_PullRequestState? = nil
 ) -> Lumberjack_V1_Worktree {
     var worktree = Lumberjack_V1_Worktree()
     worktree.branchName = branch
@@ -61,5 +77,7 @@ func stubWorktree(
     worktree.orphaned = orphaned
     worktree.branchDisparity = branchDisparity
     worktree.checkedOutBranch = checkedOutBranch
+    worktree.authorship = authorship
+    if let pullRequest { worktree.pullRequest = pullRequest }
     return worktree
 }

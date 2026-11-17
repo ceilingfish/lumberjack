@@ -41,6 +41,9 @@ func TestAddWorktreeChecksOutExistingBranch(t *testing.T) {
 	if wts[0].GithubPRNumber != nil {
 		t.Errorf("GithubPRNumber = %d, want nil (sync links a PR later)", *wts[0].GithubPRNumber)
 	}
+	if wts[0].Origin != schema.OriginLocal {
+		t.Errorf("Origin = %q, want local", wts[0].Origin)
+	}
 }
 
 func TestAddWorktreeCreatesBranchOffDefaultBranch(t *testing.T) {

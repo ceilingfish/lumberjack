@@ -70,6 +70,15 @@ type fakeGit struct {
 	locks     map[string]string
 	lockErr   map[string]error
 	unlockErr map[string]error
+
+	remoteSHAs   map[string]string
+	remoteSHAErr error
+}
+
+func (f *fakeGit) RemoteBranchSHA(_ context.Context, _, _, branch string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.remoteSHAs[branch], f.remoteSHAErr
 }
 
 func newFakeGit() *fakeGit {
@@ -329,6 +338,37 @@ type fakeGH struct {
 	// active when CheckRepoAccess ran.
 	accessErr    error
 	accessChecks []string
+
+	compare      map[string]github.CommitAuthors
+	compareErr   error
+	compareCalls []string
+
+	states      map[int64]github.PullState
+	statesErr   error
+	statesCalls [][]int64
+}
+
+func (f *fakeGH) PullStates(_ context.Context, _ github.RepoInfo, numbers []int64) (map[int64]github.PullState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statesCalls = append(f.statesCalls, numbers)
+	if f.statesErr != nil {
+		return nil, f.statesErr
+	}
+	out := map[int64]github.PullState{}
+	for _, n := range numbers {
+		if ps, ok := f.states[n]; ok {
+			out[n] = ps
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeGH) CompareCommitAuthors(_ context.Context, _ github.RepoInfo, base, head string) (github.CommitAuthors, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compareCalls = append(f.compareCalls, base+"..."+head)
+	return f.compare[head], f.compareErr
 }
 
 func (f *fakeGH) RepoInfo(context.Context, string) (github.RepoInfo, error) {
@@ -955,6 +995,29 @@ func TestSyncCreatesWorktrees(t *testing.T) {
 	}
 	if len(changes) == 0 {
 		t.Error("expected progress changes")
+	}
+	for _, wt := range wts {
+		if wt.Origin != schema.OriginSynced {
+			t.Errorf("%s origin = %q, want synced", wt.BranchName, wt.Origin)
+		}
+	}
+}
+
+func TestSyncRecordsPRAuthors(t *testing.T) {
+	h := newHarness(t)
+	repo := h.repo(t)
+	h.gh.prs = []github.PR{{Number: 1, HeadBranch: "a", AuthorLogin: "alice"}}
+	h.seedSync(t, repo)
+
+	h.gh.prs = nil
+	h.seedSync(t, repo)
+
+	prs, err := h.db.PullRequests(context.Background(), repo.ID)
+	if err != nil {
+		t.Fatalf("PullRequests: %v", err)
+	}
+	if prs[1].AuthorLogin != "alice" {
+		t.Errorf("prs = %v, want the closed PR's author kept", prs)
 	}
 }
 
@@ -2345,6 +2408,38 @@ func TestSyncLinksPRMergedBetweenTicks(t *testing.T) {
 	}
 	if got, _ := h.db.ListWorktrees(context.Background(), repo.ID); len(got) != 0 {
 		t.Errorf("expected the worktree removed, got %d", len(got))
+	}
+}
+
+func TestSyncRecordsAuthorOfPRLinkedAfterTheFact(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x", AuthorLogin: "bob"}}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	prs, _ := h.db.PullRequests(context.Background(), repo.ID)
+	if prs[7].AuthorLogin != "bob" {
+		t.Errorf("prs = %v, want PR #7 recorded with its author", prs)
+	}
+}
+
+func TestSyncReportsFailureToRecordPRLinkedAfterTheFact(t *testing.T) {
+	h := newHarness(t)
+	repo := h.unlinkedWorktree(t, "feature/x")
+	h.gh.branchPRs = map[string]github.PR{"feature/x": {Number: 7, HeadBranch: "feature/x"}}
+	if _, err := h.db.ExecContext(context.Background(),
+		"CREATE TRIGGER fail_pr_insert BEFORE INSERT ON pull_requests BEGIN SELECT RAISE(ABORT, 'boom'); END"); err != nil {
+		t.Fatalf("creating trigger: %v", err)
+	}
+
+	if _, _, err := h.svc.SyncRepository(context.Background(), repo, nil); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v, want the PR recording failure", err)
+	}
+	wts, _ := h.db.ListWorktrees(context.Background(), repo.ID)
+	if wts[0].GithubPRNumber != nil {
+		t.Error("the worktree must not be linked when its PR could not be recorded")
 	}
 }
 

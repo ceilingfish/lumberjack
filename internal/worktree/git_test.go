@@ -651,3 +651,29 @@ func TestPullFastForwards(t *testing.T) {
 		t.Errorf("Pull did not fast-forward the worktree: %v", err)
 	}
 }
+
+func TestRemoteBranchSHA(t *testing.T) {
+	g, main := setupRepos(t)
+	ctx := context.Background()
+	if err := g.Fetch(ctx, main, "origin"); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+
+	sha, err := g.RemoteBranchSHA(ctx, main, "origin", "feature/foo")
+	if err != nil {
+		t.Fatalf("RemoteBranchSHA: %v", err)
+	}
+	want, _ := g.run(ctx, main, "rev-parse", "origin/feature/foo")
+	if sha != want || sha == "" {
+		t.Errorf("sha = %q, want %q", sha, want)
+	}
+
+	for _, branch := range []string{"never-pushed", "feature"} {
+		if sha, err := g.RemoteBranchSHA(ctx, main, "origin", branch); err != nil || sha != "" {
+			t.Errorf("%s: sha = %q, err = %v; want empty for a branch not on the remote", branch, sha, err)
+		}
+	}
+	if _, err := g.RemoteBranchSHA(ctx, t.TempDir(), "origin", "main"); err == nil {
+		t.Error("expected an error outside a git repository")
+	}
+}

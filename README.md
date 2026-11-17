@@ -227,6 +227,7 @@ Run `lumberjack <command> --help` for full details on any of these.
 | `lumberjack worktree add BRANCH [--repository NAME]` | Create a worktree for `BRANCH` in the conventional location and run the repo's setup steps. Creates the branch off the default branch if it doesn't exist yet. |
 | `lumberjack worktree delete BRANCH_OR_DIR [--repository NAME]` | Delete a worktree (prompts if it would lose commits; `--force` to skip). |
 | `lumberjack set-login [LOGIN] [--repository NAME]` | Set the `gh` account for the repo in the current dir, or the named one. |
+| `lumberjack set-authorship mine\|theirs\|auto [--worktree BRANCH_OR_DIR] [--repository NAME]` | Mark a worktree as yours or someone else's, overriding the derived authorship; `auto` clears the override. Defaults to the worktree containing the current dir. |
 | `lumberjack setup-steps add/remove/list COMMAND` | Manage the current worktree's `.lumberjack.yml` run-command setup steps. |
 | `lumberjack setup-steps run` | Run the current worktree's setup steps now — inherits the main checkout's `.lumberjack.yml` unless the worktree has its own. Run-commands matching the default branch's config run straight away; a locally edited config's commands are shown and confirmed first. |
 | `lumberjack setup-steps trust` | Record this worktree's `.lumberjack.yml` checksum as one you have agreed to run, so it stops asking. Every trusted version stays trusted. |

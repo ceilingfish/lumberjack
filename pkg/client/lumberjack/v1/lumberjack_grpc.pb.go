@@ -43,6 +43,9 @@ const (
 	LumberjackService_Watch_FullMethodName            = "/lumberjack.v1.LumberjackService/Watch"
 	LumberjackService_SetSetupConsent_FullMethodName  = "/lumberjack.v1.LumberjackService/SetSetupConsent"
 	LumberjackService_TrustSetupSteps_FullMethodName  = "/lumberjack.v1.LumberjackService/TrustSetupSteps"
+	LumberjackService_SetAuthorship_FullMethodName    = "/lumberjack.v1.LumberjackService/SetAuthorship"
+	LumberjackService_MarkViewed_FullMethodName       = "/lumberjack.v1.LumberjackService/MarkViewed"
+	LumberjackService_SetRepository_FullMethodName    = "/lumberjack.v1.LumberjackService/SetRepository"
 )
 
 // LumberjackServiceClient is the client API for LumberjackService service.
@@ -112,6 +115,9 @@ type LumberjackServiceClient interface {
 	// pending again.
 	SetSetupConsent(ctx context.Context, in *SetSetupConsentRequest, opts ...grpc.CallOption) (*SetSetupConsentResponse, error)
 	TrustSetupSteps(ctx context.Context, in *TrustSetupStepsRequest, opts ...grpc.CallOption) (*TrustSetupStepsResponse, error)
+	SetAuthorship(ctx context.Context, in *SetAuthorshipRequest, opts ...grpc.CallOption) (*SetAuthorshipResponse, error)
+	MarkViewed(ctx context.Context, in *MarkViewedRequest, opts ...grpc.CallOption) (*MarkViewedResponse, error)
+	SetRepository(ctx context.Context, in *SetRepositoryRequest, opts ...grpc.CallOption) (*SetRepositoryResponse, error)
 }
 
 type lumberjackServiceClient struct {
@@ -290,6 +296,36 @@ func (c *lumberjackServiceClient) TrustSetupSteps(ctx context.Context, in *Trust
 	return out, nil
 }
 
+func (c *lumberjackServiceClient) SetAuthorship(ctx context.Context, in *SetAuthorshipRequest, opts ...grpc.CallOption) (*SetAuthorshipResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetAuthorshipResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_SetAuthorship_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lumberjackServiceClient) MarkViewed(ctx context.Context, in *MarkViewedRequest, opts ...grpc.CallOption) (*MarkViewedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MarkViewedResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_MarkViewed_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *lumberjackServiceClient) SetRepository(ctx context.Context, in *SetRepositoryRequest, opts ...grpc.CallOption) (*SetRepositoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetRepositoryResponse)
+	err := c.cc.Invoke(ctx, LumberjackService_SetRepository_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // LumberjackServiceServer is the server API for LumberjackService service.
 // All implementations must embed UnimplementedLumberjackServiceServer
 // for forward compatibility.
@@ -357,6 +393,9 @@ type LumberjackServiceServer interface {
 	// pending again.
 	SetSetupConsent(context.Context, *SetSetupConsentRequest) (*SetSetupConsentResponse, error)
 	TrustSetupSteps(context.Context, *TrustSetupStepsRequest) (*TrustSetupStepsResponse, error)
+	SetAuthorship(context.Context, *SetAuthorshipRequest) (*SetAuthorshipResponse, error)
+	MarkViewed(context.Context, *MarkViewedRequest) (*MarkViewedResponse, error)
+	SetRepository(context.Context, *SetRepositoryRequest) (*SetRepositoryResponse, error)
 	mustEmbedUnimplementedLumberjackServiceServer()
 }
 
@@ -411,6 +450,15 @@ func (UnimplementedLumberjackServiceServer) SetSetupConsent(context.Context, *Se
 }
 func (UnimplementedLumberjackServiceServer) TrustSetupSteps(context.Context, *TrustSetupStepsRequest) (*TrustSetupStepsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TrustSetupSteps not implemented")
+}
+func (UnimplementedLumberjackServiceServer) SetAuthorship(context.Context, *SetAuthorshipRequest) (*SetAuthorshipResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetAuthorship not implemented")
+}
+func (UnimplementedLumberjackServiceServer) MarkViewed(context.Context, *MarkViewedRequest) (*MarkViewedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MarkViewed not implemented")
+}
+func (UnimplementedLumberjackServiceServer) SetRepository(context.Context, *SetRepositoryRequest) (*SetRepositoryResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetRepository not implemented")
 }
 func (UnimplementedLumberjackServiceServer) mustEmbedUnimplementedLumberjackServiceServer() {}
 func (UnimplementedLumberjackServiceServer) testEmbeddedByValue()                           {}
@@ -689,6 +737,60 @@ func _LumberjackService_TrustSetupSteps_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _LumberjackService_SetAuthorship_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetAuthorshipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).SetAuthorship(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_SetAuthorship_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).SetAuthorship(ctx, req.(*SetAuthorshipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LumberjackService_MarkViewed_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MarkViewedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).MarkViewed(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_MarkViewed_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).MarkViewed(ctx, req.(*MarkViewedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _LumberjackService_SetRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetRepositoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LumberjackServiceServer).SetRepository(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: LumberjackService_SetRepository_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LumberjackServiceServer).SetRepository(ctx, req.(*SetRepositoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // LumberjackService_ServiceDesc is the grpc.ServiceDesc for LumberjackService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -747,6 +849,18 @@ var LumberjackService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TrustSetupSteps",
 			Handler:    _LumberjackService_TrustSetupSteps_Handler,
+		},
+		{
+			MethodName: "SetAuthorship",
+			Handler:    _LumberjackService_SetAuthorship_Handler,
+		},
+		{
+			MethodName: "MarkViewed",
+			Handler:    _LumberjackService_MarkViewed_Handler,
+		},
+		{
+			MethodName: "SetRepository",
+			Handler:    _LumberjackService_SetRepository_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

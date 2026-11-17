@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/ceilingfish/lumberjack/internal/database/schema"
+	"github.com/ceilingfish/lumberjack/internal/pullstate"
 	"github.com/ceilingfish/lumberjack/internal/sshkey"
 	lumberjackv1 "github.com/ceilingfish/lumberjack/pkg/client/lumberjack/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -41,18 +42,21 @@ func toProtoRepository(r *schema.Repository) *lumberjackv1.Repository {
 func toProtoWorktree(v WorktreeView) *lumberjackv1.Worktree {
 	wt := v.Worktree
 	pb := &lumberjackv1.Worktree{
-		BranchName:          wt.BranchName,
-		DirectoryPath:       wt.DirectoryPath,
-		GithubPrNumber:      wt.GithubPRNumber,
-		NeedsReconciliation: v.Status.NeedsReconciliation,
-		Dirty:               v.Status.Dirty,
-		Orphaned:            v.Status.Orphaned,
-		LocalOnlyCommits:    v.Status.LocalOnlyCommits,
-		ReconciliationNote:  v.Status.Note,
-		BranchDisparity:     v.Status.BranchDisparity,
-		CheckedOutBranch:    v.Status.CheckedOutBranch,
+		BranchName:           wt.BranchName,
+		DirectoryPath:        wt.DirectoryPath,
+		GithubPrNumber:       wt.GithubPRNumber,
+		NeedsReconciliation:  v.Status.NeedsReconciliation,
+		Dirty:                v.Status.Dirty,
+		Orphaned:             v.Status.Orphaned,
+		LocalOnlyCommits:     v.Status.LocalOnlyCommits,
+		ReconciliationNote:   v.Status.Note,
+		BranchDisparity:      v.Status.BranchDisparity,
+		CheckedOutBranch:     v.Status.CheckedOutBranch,
+		Authorship:           toProtoAuthorship(v.Authorship),
+		AuthorshipOverridden: wt.AuthorshipOverride != nil,
 	}
 	pb.LastSyncedAt = toProtoTimestamp(wt.LastSyncedAt)
+	pb.PullRequest = toProtoPullRequestState(v.PullRequest)
 	return pb
 }
 
@@ -152,4 +156,91 @@ func toProtoSyncStatus(s *string) lumberjackv1.SyncStatus {
 	default:
 		return lumberjackv1.SyncStatus_SYNC_STATUS_UNSPECIFIED
 	}
+}
+
+func toProtoAuthorship(a schema.Authorship) lumberjackv1.Authorship {
+	switch a {
+	case schema.AuthorshipMine:
+		return lumberjackv1.Authorship_AUTHORSHIP_MINE
+	case schema.AuthorshipTheirs:
+		return lumberjackv1.Authorship_AUTHORSHIP_THEIRS
+	}
+	return lumberjackv1.Authorship_AUTHORSHIP_UNSPECIFIED
+}
+
+func fromProtoAuthorship(a lumberjackv1.Authorship) (schema.Authorship, bool) {
+	switch a {
+	case lumberjackv1.Authorship_AUTHORSHIP_MINE:
+		return schema.AuthorshipMine, true
+	case lumberjackv1.Authorship_AUTHORSHIP_THEIRS:
+		return schema.AuthorshipTheirs, true
+	}
+	return "", false
+}
+
+var mergeStateStatuses = map[string]lumberjackv1.MergeStateStatus{
+	"UNKNOWN":   lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_UNKNOWN,
+	"CLEAN":     lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_CLEAN,
+	"DIRTY":     lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_DIRTY,
+	"BEHIND":    lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_BEHIND,
+	"BLOCKED":   lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_BLOCKED,
+	"UNSTABLE":  lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_UNSTABLE,
+	"HAS_HOOKS": lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_HAS_HOOKS,
+	"DRAFT":     lumberjackv1.MergeStateStatus_MERGE_STATE_STATUS_DRAFT,
+}
+
+var reviewDecisions = map[string]lumberjackv1.ReviewDecision{
+	"REVIEW_REQUIRED":   lumberjackv1.ReviewDecision_REVIEW_DECISION_REVIEW_REQUIRED,
+	"APPROVED":          lumberjackv1.ReviewDecision_REVIEW_DECISION_APPROVED,
+	"CHANGES_REQUESTED": lumberjackv1.ReviewDecision_REVIEW_DECISION_CHANGES_REQUESTED,
+}
+
+var reviewStates = map[string]lumberjackv1.ReviewState{
+	"COMMENTED":         lumberjackv1.ReviewState_REVIEW_STATE_COMMENTED,
+	"APPROVED":          lumberjackv1.ReviewState_REVIEW_STATE_APPROVED,
+	"CHANGES_REQUESTED": lumberjackv1.ReviewState_REVIEW_STATE_CHANGES_REQUESTED,
+	"DISMISSED":         lumberjackv1.ReviewState_REVIEW_STATE_DISMISSED,
+	"PENDING":           lumberjackv1.ReviewState_REVIEW_STATE_PENDING,
+}
+
+var checkStates = map[pullstate.CheckState]lumberjackv1.CheckState{
+	pullstate.ChecksPending: lumberjackv1.CheckState_CHECK_STATE_PENDING,
+	pullstate.ChecksPassing: lumberjackv1.CheckState_CHECK_STATE_PASSING,
+	pullstate.ChecksFailing: lumberjackv1.CheckState_CHECK_STATE_FAILING,
+}
+
+func toProtoPullRequestState(pv *PullView) *lumberjackv1.PullRequestState {
+	if pv == nil {
+		return nil
+	}
+	ps := pv.State
+	pb := &lumberjackv1.PullRequestState{
+		Url:                   ps.URL,
+		AuthorLogin:           pv.AuthorLogin,
+		IsDraft:               ps.IsDraft,
+		MergeStateStatus:      mergeStateStatuses[ps.MergeStateStatus],
+		ReviewDecision:        reviewDecisions[ps.ReviewDecision],
+		ReviewRequestedFromMe: pv.RequestedFromMe,
+		UnresolvedThreadCount: int32(ps.UnresolvedThreads),
+		Checks: &lumberjackv1.ChecksSummary{
+			State:   checkStates[pv.Checks.State],
+			Passing: int32(pv.Checks.Passing),
+			Failing: int32(pv.Checks.Failing),
+			Pending: int32(pv.Checks.Pending),
+		},
+		Additions:      int32(ps.Additions),
+		Deletions:      int32(ps.Deletions),
+		HasNewActivity: pv.NewActivity,
+		Score:          pv.Score,
+		BaseRefName:    ps.BaseRefName,
+	}
+	if !ps.UpdatedAt.IsZero() {
+		pb.UpdatedAt = timestamppb.New(ps.UpdatedAt)
+	}
+	for _, r := range pv.Reviews {
+		pb.LatestReviews = append(pb.LatestReviews, &lumberjackv1.Review{
+			Login: r.Login, State: reviewStates[r.State], IsMe: r.IsMe,
+		})
+	}
+	return pb
 }

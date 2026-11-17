@@ -58,6 +58,25 @@ type stubService struct {
 	// worktrees interactively takes two calls: a dry-run probe to find the locks,
 	// then the real tidy carrying the user's answers.
 	tidyRequests []*lumberjackv1.TidyRequest
+
+	lastAuthorship *lumberjackv1.SetAuthorshipRequest
+	lastSetRepo    *lumberjackv1.SetRepositoryRequest
+	setRepoErr     error
+	authorshipErr  error
+}
+
+func (s *stubService) SetAuthorship(_ context.Context, req *lumberjackv1.SetAuthorshipRequest) (*lumberjackv1.SetAuthorshipResponse, error) {
+	s.lastAuthorship = req
+	if s.authorshipErr != nil {
+		return nil, s.authorshipErr
+	}
+	a := lumberjackv1.Authorship_AUTHORSHIP_THEIRS
+	if req.Authorship != nil {
+		a = req.GetAuthorship()
+	}
+	return &lumberjackv1.SetAuthorshipResponse{Worktree: &lumberjackv1.Worktree{
+		BranchName: "feature/x", Authorship: a, AuthorshipOverridden: req.Authorship != nil,
+	}}, nil
 }
 
 func (s *stubService) Tidy(_ context.Context, req *lumberjackv1.TidyRequest) (*lumberjackv1.TidyResponse, error) {
@@ -75,6 +94,16 @@ func (s *stubService) SetLogin(_ context.Context, req *lumberjackv1.SetLoginRequ
 	s.lastSetLogin = req.GetLogin()
 	return &lumberjackv1.SetLoginResponse{Repository: &lumberjackv1.Repository{
 		DirPrefix: req.GetRepository(), Login: req.GetLogin(),
+	}}, nil
+}
+
+func (s *stubService) SetRepository(_ context.Context, req *lumberjackv1.SetRepositoryRequest) (*lumberjackv1.SetRepositoryResponse, error) {
+	if s.setRepoErr != nil {
+		return nil, s.setRepoErr
+	}
+	s.lastSetRepo = req
+	return &lumberjackv1.SetRepositoryResponse{Repository: &lumberjackv1.Repository{
+		DirPrefix: req.GetRepository(), GithubOwner: req.GetGithubOwner(), GithubName: req.GetGithubName(),
 	}}, nil
 }
 
@@ -607,6 +636,52 @@ func TestCmdSetLoginNamedRepositoryExplicit(t *testing.T) {
 	}
 }
 
+func TestCmdSetRepository(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	out, err := run(t, "", "set-repository", "fork/other", "--repository", "n")
+	if err != nil {
+		t.Fatalf("set-repository: %v", err)
+	}
+	if r := stub.lastSetRepo; r.GetRepository() != "n" || r.GetGithubOwner() != "fork" || r.GetGithubName() != "other" {
+		t.Errorf("SetRepository got %+v", r)
+	}
+	if !strings.Contains(out, "Set repository for n to fork/other") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSetRepositoryJSON(t *testing.T) {
+	serveStub(t, &stubService{})
+	out, err := run(t, "", "set-repository", "fork/other", "--repository", "n", "--format", "json")
+	if err != nil {
+		t.Fatalf("set-repository: %v", err)
+	}
+	if !strings.Contains(out, `"message":"Set repository for n to fork/other"`) {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSetRepositoryRejectsMalformed(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	for _, arg := range []string{"other", "/other", "fork/", "a/b/c"} {
+		if _, err := run(t, "", "set-repository", arg, "--repository", "n"); err == nil || !strings.Contains(err.Error(), "OWNER/NAME") {
+			t.Errorf("%q: expected an OWNER/NAME error, got %v", arg, err)
+		}
+	}
+	if stub.lastSetRepo != nil {
+		t.Error("daemon called for a malformed repository")
+	}
+}
+
+func TestCmdSetRepositoryRejectedByDaemon(t *testing.T) {
+	serveStub(t, &stubService{setRepoErr: status.Error(codes.Internal, "cannot access fork/other on github.com")})
+	if _, err := run(t, "", "set-repository", "fork/other", "--repository", "n"); err == nil || !strings.Contains(err.Error(), "fork/other") {
+		t.Errorf("expected the daemon's rejection, got %v", err)
+	}
+}
+
 func TestCmdSetLoginRejectedByDaemon(t *testing.T) {
 	stub := &stubService{loginErr: status.Error(codes.InvalidArgument, `"ghost" is not a gh account authenticated for github.com`)}
 	serveStub(t, stub)
@@ -649,6 +724,63 @@ func TestCmdSetLoginPickerNoAccounts(t *testing.T) {
 	_, err := run(t, "", "set-login", "--repository", "n")
 	if err == nil || !strings.Contains(err.Error(), "gh auth login") {
 		t.Errorf("expected a no-accounts error pointing at gh auth login, got %v", err)
+	}
+}
+
+func TestCmdSetAuthorshipNamedWorktree(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	out, err := run(t, "", "set-authorship", "mine", "--repository", "n", "--worktree", "feature/x")
+	if err != nil {
+		t.Fatalf("set-authorship: %v", err)
+	}
+	req := stub.lastAuthorship
+	if req.GetRepository() != "n" || req.GetWorktree() != "feature/x" || req.GetAuthorship() != lumberjackv1.Authorship_AUTHORSHIP_MINE {
+		t.Errorf("request = %+v", req)
+	}
+	if !strings.Contains(out, "feature/x is now mine (set by hand)") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSetAuthorshipAutoDefaultsToCurrentDirectory(t *testing.T) {
+	stub := &stubService{}
+	serveStub(t, stub)
+	wd, _ := os.Getwd()
+	out, err := run(t, "", "set-authorship", "auto")
+	if err != nil {
+		t.Fatalf("set-authorship: %v", err)
+	}
+	req := stub.lastAuthorship
+	if req.Authorship != nil || req.GetWorktree() != wd || req.GetRepository() != wd {
+		t.Errorf("request = %+v, want no authorship and the working directory as both targets", req)
+	}
+	if !strings.Contains(out, "is now theirs (derived)") {
+		t.Errorf("out = %q", out)
+	}
+}
+
+func TestCmdSetAuthorshipJSON(t *testing.T) {
+	serveStub(t, &stubService{})
+	out, err := run(t, "", "set-authorship", "theirs", "--worktree", "feature/x", "--format", "json")
+	if err != nil {
+		t.Fatalf("set-authorship: %v", err)
+	}
+	if !strings.Contains(out, `"authorship"`) {
+		t.Errorf("out = %q, want the worktree as JSON", out)
+	}
+}
+
+func TestCmdSetAuthorshipFailures(t *testing.T) {
+	serveStub(t, &stubService{authorshipErr: status.Error(codes.NotFound, "worktree not found")})
+	if _, err := run(t, "", "set-authorship", "ours"); err == nil || !strings.Contains(err.Error(), "ours") {
+		t.Errorf("err = %v, want the bad argument rejected", err)
+	}
+	if _, err := run(t, "", "set-authorship", "mine", "--worktree", "ghost"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("err = %v, want the daemon's not-found", err)
+	}
+	if _, err := run(t, "", "set-authorship", "mine", "--format", "bogus"); err == nil {
+		t.Error("expected an invalid --format to be rejected")
 	}
 }
 

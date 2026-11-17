@@ -147,15 +147,15 @@ func TestEmitRepositoryDetailCoversEveryOptionalField(t *testing.T) {
 func TestEmitWorktrees(t *testing.T) {
 	pr := int64(7)
 	wts := []*lumberjackv1.Worktree{
-		{DirectoryPath: "/wt/a", BranchName: "a", GithubPrNumber: &pr},
-		{DirectoryPath: "/wt/b", BranchName: "b", ReconciliationNote: "drifted", NeedsReconciliation: true},
+		{DirectoryPath: "/wt/a", BranchName: "a", GithubPrNumber: &pr, Authorship: lumberjackv1.Authorship_AUTHORSHIP_MINE},
+		{DirectoryPath: "/wt/b", BranchName: "b", ReconciliationNote: "drifted", NeedsReconciliation: true, Authorship: lumberjackv1.Authorship_AUTHORSHIP_THEIRS, AuthorshipOverridden: true},
 		{DirectoryPath: "/wt/c", BranchName: "c", ReconciliationNote: "noted"},
 	}
 	var out bytes.Buffer
 	if err := EmitWorktrees(&out, present.Structured, wts); err != nil {
 		t.Fatalf("EmitWorktrees: %v", err)
 	}
-	for _, want := range []string{"DIRECTORY", "#7", "-", "⚠ drifted", "noted", "ok"} {
+	for _, want := range []string{"DIRECTORY", "AUTHOR", "PR STATE", "#7", "-", "mine", "theirs (set)", "⚠ drifted", "noted", "ok"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("out = %q, want it to contain %q", out.String(), want)
 		}

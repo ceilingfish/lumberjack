@@ -41,7 +41,7 @@ struct AppStateRefreshTests {
         #expect(state.repositories.map(\.githubName) == ["repo"])
     }
 
-    @Test("a refresh sorts repositories by name, selects the daemon's first, and counts worktrees")
+    @Test("a refresh sorts repositories by name and merges every repository's worktrees into one list")
     func refreshPopulatesRepositoriesAndWorktrees() async {
         let daemon = StubDaemon()
         daemon.repositories = [
@@ -60,29 +60,11 @@ struct AppStateRefreshTests {
         await state.refreshOnce()
 
         #expect(state.repositories.map(\.githubName) == ["apple", "zebra"])
-        #expect(state.selectedRepository == "/tmp/zebra")
-        #expect(state.selectedRepositoryObject?.githubName == "zebra")
-        #expect(state.worktrees.map(\.branchName) == ["alpha", "main"])
+        #expect(state.rows.map(\.id) == ["/tmp/apple/main", "/tmp/zebra/main", "/tmp/zebra/alpha"])
+        #expect(state.rows.map(\.repository.githubName) == ["apple", "zebra", "zebra"])
+        #expect(state.worktrees.count == 3)
         #expect(state.worktreesLoaded)
-        #expect(state.worktreeCountsByRepo == ["/tmp/zebra": 2, "/tmp/apple": 1])
         #expect(state.knownWorktreeKeys == ["/tmp/zebra", "/tmp/apple"])
-    }
-
-    @Test("an already-selected repository survives a refresh")
-    func refreshKeepsAnExistingSelection() async {
-        let daemon = StubDaemon()
-        daemon.repositories = [
-            stubRepository(name: "zebra", path: "/tmp/zebra"),
-            stubRepository(name: "apple", path: "/tmp/apple"),
-        ]
-        daemon.worktreesByRepository = ["/tmp/apple": [stubWorktree(branch: "main", path: "/tmp/apple/main")]]
-        let state = AppState(connect: { daemon })
-        state.selectedRepository = "/tmp/apple"
-
-        await state.refreshOnce()
-
-        #expect(state.selectedRepository == "/tmp/apple")
-        #expect(state.worktrees.map(\.branchName) == ["main"])
     }
 
     @Test("a worktree listing that fails mid-refresh leaves the last known good data on screen")
@@ -98,7 +80,23 @@ struct AppStateRefreshTests {
 
         #expect(state.connectionState == .connected)
         #expect(state.worktrees.map(\.branchName) == ["main"])
-        #expect(state.worktreeCountsByRepo == ["/tmp/repo": 1])
+    }
+
+    @Test("one repository whose worktree listing fails does not stop the others loading")
+    func oneFailingRepositoryDoesNotBlockTheRest() async {
+        let daemon = StubDaemon()
+        daemon.repositories = [
+            stubRepository(name: "broken", path: "/tmp/broken"),
+            stubRepository(name: "healthy", path: "/tmp/healthy"),
+        ]
+        daemon.worktreesByRepository = ["/tmp/healthy": [stubWorktree(branch: "main", path: "/tmp/healthy/main")]]
+        daemon.failingRepositories = ["/tmp/broken"]
+        let state = AppState(connect: { daemon })
+
+        await state.refreshOnce()
+
+        #expect(state.worktreesLoaded)
+        #expect(state.worktrees.map(\.branchName) == ["main"])
     }
 
     @Test("a repository listing that fails leaves the connection reported as up")
@@ -113,24 +111,24 @@ struct AppStateRefreshTests {
         #expect(state.repositories.isEmpty)
     }
 
-    @Test("switching repository clears the previous one's worktrees, reselecting the same one does not")
-    func selectionClearsWorktreesOnlyWhenItChanges() async {
+    @Test("a repository that stops being tracked takes its worktrees with it")
+    func untrackedRepositoryDropsItsRows() async {
         let daemon = StubDaemon()
-        daemon.repositories = [stubRepository(name: "repo", path: "/tmp/repo")]
-        daemon.worktreesByRepository = ["/tmp/repo": [stubWorktree(branch: "main", path: "/tmp/repo/main")]]
+        daemon.repositories = [
+            stubRepository(name: "apple", path: "/tmp/apple"),
+            stubRepository(name: "zebra", path: "/tmp/zebra"),
+        ]
+        daemon.worktreesByRepository = [
+            "/tmp/apple": [stubWorktree(branch: "main", path: "/tmp/apple/main")],
+            "/tmp/zebra": [stubWorktree(branch: "main", path: "/tmp/zebra/main")],
+        ]
         let state = AppState(connect: { daemon })
         await state.refreshOnce()
 
-        state.selectedRepository = "/tmp/repo"
+        daemon.repositories.removeLast()
+        await state.refreshOnce()
 
-        #expect(state.worktrees.count == 1)
-        #expect(state.worktreesLoaded)
-
-        state.selectedRepository = "/tmp/other"
-
-        #expect(state.worktrees.isEmpty)
-        #expect(!state.worktreesLoaded)
-        #expect(state.selectedRepositoryObject == nil)
+        #expect(state.rows.map(\.id) == ["/tmp/apple/main"])
     }
 
     @Test("start polls until stopped, and starting twice keeps one loop")
