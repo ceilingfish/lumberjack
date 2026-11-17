@@ -555,6 +555,43 @@ nonisolated struct Lumberjack_V1_MarkViewedResponse: Sendable {
   init() {}
 }
 
+nonisolated struct Lumberjack_V1_SetRepositoryRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var repository: String = String()
+
+  var githubOwner: String = String()
+
+  var githubName: String = String()
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+}
+
+nonisolated struct Lumberjack_V1_SetRepositoryResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  var repository: Lumberjack_V1_Repository {
+    get {_repository ?? Lumberjack_V1_Repository()}
+    set {_repository = newValue}
+  }
+  /// Returns true if `repository` has been explicitly set.
+  var hasRepository: Bool {self._repository != nil}
+  /// Clears the value of `repository`. Subsequent reads from it will return its default value.
+  mutating func clearRepository() {self._repository = nil}
+
+  var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  init() {}
+
+  fileprivate var _repository: Lumberjack_V1_Repository? = nil
+}
+
 nonisolated struct Lumberjack_V1_Review: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1810,6 +1847,80 @@ nonisolated extension Lumberjack_V1_MarkViewedResponse: SwiftProtobuf.Message, S
   }
 
   static func ==(lhs: Lumberjack_V1_MarkViewedResponse, rhs: Lumberjack_V1_MarkViewedResponse) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_SetRepositoryRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".SetRepositoryRequest"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0\u{3}github_owner\0\u{3}github_name\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.repository) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.githubOwner) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.githubName) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.repository.isEmpty {
+      try visitor.visitSingularStringField(value: self.repository, fieldNumber: 1)
+    }
+    if !self.githubOwner.isEmpty {
+      try visitor.visitSingularStringField(value: self.githubOwner, fieldNumber: 2)
+    }
+    if !self.githubName.isEmpty {
+      try visitor.visitSingularStringField(value: self.githubName, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_SetRepositoryRequest, rhs: Lumberjack_V1_SetRepositoryRequest) -> Bool {
+    if lhs.repository != rhs.repository {return false}
+    if lhs.githubOwner != rhs.githubOwner {return false}
+    if lhs.githubName != rhs.githubName {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Lumberjack_V1_SetRepositoryResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  static let protoMessageName: String = _protobuf_package + ".SetRepositoryResponse"
+  static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}repository\0")
+
+  mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._repository) }()
+      default: break
+      }
+    }
+  }
+
+  func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._repository {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  static func ==(lhs: Lumberjack_V1_SetRepositoryResponse, rhs: Lumberjack_V1_SetRepositoryResponse) -> Bool {
+    if lhs._repository != rhs._repository {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

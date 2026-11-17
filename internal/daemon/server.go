@@ -170,6 +170,24 @@ func (s *Server) SetLogin(ctx context.Context, req *lumberjackv1.SetLoginRequest
 	return &lumberjackv1.SetLoginResponse{Repository: toProtoRepository(updated)}, nil
 }
 
+func (s *Server) SetRepository(ctx context.Context, req *lumberjackv1.SetRepositoryRequest) (*lumberjackv1.SetRepositoryResponse, error) {
+	if req.GetRepository() == "" {
+		return nil, status.Error(codes.InvalidArgument, "repository is required")
+	}
+	if req.GetGithubOwner() == "" || req.GetGithubName() == "" {
+		return nil, status.Error(codes.InvalidArgument, "github owner and name are required")
+	}
+	repo, err := s.db.FindRepository(ctx, req.GetRepository())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	updated, err := s.svc.SetRepository(ctx, repo, req.GetGithubOwner(), req.GetGithubName())
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return &lumberjackv1.SetRepositoryResponse{Repository: toProtoRepository(updated)}, nil
+}
+
 // ListLogins returns the gh accounts authenticated for a repository's host.
 func (s *Server) ListLogins(ctx context.Context, req *lumberjackv1.ListLoginsRequest) (*lumberjackv1.ListLoginsResponse, error) {
 	if req.GetRepository() == "" {

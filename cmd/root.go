@@ -26,6 +26,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newListCmd())
 	root.AddCommand(newSetAuthorshipCmd())
 	root.AddCommand(newSetLoginCmd())
+	root.AddCommand(newSetRepositoryCmd())
 	root.AddCommand(newSetupCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSyncCmd())

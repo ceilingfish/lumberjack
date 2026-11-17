@@ -97,6 +97,8 @@ service LumberjackService {
   rpc SetAuthorship(SetAuthorshipRequest) returns (SetAuthorshipResponse);
 
   rpc MarkViewed(MarkViewedRequest) returns (MarkViewedResponse);
+
+  rpc SetRepository(SetRepositoryRequest) returns (SetRepositoryResponse);
 }
 
 enum Authorship {
@@ -122,6 +124,16 @@ message MarkViewedRequest {
 }
 
 message MarkViewedResponse {}
+
+message SetRepositoryRequest {
+  string repository = 1;
+  string github_owner = 2;
+  string github_name = 3;
+}
+
+message SetRepositoryResponse {
+  Repository repository = 1;
+}
 
 enum MergeStateStatus {
   MERGE_STATE_STATUS_UNSPECIFIED = 0;

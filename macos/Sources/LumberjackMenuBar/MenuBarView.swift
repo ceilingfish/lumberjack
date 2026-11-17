@@ -695,7 +695,7 @@ private struct WorktreeRow: View {
 
     @ViewBuilder
     private var prLink: some View {
-        let label = Text("#\(worktree.githubPrNumber)")
+        let label = Text(verbatim: "#\(worktree.githubPrNumber)")
             .font(.system(size: 10, design: .monospaced))
             .foregroundStyle(Palette.subtleText)
         if let prURL {

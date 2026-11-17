@@ -127,6 +127,14 @@ func (c *Client) SetLogin(ctx context.Context, ref, login string) (*lumberjackv1
 	return resp.GetRepository(), nil
 }
 
+func (c *Client) SetRepository(ctx context.Context, ref, owner, name string) (*lumberjackv1.Repository, error) {
+	resp, err := c.svc.SetRepository(ctx, &lumberjackv1.SetRepositoryRequest{Repository: ref, GithubOwner: owner, GithubName: name})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return resp.GetRepository(), nil
+}
+
 // ListLogins returns the gh accounts authenticated for the host of the
 // repository resolved by ref, plus the login it currently operates under.
 func (c *Client) ListLogins(ctx context.Context, ref string) (logins []string, current string, err error) {

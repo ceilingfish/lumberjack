@@ -75,6 +75,15 @@ func (stubServer) SetLogin(_ context.Context, req *lumberjackv1.SetLoginRequest)
 	}, nil
 }
 
+func (stubServer) SetRepository(_ context.Context, req *lumberjackv1.SetRepositoryRequest) (*lumberjackv1.SetRepositoryResponse, error) {
+	if req.GetGithubName() == "ghost" {
+		return nil, status.Error(codes.NotFound, "repository not found")
+	}
+	return &lumberjackv1.SetRepositoryResponse{Repository: &lumberjackv1.Repository{
+		DirPrefix: req.GetRepository(), GithubOwner: req.GetGithubOwner(), GithubName: req.GetGithubName(),
+	}}, nil
+}
+
 func (stubServer) SetAuthorship(_ context.Context, req *lumberjackv1.SetAuthorshipRequest) (*lumberjackv1.SetAuthorshipResponse, error) {
 	if req.GetWorktree() == "ghost" {
 		return nil, status.Error(codes.NotFound, "worktree not found")
@@ -391,6 +400,20 @@ func TestClientSetLoginAndListLogins(t *testing.T) {
 	}
 	if len(logins) != 2 || current != "bob" {
 		t.Errorf("ListLogins = %v, %q", logins, current)
+	}
+}
+
+func TestClientSetRepository(t *testing.T) {
+	c := startStub(t)
+	repo, err := c.SetRepository(context.Background(), "a", "fork", "b")
+	if err != nil {
+		t.Fatalf("SetRepository: %v", err)
+	}
+	if repo.GetDirPrefix() != "a" || repo.GetGithubOwner() != "fork" || repo.GetGithubName() != "b" {
+		t.Errorf("SetRepository = %+v", repo)
+	}
+	if _, err := c.SetRepository(context.Background(), "a", "fork", "ghost"); err == nil {
+		t.Error("expected an error for an unknown repository")
 	}
 }
 
